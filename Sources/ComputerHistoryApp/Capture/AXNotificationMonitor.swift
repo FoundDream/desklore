@@ -8,13 +8,17 @@ final class AXNotificationMonitor: @unchecked Sendable {
 
     private var observer: AXObserver?
     private var applicationElement: AXUIElement?
-    private var focusedElement: AXUIElement?
+    private var valueElements: [AXUIElement] = []
     private var selectionElements: [AXUIElement] = []
     private var processIdentifier: pid_t?
     private var pendingTextChange: DispatchWorkItem?
     private var pendingSelectionChange: DispatchWorkItem?
     private var hasPendingTextChange = false
     private var hasPendingSelectionChange = false
+
+    private(set) var valueNotificationTargetCount = 0
+    private(set) var selectionNotificationTargetCount = 0
+    var isObservingApplication: Bool { observer != nil }
 
     func observe(_ application: NSRunningApplication) {
         guard processIdentifier != application.processIdentifier else { return }
@@ -76,7 +80,10 @@ final class AXNotificationMonitor: @unchecked Sendable {
         }
         observer = nil
         applicationElement = nil
-        focusedElement = nil
+        valueElements = []
+        selectionElements = []
+        valueNotificationTargetCount = 0
+        selectionNotificationTargetCount = 0
         processIdentifier = nil
     }
 
@@ -97,36 +104,48 @@ final class AXNotificationMonitor: @unchecked Sendable {
 
         let element = unsafeDowncast(value, to: AXUIElement.self)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        _ = AXObserverAddNotification(
-            observer,
-            element,
-            kAXValueChangedNotification as CFString,
-            refcon
+        let semanticElements = elementAndAncestors(
+            startingAt: element,
+            maximumDepth: 6
         )
-
-        let selectionElements = elementAndAncestors(startingAt: element)
-        for selectionElement in selectionElements {
-            _ = AXObserverAddNotification(
+        var valueElements: [AXUIElement] = []
+        var selectionElements: [AXUIElement] = []
+        for semanticElement in semanticElements {
+            if AXObserverAddNotification(
                 observer,
-                selectionElement,
+                semanticElement,
+                kAXValueChangedNotification as CFString,
+                refcon
+            ) == .success {
+                valueElements.append(semanticElement)
+            }
+            if AXObserverAddNotification(
+                observer,
+                semanticElement,
                 kAXSelectedTextChangedNotification as CFString,
                 refcon
-            )
+            ) == .success {
+                selectionElements.append(semanticElement)
+            }
         }
-        focusedElement = element
+        self.valueElements = valueElements
         self.selectionElements = selectionElements
+        valueNotificationTargetCount = valueElements.count
+        selectionNotificationTargetCount = selectionElements.count
     }
 
     private func removeFocusedElementSubscriptions() {
         guard let observer else {
-            focusedElement = nil
+            valueElements = []
             selectionElements = []
+            valueNotificationTargetCount = 0
+            selectionNotificationTargetCount = 0
             return
         }
-        if let focusedElement {
+        for valueElement in valueElements {
             _ = AXObserverRemoveNotification(
                 observer,
-                focusedElement,
+                valueElement,
                 kAXValueChangedNotification as CFString
             )
         }
@@ -137,8 +156,10 @@ final class AXNotificationMonitor: @unchecked Sendable {
                 kAXSelectedTextChangedNotification as CFString
             )
         }
-        focusedElement = nil
+        valueElements = []
         selectionElements = []
+        valueNotificationTargetCount = 0
+        selectionNotificationTargetCount = 0
     }
 
     private func elementAndAncestors(

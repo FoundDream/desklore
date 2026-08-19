@@ -4,7 +4,7 @@ public enum PrivacySanitizer {
     public static func sanitize(
         _ event: HistoryEvent,
         textLimit: Int = 4_096,
-        accessibilityTextLimit: Int = 12_000
+        accessibilityTextLimit: Int = 48_000
     ) -> HistoryEvent {
         let sensitiveTarget = isSensitiveTarget(event.target)
         let window = event.window.map {

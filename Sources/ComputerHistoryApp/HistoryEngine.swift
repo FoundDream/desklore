@@ -15,6 +15,20 @@ final class HistoryEngine: NSObject, ObservableObject {
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var interactionMonitorActive = false
     @Published private(set) var lastKeyboardEventAt: Date?
+    @Published private(set) var returnKeyEventCount = 0
+    @Published private(set) var keyboardSubmitCount = 0
+    @Published private(set) var keyboardShortcutCount = 0
+    @Published private(set) var textInputEventCount = 0
+    @Published private(set) var selectionEventCount = 0
+    @Published private(set) var axObserverActive = false
+    @Published private(set) var axValueNotificationTargets = 0
+    @Published private(set) var axSelectionNotificationTargets = 0
+    @Published private(set) var lastAXSnapshotNodeCount = 0
+    @Published private(set) var lastAXVisitedNodeCount = 0
+    @Published private(set) var lastAXCaptureDurationMilliseconds = 0.0
+    @Published private(set) var axSlowCaptureCount = 0
+    @Published private(set) var axTruncatedCaptureCount = 0
+    @Published private(set) var axCaptureBacklog = 0
     @Published private(set) var activeApplication: HistoryEvent.Application?
     @Published private(set) var activeDomain: String?
     @Published private(set) var documents: [TimelineDocument] = []
@@ -32,7 +46,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     private let workspaceMonitor = WorkspaceMonitor()
     private let axNotificationMonitor = AXNotificationMonitor()
     private let interactionMonitor = InteractionMonitor()
-    private let contextReader = AXContextReader()
+    private let axCaptureCoordinator = AXCaptureCoordinator()
     private let timelineDirectoryWatcher = TimelineDirectoryWatcher()
     private var coalescer = EventCoalescer()
     private var burstCoalescer = EventBurstCoalescer()
@@ -40,6 +54,9 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var burstFlushTimer: Timer?
     private var maintenanceTimer: Timer?
     private var started = false
+    private var nextCaptureSequence = 0
+    private var nextCaptureResultSequence = 0
+    private var pendingCaptureResults: [Int: AXCaptureResult] = [:]
 
     override init() {
         let llmSettings = TimelineLLMSettings.load()
@@ -96,6 +113,7 @@ final class HistoryEngine: NSObject, ObservableObject {
         interactionMonitor.onInteraction = { [weak self] kind, capture in
             if capture.keyEquivalent == "return"
                 || capture.keyEquivalent == "numpad-enter" {
+                self?.returnKeyEventCount += 1
                 self?.axNotificationMonitor.flushPendingTextChange()
             }
             if kind == .keyboardShortcut || kind == .keyboardSubmit {
@@ -116,6 +134,7 @@ final class HistoryEngine: NSObject, ObservableObject {
                 name: application.localizedName ?? "Unknown application"
             )
             self?.axNotificationMonitor.observe(application)
+            self?.refreshSemanticListenerHealth()
             self?.capture(application, kind: .windowChanged)
         }
         workspaceMonitor.start()
@@ -327,7 +346,11 @@ final class HistoryEngine: NSObject, ObservableObject {
                 ?? "pid.\(application.processIdentifier)",
             name: application.localizedName ?? "Unknown application"
         )
-        capture(application, kind: .windowChanged)
+        capture(
+            application,
+            kind: .windowChanged,
+            includeRichSnapshot: false
+        )
     }
 
     private func captureFrontmostApplication(
@@ -344,7 +367,8 @@ final class HistoryEngine: NSObject, ObservableObject {
     private func capture(
         _ application: NSRunningApplication,
         kind: HistoryEvent.Kind,
-        interaction: InteractionCapture? = nil
+        interaction: InteractionCapture? = nil,
+        includeRichSnapshot: Bool = true
     ) {
         guard state == .running else { return }
         let bundleIdentifier = application.bundleIdentifier
@@ -355,11 +379,45 @@ final class HistoryEngine: NSObject, ObservableObject {
             activeDomain = nil
             return
         }
-        let event = contextReader.event(
-            for: application,
-            kind: kind,
-            interaction: interaction
-        )
+        let applicationContext = RunningApplicationContext(application)
+        let timestamp = Date()
+        let sequence = nextCaptureSequence
+        nextCaptureSequence += 1
+        axCaptureBacklog = nextCaptureSequence - nextCaptureResultSequence
+        let coordinator = axCaptureCoordinator
+        Task { [weak self] in
+            let result = await coordinator.capture(
+                application: applicationContext,
+                kind: kind,
+                interaction: interaction,
+                includeRichSnapshot: includeRichSnapshot,
+                timestamp: timestamp
+            )
+            self?.receiveCaptureResult(result, sequence: sequence)
+        }
+    }
+
+    private func receiveCaptureResult(
+        _ result: AXCaptureResult,
+        sequence: Int
+    ) {
+        pendingCaptureResults[sequence] = result
+        while let ready = pendingCaptureResults.removeValue(
+            forKey: nextCaptureResultSequence
+        ) {
+            processCapturedEvent(ready)
+            nextCaptureResultSequence += 1
+        }
+        axCaptureBacklog = nextCaptureSequence - nextCaptureResultSequence
+    }
+
+    private func processCapturedEvent(_ result: AXCaptureResult) {
+        lastAXCaptureDurationMilliseconds = result.durationMilliseconds
+        lastAXSnapshotNodeCount = result.snapshotNodeCount
+        lastAXVisitedNodeCount = result.visitedNodeCount
+        if result.durationMilliseconds > 250 { axSlowCaptureCount += 1 }
+        if result.snapshotWasTruncated { axTruncatedCaptureCount += 1 }
+        let event = result.event
         activeDomain = event.window?.url.flatMap(Self.domain(from:))
         guard let sanitized = policy.sanitized(event) else {
             Task {
@@ -376,6 +434,8 @@ final class HistoryEngine: NSObject, ObservableObject {
             return
         }
         guard let normalized = coalescer.process(sanitized) else { return }
+        recordSemanticCaptureHealth(normalized)
+        refreshSemanticListenerHealth()
         for ready in burstCoalescer.ingest(normalized) {
             persist(ready)
         }
@@ -474,17 +534,44 @@ final class HistoryEngine: NSObject, ObservableObject {
         interactionMonitorActive = interactionMonitor.isActive
     }
 
+    private func recordSemanticCaptureHealth(_ event: HistoryEvent) {
+        switch event.kind {
+        case .keyboardSubmit:
+            keyboardSubmitCount += 1
+        case .keyboardShortcut:
+            keyboardShortcutCount += 1
+        case .keyboardTextInput:
+            textInputEventCount += 1
+        case .selectionChanged:
+            selectionEventCount += 1
+        case .windowChanged, .mouseClick, .mouseContextMenu, .mouseDrag:
+            break
+        }
+    }
+
+    private func refreshSemanticListenerHealth() {
+        axObserverActive = axNotificationMonitor.isObservingApplication
+        axValueNotificationTargets = axNotificationMonitor.valueNotificationTargetCount
+        axSelectionNotificationTargets = axNotificationMonitor
+            .selectionNotificationTargetCount
+    }
+
     private static let policyKey = "observation-policy-v1"
 
-    private static func loadPolicy() -> ObservationPolicy {
-        guard let data = UserDefaults.standard.data(forKey: policyKey),
+    private static func loadPolicy(defaults: UserDefaults = .standard) -> ObservationPolicy {
+        guard let data = defaults.data(forKey: policyKey),
               var policy = try? JSONDecoder().decode(ObservationPolicy.self, from: data) else {
             return ObservationPolicy()
         }
+        let original = policy
         // v1 shipped as default-deny. Preserve explicit exclusions while migrating
         // existing installations to the new default-allow behavior.
         policy.defaultApplicationBehavior = .observe
         policy.defaultURLBehavior = .observe
+        if policy != original,
+           let migratedData = try? JSONEncoder().encode(policy) {
+            defaults.set(migratedData, forKey: policyKey)
+        }
         return policy
     }
 

@@ -121,7 +121,15 @@ public struct OpenAIResponsesTimelineSummarizer: TimelineSummarizer {
         let sampledEvents = TimelineEventSampler.sample(
             events,
             limit: configuration.maxInputEvents
-        ).map { PrivacySanitizer.sanitize($0) }
+        ).map {
+            // Disk evidence keeps a richer AX snapshot. Bound each sampled
+            // event again before transmission so model cost and exposure do
+            // not grow with the local evidence budget.
+            PrivacySanitizer.sanitize(
+                $0,
+                accessibilityTextLimit: 12_000
+            )
+        }
         let request = try makeRequest(events: sampledEvents, context: context)
         let response = try await transport.perform(request)
         guard (200..<300).contains(response.statusCode) else {

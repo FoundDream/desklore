@@ -27,6 +27,20 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 install -m 755 "$BIN_DIR/ComputerHistoryApp" "$MACOS_DIR/ComputerHistoryApp"
 install -m 644 "$PROJECT_ROOT/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
-codesign --force --deep --sign - "$APP_DIR"
+
+# Accessibility and Screen Recording permissions are bound to the app's code
+# requirement. A default ad-hoc signature reduces that requirement to a changing
+# CDHash, so every rebuilt binary looks like a different app to TCC. An explicit
+# identifier requirement keeps local development builds stable across updates.
+SIGNING_IDENTITY="${COMPUTER_HISTORY_CODESIGN_IDENTITY:-}"
+if [[ -n "$SIGNING_IDENTITY" ]]; then
+  codesign --force --deep --options runtime --timestamp=none \
+    --sign "$SIGNING_IDENTITY" "$APP_DIR"
+else
+  codesign --force --deep --sign - \
+    --identifier com.ziwen.computer-history \
+    --requirements '=designated => identifier "com.ziwen.computer-history"' \
+    "$APP_DIR"
+fi
 
 echo "$APP_DIR"

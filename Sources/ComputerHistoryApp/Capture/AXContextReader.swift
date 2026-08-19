@@ -31,22 +31,93 @@ struct InteractionCapture: Sendable {
     }
 }
 
-@MainActor
+struct RunningApplicationContext: Sendable {
+    let processIdentifier: pid_t
+    let bundleIdentifier: String
+    let name: String
+
+    @MainActor
+    init(_ application: NSRunningApplication) {
+        processIdentifier = application.processIdentifier
+        bundleIdentifier = application.bundleIdentifier
+            ?? "pid.\(application.processIdentifier)"
+        name = application.localizedName ?? "Unknown application"
+    }
+}
+
+struct AXCaptureResult: Sendable {
+    let event: HistoryEvent
+    let durationMilliseconds: Double
+    let snapshotNodeCount: Int
+    let visitedNodeCount: Int
+    let snapshotWasTruncated: Bool
+}
+
+actor AXCaptureCoordinator {
+    private let reader = AXContextReader()
+
+    func capture(
+        application: RunningApplicationContext,
+        kind: HistoryEvent.Kind,
+        interaction: InteractionCapture?,
+        includeRichSnapshot: Bool,
+        timestamp: Date
+    ) -> AXCaptureResult {
+        reader.event(
+            for: application,
+            kind: kind,
+            interaction: interaction,
+            includeRichSnapshot: includeRichSnapshot,
+            at: timestamp
+        )
+    }
+}
+
 final class AXContextReader {
     private struct AXSnapshotState {
-        var text: String
+        var snapshot: AXTreeSnapshot
         var segmentID: String
+    }
+
+    private struct AccessibilityCapture {
+        let context: HistoryEvent.AccessibilityContext?
+        let snapshot: AXTreeSnapshot
+    }
+
+    private struct PendingElement {
+        let element: AXUIElement
+        let parentID: String?
+        let depth: Int
+        let siblingIndex: Int
+    }
+
+    private struct NodeMetadata {
+        let role: String
+        let subrole: String?
+        let identifier: String?
+        let title: String?
+        let description: String?
+        let help: String?
+        let placeholder: String?
+        let enabled: Bool?
+        let focused: Bool?
+        let selected: Bool?
+        let expanded: Bool?
+        let disclosureLevel: Int?
     }
 
     private var previousAXSnapshotByStream: [String: AXSnapshotState] = [:]
 
     func event(
-        for application: NSRunningApplication,
+        for application: RunningApplicationContext,
         kind: HistoryEvent.Kind = .windowChanged,
         interaction capture: InteractionCapture? = nil,
+        includeRichSnapshot: Bool = true,
         at timestamp: Date = Date()
-    ) -> HistoryEvent {
+    ) -> AXCaptureResult {
+        let captureStartedAt = ProcessInfo.processInfo.systemUptime
         let appElement = AXUIElementCreateApplication(application.processIdentifier)
+        _ = AXUIElementSetMessagingTimeout(appElement, 0.25)
         let windowElement = element(
             attribute: kAXFocusedWindowAttribute as CFString,
             from: appElement
@@ -81,36 +152,42 @@ final class AXContextReader {
             selectedText: selectedText,
             capture: capture
         )
-        let bundleIdentifier = application.bundleIdentifier
-            ?? "pid.\(application.processIdentifier)"
-        let accessibility = windowElement.flatMap {
+        let accessibilityCapture = includeRichSnapshot ? windowElement.flatMap {
             accessibilityContext(
                 from: $0,
-                bundleIdentifier: bundleIdentifier,
-                windowTitle: windowTitle,
-                url: url,
+                focusedElement: focusedElement,
+                bundleIdentifier: application.bundleIdentifier,
                 timestamp: timestamp
             )
-        }
+        } : nil
 
-        return HistoryEvent(
+        let event = HistoryEvent(
             timestamp: timestamp,
             kind: resolvedKind,
             application: .init(
-                bundleIdentifier: bundleIdentifier,
-                name: application.localizedName ?? "Unknown application"
+                bundleIdentifier: application.bundleIdentifier,
+                name: application.name
             ),
             window: .init(
                 title: windowTitle,
                 url: url,
                 isPrivateBrowsing: isPrivateBrowsing(
-                    application: application,
+                    bundleIdentifier: application.bundleIdentifier,
                     windowTitle: windowTitle
                 )
             ),
             target: target,
             interaction: interaction,
-            accessibility: accessibility
+            accessibility: accessibilityCapture?.context
+        )
+        return AXCaptureResult(
+            event: event,
+            durationMilliseconds: (
+                ProcessInfo.processInfo.systemUptime - captureStartedAt
+            ) * 1_000,
+            snapshotNodeCount: accessibilityCapture?.snapshot.nodes.count ?? 0,
+            visitedNodeCount: accessibilityCapture?.snapshot.visitedNodeCount ?? 0,
+            snapshotWasTruncated: accessibilityCapture?.snapshot.wasTruncated ?? false
         )
     }
 
@@ -182,84 +259,179 @@ final class AXContextReader {
 
     private func accessibilityContext(
         from window: AXUIElement,
+        focusedElement: AXUIElement?,
         bundleIdentifier: String,
-        windowTitle: String?,
-        url: String?,
         timestamp: Date
-    ) -> HistoryEvent.AccessibilityContext? {
-        let snapshot = snapshotText(from: window)
-        guard !snapshot.isEmpty else { return nil }
-        let streamKey = [bundleIdentifier, windowTitle ?? "", url ?? ""]
-            .joined(separator: "\u{1f}")
+    ) -> AccessibilityCapture? {
+        let snapshot = snapshot(from: window, focusedElement: focusedElement)
+        guard !snapshot.nodes.isEmpty else { return nil }
+        let streamKey = "\(bundleIdentifier)\u{1f}\(elementID(window))"
         let segmentID = SegmentClock.identifier(for: timestamp)
         defer {
             previousAXSnapshotByStream[streamKey] = AXSnapshotState(
-                text: snapshot,
+                snapshot: snapshot,
                 segmentID: segmentID
             )
         }
         guard let previous = previousAXSnapshotByStream[streamKey],
               previous.segmentID == segmentID else {
-            return .init(mode: .fullTree, text: snapshot)
+            return AccessibilityCapture(
+                context: .init(
+                    mode: .fullTree,
+                    text: AXTreeRenderer.fullText(snapshot)
+                ),
+                snapshot: snapshot
+            )
         }
-        guard previous.text != snapshot else { return nil }
-
-        let previousLines = Set(previous.text.components(separatedBy: .newlines))
-        let currentLines = Set(snapshot.components(separatedBy: .newlines))
-        let removed = previousLines.subtracting(currentLines).sorted()
-        let added = currentLines.subtracting(previousLines).sorted()
-        let changedLineCount = removed.count + added.count
-        let baselineLineCount = max(previousLines.count, currentLines.count, 1)
-        if Double(changedLineCount) / Double(baselineLineCount) >= 0.65 {
-            return .init(mode: .fullTree, text: snapshot)
+        let delta = AXTreeDiffer.diff(previous: previous.snapshot, current: snapshot)
+        guard !delta.isEmpty else {
+            return AccessibilityCapture(context: nil, snapshot: snapshot)
         }
-        let diff = removed.map { "- \($0)" } + added.map { "+ \($0)" }
-        let boundedDiff = String(diff.joined(separator: "\n").prefix(12_000))
-        return boundedDiff.isEmpty ? nil : .init(
-            mode: .diffFromPrevious,
-            text: boundedDiff
+        let baselineNodeCount = max(previous.snapshot.nodes.count, snapshot.nodes.count, 1)
+        if Double(delta.changeCount) / Double(baselineNodeCount) >= 0.65 {
+            return AccessibilityCapture(
+                context: .init(
+                    mode: .fullTree,
+                    text: AXTreeRenderer.fullText(snapshot)
+                ),
+                snapshot: snapshot
+            )
+        }
+        guard let diff = AXTreeRenderer.diffText(
+            previous: previous.snapshot,
+            current: snapshot
+        ) else {
+            return AccessibilityCapture(context: nil, snapshot: snapshot)
+        }
+        return AccessibilityCapture(
+            context: .init(
+                mode: .diffFromPrevious,
+                text: diff
+            ),
+            snapshot: snapshot
         )
     }
 
-    private func snapshotText(from root: AXUIElement) -> String {
-        var lines: [String] = []
-        var queue: [(AXUIElement, Int)] = [(root, 0)]
-        var index = 0
+    private func snapshot(
+        from root: AXUIElement,
+        focusedElement: AXUIElement?
+    ) -> AXTreeSnapshot {
+        let maximumVisitedNodes = 1_200
+        let maximumOutputNodes = 800
+        let maximumDepth = 20
+        let focusedPath = focusedElement.map(focusedPathIDs(from:)) ?? []
+        let focusedElementID = focusedElement.map(elementID)
+        var metadataCache: [String: NodeMetadata] = [:]
+        var stack = [
+            PendingElement(
+                element: root,
+                parentID: nil,
+                depth: 0,
+                siblingIndex: 0
+            ),
+        ]
+        var visitedIDs: Set<String> = []
+        var nodes: [AXTreeNode] = []
+        var visitedNodeCount = 0
 
-        while index < queue.count, index < 500, lines.count < 240 {
-            let (candidate, depth) = queue[index]
-            index += 1
-            let role = string(attribute: kAXRoleAttribute as CFString, from: candidate)
-                ?? "AXUnknown"
-            let title = string(attribute: kAXTitleAttribute as CFString, from: candidate)
-            let description = string(
-                attribute: kAXDescriptionAttribute as CFString,
-                from: candidate
-            )
-            let help = string(attribute: kAXHelpAttribute as CFString, from: candidate)
-            let semanticValue = snapshotValue(from: candidate, role: role)
-            let detail = [title, description, help, semanticValue]
-                .compactMap { PrivacySanitizer.clean($0, limit: 320) }
-                .filter { !$0.isEmpty }
-                .uniqued()
-                .joined(separator: " | ")
-            let indentation = String(repeating: "  ", count: depth)
-            if !detail.isEmpty || Self.structuralRoles.contains(role) {
-                lines.append(
-                    "\(indentation)\(role)\(detail.isEmpty ? "" : ": \(detail)")"
-                )
-            }
-
-            if depth < 8 {
-                queue.append(
-                    contentsOf: children(of: candidate).prefix(80).map { ($0, depth + 1) }
-                )
-            }
+        func metadata(for element: AXUIElement) -> NodeMetadata {
+            let id = elementID(element)
+            if let cached = metadataCache[id] { return cached }
+            let loaded = nodeMetadata(from: element)
+            metadataCache[id] = loaded
+            return loaded
         }
-        return String(lines.joined(separator: "\n").prefix(12_000))
+
+        while let pending = stack.popLast(),
+              visitedNodeCount < maximumVisitedNodes,
+              nodes.count < maximumOutputNodes {
+            let id = elementID(pending.element)
+            guard visitedIDs.insert(id).inserted else { continue }
+            visitedNodeCount += 1
+            let nodeMetadata = metadata(for: pending.element)
+            let childElements = pending.depth < maximumDepth
+                ? children(of: pending.element)
+                : []
+            let isOnFocusedPath = focusedPath.contains(id)
+            let semanticValue = snapshotValue(
+                from: pending.element,
+                metadata: nodeMetadata
+            )
+            let hasSemanticContent = [
+                nodeMetadata.identifier,
+                nodeMetadata.title,
+                nodeMetadata.description,
+                nodeMetadata.help,
+                nodeMetadata.placeholder,
+                semanticValue,
+            ].contains { !($0?.isEmpty ?? true) }
+            if hasSemanticContent
+                || !childElements.isEmpty
+                || Self.structuralRoles.contains(nodeMetadata.role)
+                || isOnFocusedPath {
+                nodes.append(
+                    AXTreeNode(
+                        id: id,
+                        parentID: pending.parentID,
+                        depth: pending.depth,
+                        siblingIndex: pending.siblingIndex,
+                        role: nodeMetadata.role,
+                        subrole: nodeMetadata.subrole,
+                        identifier: nodeMetadata.identifier,
+                        title: nodeMetadata.title,
+                        description: nodeMetadata.description,
+                        help: nodeMetadata.help,
+                        placeholder: nodeMetadata.placeholder,
+                        value: semanticValue,
+                        enabled: nodeMetadata.enabled,
+                        focused: nodeMetadata.focused
+                            ?? (id == focusedElementID ? true : nil),
+                        selected: nodeMetadata.selected,
+                        expanded: nodeMetadata.expanded,
+                        disclosureLevel: nodeMetadata.disclosureLevel,
+                        childCount: childElements.count
+                    )
+                )
+            }
+
+            let prioritizedChildren = childElements.enumerated().map { index, child in
+                (
+                    pending: PendingElement(
+                        element: child,
+                        parentID: id,
+                        depth: pending.depth + 1,
+                        siblingIndex: index
+                    ),
+                    priority: traversalPriority(
+                        metadata: metadata(for: child),
+                        isOnFocusedPath: focusedPath.contains(elementID(child))
+                    )
+                )
+            }
+            // The stack is LIFO, so append lower-priority nodes first.
+            stack.append(contentsOf: prioritizedChildren
+                .sorted { lhs, rhs in
+                    if lhs.priority == rhs.priority {
+                        return lhs.pending.siblingIndex > rhs.pending.siblingIndex
+                    }
+                    return lhs.priority < rhs.priority
+                }
+                .map(\.pending))
+        }
+        let wasTruncated = !stack.isEmpty
+            || visitedNodeCount >= maximumVisitedNodes
+            || nodes.count >= maximumOutputNodes
+        return AXTreeSnapshot(
+            nodes: nodes,
+            visitedNodeCount: visitedNodeCount,
+            wasTruncated: wasTruncated
+        )
     }
 
-    private func snapshotValue(from element: AXUIElement, role: String) -> String? {
+    private func snapshotValue(
+        from element: AXUIElement,
+        metadata: NodeMetadata
+    ) -> String? {
         let safeValueRoles: Set<String> = [
             "AXStaticText",
             "AXHeading",
@@ -276,9 +448,147 @@ final class AXContextReader {
             "AXProgressIndicator",
             "AXDocument",
             "AXWebArea",
+            "AXTextField",
+            "AXTextArea",
+            "AXSearchField",
+            "AXComboBox",
         ]
-        guard safeValueRoles.contains(role) else { return nil }
-        return scalarString(attribute: kAXValueAttribute as CFString, from: element)
+        let target = HistoryEvent.Target(
+            role: metadata.role,
+            subrole: metadata.subrole,
+            identifier: metadata.identifier,
+            title: metadata.title,
+            description: metadata.description,
+            placeholder: metadata.placeholder
+        )
+        guard safeValueRoles.contains(metadata.role),
+              !PrivacySanitizer.isSensitiveTarget(target) else {
+            return nil
+        }
+        let raw = scalarString(attribute: kAXValueAttribute as CFString, from: element)
+        return PrivacySanitizer.clean(raw, limit: 1_024)
+    }
+
+    private func focusedPathIDs(from focusedElement: AXUIElement) -> Set<String> {
+        var result: Set<String> = []
+        var current: AXUIElement? = focusedElement
+        var depth = 0
+        while let element = current, depth < 32 {
+            let id = elementID(element)
+            guard result.insert(id).inserted else { break }
+            current = self.element(
+                attribute: kAXParentAttribute as CFString,
+                from: element
+            )
+            depth += 1
+        }
+        return result
+    }
+
+    private func traversalPriority(
+        metadata: NodeMetadata,
+        isOnFocusedPath: Bool
+    ) -> Int {
+        if isOnFocusedPath { return 1_000 }
+        switch metadata.role {
+        case "AXWebArea", "AXDocument":
+            return 900
+        case "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox":
+            return 850
+        case "AXHeading", "AXStaticText", "AXParagraph", "AXLink":
+            return 800
+        case "AXButton", "AXMenuButton", "AXCheckBox", "AXRadioButton":
+            return 750
+        case "AXTable", "AXOutline", "AXList", "AXRow", "AXCell":
+            return 700
+        case "AXGroup", "AXSplitGroup", "AXScrollArea", "AXToolbar", "AXTabGroup":
+            return 500
+        default:
+            return 300
+        }
+    }
+
+    private func nodeMetadata(from element: AXUIElement) -> NodeMetadata {
+        let attributes: [CFString] = [
+            kAXRoleAttribute as CFString,
+            kAXSubroleAttribute as CFString,
+            kAXIdentifierAttribute as CFString,
+            kAXTitleAttribute as CFString,
+            kAXDescriptionAttribute as CFString,
+            kAXHelpAttribute as CFString,
+            kAXPlaceholderValueAttribute as CFString,
+            kAXEnabledAttribute as CFString,
+            kAXFocusedAttribute as CFString,
+            kAXSelectedAttribute as CFString,
+            kAXExpandedAttribute as CFString,
+            kAXDisclosureLevelAttribute as CFString,
+        ]
+        let values = multipleAttributeValues(attributes, from: element)
+        func cleaned(_ attribute: CFString, limit: Int = 512) -> String? {
+            PrivacySanitizer.clean(
+                scalarString(values[attribute as String]),
+                limit: limit
+            )
+        }
+        return NodeMetadata(
+            role: scalarString(values[kAXRoleAttribute as String]) ?? "AXUnknown",
+            subrole: cleaned(kAXSubroleAttribute as CFString, limit: 128),
+            identifier: cleaned(kAXIdentifierAttribute as CFString, limit: 256),
+            title: cleaned(kAXTitleAttribute as CFString),
+            description: cleaned(kAXDescriptionAttribute as CFString),
+            help: cleaned(kAXHelpAttribute as CFString),
+            placeholder: cleaned(kAXPlaceholderValueAttribute as CFString),
+            enabled: boolValue(values[kAXEnabledAttribute as String]),
+            focused: boolValue(values[kAXFocusedAttribute as String]),
+            selected: boolValue(values[kAXSelectedAttribute as String]),
+            expanded: boolValue(values[kAXExpandedAttribute as String]),
+            disclosureLevel: intValue(values[kAXDisclosureLevelAttribute as String])
+        )
+    }
+
+    private func multipleAttributeValues(
+        _ attributes: [CFString],
+        from element: AXUIElement
+    ) -> [String: Any] {
+        var copiedValues: CFArray?
+        let result = AXUIElementCopyMultipleAttributeValues(
+            element,
+            attributes as CFArray,
+            AXCopyMultipleAttributeOptions(rawValue: 0),
+            &copiedValues
+        )
+        guard result == .success,
+              let values = copiedValues as? [Any],
+              values.count == attributes.count else {
+            return [:]
+        }
+        var mapped: [String: Any] = [:]
+        for (attribute, value) in zip(attributes, values) {
+            let reference = value as CFTypeRef
+            guard CFGetTypeID(reference) != CFNullGetTypeID() else { continue }
+            mapped[attribute as String] = value
+        }
+        return mapped
+    }
+
+    private func scalarString(_ value: Any?) -> String? {
+        if let string = value as? String { return string }
+        if let attributed = value as? NSAttributedString { return attributed.string }
+        if let number = value as? NSNumber { return number.stringValue }
+        if let url = value as? URL { return url.absoluteString }
+        return nil
+    }
+
+    private func boolValue(_ value: Any?) -> Bool? {
+        (value as? NSNumber)?.boolValue
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        (value as? NSNumber)?.intValue
+    }
+
+    private func elementID(_ element: AXUIElement) -> String {
+        "e" + String(CFHash(element), radix: 36)
     }
 
     private static let structuralRoles: Set<String> = [
@@ -323,11 +633,23 @@ final class AXContextReader {
     }
 
     private func children(of element: AXUIElement) -> [AXUIElement] {
-        guard let value = value(attribute: kAXChildrenAttribute as CFString, from: element),
-              let children = value as? [AXUIElement] else {
-            return []
+        let childAttributes: [CFString] = [
+            kAXChildrenAttribute as CFString,
+            kAXVisibleChildrenAttribute as CFString,
+            kAXRowsAttribute as CFString,
+            kAXContentsAttribute as CFString,
+        ]
+        var result: [AXUIElement] = []
+        for attribute in childAttributes {
+            guard let value = value(attribute: attribute, from: element),
+                  let children = value as? [AXUIElement] else {
+                continue
+            }
+            for child in children where !result.contains(where: { CFEqual($0, child) }) {
+                result.append(child)
+            }
         }
-        return children
+        return result
     }
 
     private func element(at point: CGPoint) -> AXUIElement? {
@@ -399,7 +721,7 @@ final class AXContextReader {
     }
 
     private func isPrivateBrowsing(
-        application: NSRunningApplication,
+        bundleIdentifier: String,
         windowTitle: String?
     ) -> Bool {
         let browserBundles = [
@@ -409,8 +731,7 @@ final class AXContextReader {
             "org.mozilla.firefox",
             "com.microsoft.edgemac",
         ]
-        guard let bundleIdentifier = application.bundleIdentifier,
-              browserBundles.contains(bundleIdentifier) else {
+        guard browserBundles.contains(bundleIdentifier) else {
             return false
         }
 

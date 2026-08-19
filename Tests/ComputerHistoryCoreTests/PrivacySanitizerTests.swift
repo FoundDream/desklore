@@ -102,4 +102,57 @@ final class PrivacySanitizerTests: XCTestCase {
         XCTAssertEqual(sanitized.interaction?.text?.count, 20)
         XCTAssertEqual(sanitized.accessibility?.text.count, 80)
     }
+
+    func testDefaultAccessibilityLimitPreservesRichLocalEvidence() {
+        let event = HistoryEvent(
+            timestamp: Date(),
+            kind: .windowChanged,
+            application: .init(bundleIdentifier: "com.example.app", name: "Example"),
+            accessibility: .init(
+                mode: .fullTree,
+                text: String(repeating: "a", count: 60_000)
+            )
+        )
+
+        let sanitized = PrivacySanitizer.sanitize(event)
+
+        XCTAssertEqual(sanitized.accessibility?.text.count, 48_000)
+    }
+
+    func testStructuredAXTreeIsRedactedBeforePersistence() {
+        let snapshot = AXTreeSnapshot(nodes: [
+            AXTreeNode(
+                id: "1",
+                depth: 0,
+                siblingIndex: 0,
+                role: "AXWindow",
+                childCount: 1
+            ),
+            AXTreeNode(
+                id: "2",
+                parentID: "1",
+                depth: 1,
+                siblingIndex: 0,
+                role: "AXStaticText",
+                value: "api_key=sk-abcdefghijklmnopqrstuvwxyz"
+            ),
+        ])
+        let event = HistoryEvent(
+            timestamp: Date(),
+            kind: .windowChanged,
+            application: .init(bundleIdentifier: "com.example.app", name: "Example"),
+            accessibility: .init(
+                mode: .fullTree,
+                text: AXTreeRenderer.fullText(snapshot)
+            )
+        )
+
+        let sanitized = PrivacySanitizer.sanitize(event)
+
+        XCTAssertFalse(
+            sanitized.accessibility?.text.contains("sk-abcdefghijklmnopqrstuvwxyz")
+                ?? true
+        )
+        XCTAssertTrue(sanitized.accessibility?.text.contains("[REDACTED]") ?? false)
+    }
 }

@@ -106,14 +106,11 @@ public struct EventBurstCoalescer: Sendable {
     ) -> HistoryEvent.AccessibilityContext? {
         guard let previous else { return latest }
         guard let latest else { return previous }
-        let lines = (previous.text + "\n" + latest.text)
-            .components(separatedBy: .newlines)
-        var seen: Set<String> = []
+        guard previous != latest else { return latest }
+        // AXTree v2 lines carry stable IDs and hierarchy. De-duplicating lines
+        // would corrupt that structure, so retain the two chronological views.
         let text = String(
-            lines
-                .filter { !$0.isEmpty && seen.insert($0).inserted }
-                .joined(separator: "\n")
-                .prefix(12_000)
+            (previous.text + "\n" + latest.text).prefix(48_000)
         )
         let mode: HistoryEvent.AccessibilityContext.Mode =
             previous.mode == .fullTree || latest.mode == .fullTree

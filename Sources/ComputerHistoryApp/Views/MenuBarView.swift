@@ -117,6 +117,37 @@ struct MenuBarView: View {
                         "全局事件监听器",
                         healthy: engine.interactionMonitorActive
                     )
+                    healthRow(
+                        "AX 语义监听器",
+                        healthy: engine.axObserverActive
+                    )
+                    Text(
+                        "AX 订阅：文本 \(engine.axValueNotificationTargets) · 选择 \(engine.axSelectionNotificationTargets)"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Text(
+                        "本次启动：Return \(engine.returnKeyEventCount) · 提交 \(engine.keyboardSubmitCount) · 快捷键 \(engine.keyboardShortcutCount)"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Text(
+                        "文本变化 \(engine.textInputEventCount) · 选择变化 \(engine.selectionEventCount)"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Text(
+                        "AX 树：\(engine.lastAXSnapshotNodeCount)/\(engine.lastAXVisitedNodeCount) 节点 · \(engine.lastAXCaptureDurationMilliseconds, format: .number.precision(.fractionLength(0))) ms"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Text(
+                        "AX 队列 \(engine.axCaptureBacklog) · 慢采集 \(engine.axSlowCaptureCount) · 截断 \(engine.axTruncatedCaptureCount)"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(
+                        engine.axCaptureBacklog > 2 ? Color.orange : Color.secondary
+                    )
                     if let date = engine.lastKeyboardEventAt {
                         Text("最近键盘语义事件：\(date.formatted(date: .omitted, time: .standard))")
                             .font(.caption)

@@ -64,7 +64,7 @@ public struct ObservationPolicy: Codable, Equatable, Sendable {
     public func sanitized(
         _ event: HistoryEvent,
         textLimit: Int = 4_096,
-        accessibilityTextLimit: Int = 12_000
+        accessibilityTextLimit: Int = 48_000
     ) -> HistoryEvent? {
         guard allows(event) else { return nil }
         return PrivacySanitizer.sanitize(

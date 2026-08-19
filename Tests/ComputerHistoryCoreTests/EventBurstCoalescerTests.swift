@@ -49,6 +49,28 @@ final class EventBurstCoalescerTests: XCTestCase {
         XCTAssertEqual(event.accessibility?.text, "first\nsecond")
     }
 
+    func testWindowBurstRetainsRichAXContextBeyondLegacyTwelveKLimit() throws {
+        var coalescer = EventBurstCoalescer(windowChangeWindow: 0.75)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let firstText = "AXTree v2\n" + String(repeating: "a", count: 20_000)
+        let secondText = "AXTreeDiff v2\n" + String(repeating: "b", count: 20_000)
+
+        _ = coalescer.ingest(windowEvent(at: start, axText: firstText))
+        _ = coalescer.ingest(
+            windowEvent(
+                at: start.addingTimeInterval(0.5),
+                axText: secondText
+            )
+        )
+        let event = try XCTUnwrap(coalescer.flushAll().first)
+        let text = try XCTUnwrap(event.accessibility?.text)
+
+        XCTAssertGreaterThan(text.count, 40_000)
+        XCTAssertLessThanOrEqual(text.count, 48_000)
+        XCTAssertTrue(text.contains("AXTree v2"))
+        XCTAssertTrue(text.contains("AXTreeDiff v2"))
+    }
+
     private func click(at date: Date, identifier: String = "button") -> HistoryEvent {
         HistoryEvent(
             timestamp: date,
