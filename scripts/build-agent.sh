@@ -28,16 +28,14 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 install -m 755 "$BIN_DIR/ComputerHistoryAgent" "$MACOS_DIR/ComputerHistoryAgent"
 install -m 644 "$PROJECT_ROOT/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 
-# Keep the former Swift app identifier so existing local Accessibility grants
-# can follow the native collector across the Electron migration.
 SIGNING_IDENTITY="${COMPUTER_HISTORY_CODESIGN_IDENTITY:-}"
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   codesign --force --deep --options runtime --timestamp=none \
     --sign "$SIGNING_IDENTITY" "$APP_DIR"
 else
   codesign --force --deep --sign - \
-    --identifier com.ziwen.computer-history \
-    --requirements '=designated => identifier "com.ziwen.computer-history"' \
+    --identifier com.ziwen.computer-history.desktop.agent \
+    --requirements '=designated => identifier "com.ziwen.computer-history.desktop.agent"' \
     "$APP_DIR"
 fi
 

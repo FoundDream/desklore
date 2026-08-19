@@ -67,7 +67,7 @@ final class HistoryEngine: NSObject, ObservableObject {
         } catch {
             resolvedLayout = StorageLayout(
                 root: FileManager.default.temporaryDirectory
-                    .appendingPathComponent("ComputerHistory", isDirectory: true)
+                    .appendingPathComponent("ComputerHistoryDesktop", isDirectory: true)
             )
         }
         layout = resolvedLayout
@@ -162,6 +162,7 @@ final class HistoryEngine: NSObject, ObservableObject {
         )
 
         Task {
+            await refreshTimeline()
             await recoverPendingSegments()
             await refreshTimeline()
         }
@@ -556,21 +557,12 @@ final class HistoryEngine: NSObject, ObservableObject {
             .selectionNotificationTargetCount
     }
 
-    private static let policyKey = "observation-policy-v1"
+    private static let policyKey = "observation-policy"
 
     private static func loadPolicy(defaults: UserDefaults = .standard) -> ObservationPolicy {
         guard let data = defaults.data(forKey: policyKey),
-              var policy = try? JSONDecoder().decode(ObservationPolicy.self, from: data) else {
+              let policy = try? JSONDecoder().decode(ObservationPolicy.self, from: data) else {
             return ObservationPolicy()
-        }
-        let original = policy
-        // v1 shipped as default-deny. Preserve explicit exclusions while migrating
-        // existing installations to the new default-allow behavior.
-        policy.defaultApplicationBehavior = .observe
-        policy.defaultURLBehavior = .observe
-        if policy != original,
-           let migratedData = try? JSONEncoder().encode(policy) {
-            defaults.set(migratedData, forKey: policyKey)
         }
         return policy
     }

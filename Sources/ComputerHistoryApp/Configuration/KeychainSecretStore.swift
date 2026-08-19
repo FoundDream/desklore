@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum KeychainSecretStore {
-    private static let service = "com.ziwen.computer-history.llm"
+    private static let service = "com.ziwen.computer-history.desktop.agent.llm"
     private static let account = "api-key"
 
     static func loadAPIKey() -> String? {

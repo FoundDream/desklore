@@ -49,7 +49,7 @@ final class EventBurstCoalescerTests: XCTestCase {
         XCTAssertEqual(event.accessibility?.text, "first\nsecond")
     }
 
-    func testWindowBurstRetainsRichAXContextBeyondLegacyTwelveKLimit() throws {
+    func testWindowBurstRetainsRichAXContextBeyondModelRequestLimit() throws {
         var coalescer = EventBurstCoalescer(windowChangeWindow: 0.75)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         let firstText = "AXTree v2\n" + String(repeating: "a", count: 20_000)

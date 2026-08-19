@@ -54,7 +54,7 @@ struct TimelineLLMSettings: Equatable {
         return scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host)
     }
 
-    private static let enabledKey = "timeline-llm-enabled-v1"
-    private static let modelKey = "timeline-llm-model-v1"
-    private static let endpointKey = "timeline-llm-endpoint-v1"
+    private static let enabledKey = "timeline-llm-enabled"
+    private static let modelKey = "timeline-llm-model"
+    private static let endpointKey = "timeline-llm-endpoint"
 }

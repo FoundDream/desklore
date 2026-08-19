@@ -4,6 +4,7 @@ public enum TimelineMarkdownCodecError: Error, Equatable {
     case missingFrontmatter
     case missingField(String)
     case invalidField(String)
+    case unsupportedSchemaVersion(Int)
 }
 
 public enum TimelineMarkdownCodec {
@@ -71,6 +72,9 @@ public enum TimelineMarkdownCodec {
         let scalars = parseTopLevelScalars(frontmatter)
 
         let schemaVersion = try integer("schema_version", from: scalars)
+        guard schemaVersion == TimelineDocument.currentSchemaVersion else {
+            throw TimelineMarkdownCodecError.unsupportedSchemaVersion(schemaVersion)
+        }
         let id = try required("id", from: scalars)
         let sourceSegmentID = try required("source_segment_id", from: scalars)
         let startedAt = try date("started_at", from: scalars)

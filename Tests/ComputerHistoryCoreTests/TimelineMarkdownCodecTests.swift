@@ -43,7 +43,7 @@ final class TimelineMarkdownCodecTests: XCTestCase {
     func testRejectsInvalidActivityState() {
         let markdown = """
         ---
-        schema_version: 1
+        schema_version: 2
         id: "timeline-1"
         source_segment_id: "segment-1"
         started_at: "2026-04-18T03:20:00.000Z"
@@ -67,6 +67,36 @@ final class TimelineMarkdownCodecTests: XCTestCase {
             XCTAssertEqual(
                 error as? TimelineMarkdownCodecError,
                 .invalidField("activity_state")
+            )
+        }
+    }
+
+    func testRejectsLegacySchemaVersion() {
+        let markdown = """
+        ---
+        schema_version: 1
+        id: "timeline-1"
+        source_segment_id: "segment-1"
+        started_at: "2026-04-18T03:20:00.000Z"
+        ended_at: "2026-04-18T03:30:00.000Z"
+        title: "Timeline"
+        description: "Description"
+        applications:
+          []
+        evidence_event_ids:
+          []
+        generator:
+          type: "rules"
+          version: 1
+        created_at: "2026-04-18T03:30:01.000Z"
+        ---
+        Body
+        """
+
+        XCTAssertThrowsError(try TimelineMarkdownCodec.decode(markdown)) { error in
+            XCTAssertEqual(
+                error as? TimelineMarkdownCodecError,
+                .unsupportedSchemaVersion(1)
             )
         }
     }

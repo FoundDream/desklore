@@ -1,6 +1,8 @@
 import Foundation
 
 public struct TimelineDocument: Equatable, Identifiable, Sendable {
+    public static let currentSchemaVersion = 2
+
     public struct Generator: Equatable, Sendable {
         public let type: String
         public let version: Int
@@ -29,7 +31,7 @@ public struct TimelineDocument: Equatable, Identifiable, Sendable {
     public var fileURL: URL?
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = Self.currentSchemaVersion,
         id: String = UUID().uuidString.lowercased(),
         sourceSegmentID: String,
         startedAt: Date,

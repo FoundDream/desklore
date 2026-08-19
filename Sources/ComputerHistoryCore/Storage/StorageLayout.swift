@@ -17,7 +17,7 @@ public struct StorageLayout: Sendable {
             create: true
         )
         return StorageLayout(
-            root: base.appendingPathComponent("ComputerHistory", isDirectory: true)
+            root: base.appendingPathComponent("ComputerHistoryDesktop", isDirectory: true)
         )
     }
 

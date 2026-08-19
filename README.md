@@ -42,11 +42,12 @@ This produces `out/main`, `out/preload`, `out/renderer`, and the signed
 exercise those production outputs. `npm run package:mac` adds the downstream
 electron-builder step for DMG/ZIP artifacts under `release/`.
 
-The Agent packaging script keeps the former Swift app identifier requirement so
-macOS privacy grants can survive the UI migration and local binary updates. Set
+The Electron app and native Agent use independent bundle identifiers. Set
 `COMPUTER_HISTORY_CODESIGN_IDENTITY` to use a Developer ID or Apple Development
 identity for distributable builds; the default identifier-only ad-hoc signature
-is intended for local development.
+is intended for local development. This version starts with independent storage,
+settings, Keychain secrets, and macOS privacy grants; it does not import state
+from the former SwiftUI application.
 
 On first launch, grant Accessibility access when macOS prompts. Recording starts
 for all apps and domains automatically; use **设置 → 当前观察范围** to exclude
@@ -122,14 +123,13 @@ sanitized AX context per event; the model request is independently capped at
   are still excluded.
 
 Timeline generation is serialized per source segment and rechecks the Markdown
-directory before its atomic write. If older versions already contain duplicate
-documents, the files remain recoverable on disk while the UI chooses one best
-summary using integrity and quality evidence.
+directory before its atomic write. If interrupted work produces duplicate
+documents, the UI chooses one best summary using integrity and quality evidence.
 
 Data is written to:
 
 ```text
-~/Library/Application Support/ComputerHistory/
+~/Library/Application Support/ComputerHistoryDesktop/
   segments/<utc-segment-id>/events.jsonl
   segments/<utc-segment-id>/metadata.json
   timeline/<utc-segment-id>-<id>-10min-<slug>.md
@@ -171,6 +171,3 @@ capture-health dashboard, observation controls, and LLM settings. macOS capture
 remains in the separately signed Swift Agent so Electron upgrades do not couple
 AX behavior to Node native-module ABI changes. Windows UI Automation and Linux
 AT-SPI collectors remain future platform work.
-
-The complete SwiftUI version immediately before this migration is preserved on
-branch `codex/archive-swift-before-electron-20260819` at commit `c6eab44`.

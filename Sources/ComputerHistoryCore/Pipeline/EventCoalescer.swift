@@ -84,11 +84,6 @@ public struct EventCoalescer: Sendable {
         return normalized
     }
 
-    /// Compatibility helper for callers that only need a decision.
-    public mutating func accept(_ event: HistoryEvent) -> Bool {
-        process(event) != nil
-    }
-
     private func streamKey(for event: HistoryEvent) -> String {
         var components = [
             event.kind.rawValue,
