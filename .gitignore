@@ -3,3 +3,6 @@
 .DS_Store
 DerivedData/
 dist/
+node_modules/
+out/
+release/

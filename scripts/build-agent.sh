@@ -11,27 +11,25 @@ if [[ "$PROJECT_ROOT" != "$EXPECTED_ROOT" ]]; then
 fi
 
 cd "$PROJECT_ROOT"
-swift build -c release --product ComputerHistoryApp
+swift build -c release --product ComputerHistoryAgent
 BIN_DIR="$(swift build -c release --show-bin-path)"
 
-if [[ ! -x "$BIN_DIR/ComputerHistoryApp" ]]; then
-  echo "Missing release executable: $BIN_DIR/ComputerHistoryApp" >&2
+if [[ ! -x "$BIN_DIR/ComputerHistoryAgent" ]]; then
+  echo "Missing release executable: $BIN_DIR/ComputerHistoryAgent" >&2
   exit 1
 fi
 
-APP_DIR="$PROJECT_ROOT/dist/Computer History.app"
+APP_DIR="$PROJECT_ROOT/dist/Computer History Agent.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-install -m 755 "$BIN_DIR/ComputerHistoryApp" "$MACOS_DIR/ComputerHistoryApp"
+install -m 755 "$BIN_DIR/ComputerHistoryAgent" "$MACOS_DIR/ComputerHistoryAgent"
 install -m 644 "$PROJECT_ROOT/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 
-# Accessibility and Screen Recording permissions are bound to the app's code
-# requirement. A default ad-hoc signature reduces that requirement to a changing
-# CDHash, so every rebuilt binary looks like a different app to TCC. An explicit
-# identifier requirement keeps local development builds stable across updates.
+# Keep the former Swift app identifier so existing local Accessibility grants
+# can follow the native collector across the Electron migration.
 SIGNING_IDENTITY="${COMPUTER_HISTORY_CODESIGN_IDENTITY:-}"
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   codesign --force --deep --options runtime --timestamp=none \

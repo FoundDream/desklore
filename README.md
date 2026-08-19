@@ -1,7 +1,11 @@
-# Computer History Timeline
+# Computer History
 
-A local-first macOS prototype that turns application activity into a
-Markdown timeline. It deliberately keeps the storage model small:
+A local-first Electron desktop application that turns macOS activity into a
+Markdown timeline. The product UI runs in React/Electron while a signed,
+headless Swift Agent keeps native Accessibility capture and privacy-sensitive
+processing outside the renderer.
+
+It deliberately keeps the storage model small:
 
 - Raw interaction evidence is appended to ten-minute JSONL segments.
 - Noisy OS callbacks are normalized before storage: a drag is one event,
@@ -11,45 +15,75 @@ Markdown timeline. It deliberately keeps the storage model small:
 - An optional Responses API summarizer produces strict-schema semantic titles,
   descriptions, lifecycle state, and evidence event IDs, with retries and
   rules-based fallback.
-- The UI rebuilds its in-memory index from Markdown; there is no database.
-- Observation is enabled for all apps and domains by default. The menu bar can
+- The Electron UI receives sanitized timeline DTOs from the Swift Agent; there
+  is no database and the renderer cannot read raw JSONL or API keys.
+- Observation is enabled for all apps and domains by default. Settings can
   exclude the current app or domain at any time.
 
 ## Run
 
 ```sh
-swift run ComputerHistoryApp
+npm install
+npm run dev
 ```
 
-For a stable local app bundle and Accessibility identity:
+`npm run dev` first builds and signs the native Agent, then starts the
+main/preload/renderer development loop through
+`electron-vite-plus@0.1.0-alpha.0`.
+
+To build each layer without launching the UI:
 
 ```sh
-./scripts/build-app.sh
-open "dist/Computer History.app"
+npm run build
 ```
 
-The packaging script embeds a stable identifier requirement so macOS privacy
-grants survive local binary updates. Set `COMPUTER_HISTORY_CODESIGN_IDENTITY` to
-use a Developer ID or Apple Development identity for distributable builds; the
-default identifier-only ad-hoc signature is intended for local development.
+This produces `out/main`, `out/preload`, `out/renderer`, and the signed
+`dist/Computer History Agent.app`. Run `npm run preview -- --skip-build` to
+exercise those production outputs. `npm run package:mac` adds the downstream
+electron-builder step for DMG/ZIP artifacts under `release/`.
+
+The Agent packaging script keeps the former Swift app identifier requirement so
+macOS privacy grants can survive the UI migration and local binary updates. Set
+`COMPUTER_HISTORY_CODESIGN_IDENTITY` to use a Developer ID or Apple Development
+identity for distributable builds; the default identifier-only ad-hoc signature
+is intended for local development.
 
 On first launch, grant Accessibility access when macOS prompts. Recording starts
-for all apps and domains automatically; use the menu bar to exclude sensitive
-apps or domains. Accessibility trust also allows the read-only global `NSEvent`
-monitor to observe Return and modified shortcuts; a separate Input Monitoring
-permission is not required. The **采集健康** section reports Accessibility,
+for all apps and domains automatically; use **设置 → 当前观察范围** to exclude
+the active app or domain. Accessibility trust also allows the read-only global
+`NSEvent` monitor to observe Return and modified shortcuts; a separate Input
+Monitoring permission is not required. The **采集健康** page reports Accessibility,
 AX observer/subscription status, and separate Return, submit, shortcut, text, and
 selection counters. It also reports the latest AX tree node/visit counts, capture
 latency, queue depth, slow captures, and truncated captures. The first timeline
 Markdown file is generated when its ten-minute segment closes.
 
+## Architecture
+
+```text
+React renderer (timeline, health, settings)
+        ↕ narrow contextBridge API
+Electron main (window, tray, lifecycle, validated IPC)
+        ↕ newline-delimited JSON over stdio
+Signed Swift Agent
+        ├── AppKit / AX / NSEvent collectors
+        ├── privacy policy and Keychain
+        ├── JSONL segments and Markdown timeline
+        └── LLM summarizer and evaluator
+```
+
+The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, a
+sandbox, and a local-only CSP. It receives summary documents and capture health,
+not raw events. Main-process IPC exposes explicit commands rather than passing
+`ipcRenderer` or arbitrary file paths through preload.
+
 ## LLM summaries
 
-Open the menu bar item, expand **模型摘要**, enter a Responses API model,
-endpoint, and API key, then enable semantic summaries. The API key is stored in
-macOS Keychain; only the model and endpoint are saved in `UserDefaults`. The
-default model is `gpt-5.6-luna`, and `OPENAI_API_KEY` is also supported for
-development launches.
+Open **设置 → 语义摘要**, enter a Responses API model, endpoint, and API key,
+then enable semantic summaries. The renderer sends the key directly through the
+narrow bridge to the Swift Agent, which stores it in macOS Keychain; only the
+model and endpoint are saved in `UserDefaults`. The default model is
+`gpt-5.6-luna`, and `OPENAI_API_KEY` is also supported for development launches.
 
 Model output is constrained by strict JSON Schema. Evidence IDs are checked
 against the exact input segment before writing Markdown. A full quality gate also
@@ -104,6 +138,10 @@ Data is written to:
 ## Verify
 
 ```sh
+npm run check
+npm test
+npm run build
+npm run doctor
 swift test
 swift build
 swift run ComputerHistoryEval /path/to/events.jsonl /path/to/timeline.md
@@ -127,3 +165,12 @@ watches the Markdown directory for edits, recovers interrupted segments, passes
 the two previous summaries into the next LLM request for continuity, and removes
 raw segments after 48 hours. Range-based clearing and a full observation-rule
 editor remain follow-up work.
+
+Electron is now the primary product entry and owns the window, tray, timeline,
+capture-health dashboard, observation controls, and LLM settings. macOS capture
+remains in the separately signed Swift Agent so Electron upgrades do not couple
+AX behavior to Node native-module ABI changes. Windows UI Automation and Linux
+AT-SPI collectors remain future platform work.
+
+The complete SwiftUI version immediately before this migration is preserved on
+branch `codex/archive-swift-before-electron-20260819` at commit `c6eab44`.

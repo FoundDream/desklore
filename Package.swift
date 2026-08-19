@@ -13,8 +13,8 @@ let package = Package(
             targets: ["ComputerHistoryCore"]
         ),
         .executable(
-            name: "ComputerHistoryApp",
-            targets: ["ComputerHistoryApp"]
+            name: "ComputerHistoryAgent",
+            targets: ["ComputerHistoryAgent"]
         ),
         .executable(
             name: "ComputerHistoryEval",
@@ -26,8 +26,9 @@ let package = Package(
             name: "ComputerHistoryCore"
         ),
         .executableTarget(
-            name: "ComputerHistoryApp",
-            dependencies: ["ComputerHistoryCore"]
+            name: "ComputerHistoryAgent",
+            dependencies: ["ComputerHistoryCore"],
+            path: "Sources/ComputerHistoryApp"
         ),
         .executableTarget(
             name: "ComputerHistoryEval",

@@ -1,0 +1,67 @@
+{
+  "name": "computer-history-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Local-first activity timeline with an Electron UI and native macOS collector",
+  "author": "FoundDream",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "native:build": "./scripts/build-agent.sh",
+    "dev": "npm run native:build && electron-vite-plus dev",
+    "dev:ui": "electron-vite-plus dev",
+    "build": "npm run native:build && electron-vite-plus build",
+    "check": "vp check",
+    "test": "vp test run",
+    "doctor": "electron-vite-plus doctor",
+    "preview": "electron-vite-plus preview",
+    "package:mac": "npm run build && electron-builder --mac"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.5",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "electron-vite-plus": "0.1.0-alpha.0",
+    "typescript": "^5.9.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9",
+    "vite-plus": "0.2.9"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"
+  },
+  "packageManager": "npm@11.12.1",
+  "build": {
+    "appId": "com.ziwen.computer-history.desktop",
+    "productName": "Computer History",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/Computer History Agent.app",
+        "to": "native/Computer History Agent.app"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "artifactName": "Computer-History-${version}-${arch}.${ext}"
+    }
+  }
+}
