@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AgentSnapshot, DesktopSnapshot, TimelineDocument } from "../../shared/contracts.js";
 
 type View = "timeline" | "health" | "settings";
@@ -45,6 +45,29 @@ function Icon({ name }: { name: "timeline" | "health" | "settings" | "folder" })
     <svg viewBox="0 0 24 24" aria-hidden="true">
       {paths[name]}
     </svg>
+  );
+}
+
+function PageHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
+  return (
+    <header className="content-header">
+      <div>
+        <span className="section-kicker">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {action}
+    </header>
   );
 }
 
@@ -160,7 +183,7 @@ function Sidebar({
           </div>
         </button>
         <p>
-          <span>LOCAL ONLY</span> 原始活动保留在本机，界面只接收经过脱敏的时间线数据。
+          <span>仅存本地</span> 原始活动保留在本机，界面只接收经过脱敏的时间线数据。
         </p>
       </div>
     </aside>
@@ -252,20 +275,20 @@ function TimelineView({
 
   return (
     <>
-      <header className="content-header">
-        <div>
-          <span className="section-kicker">ACTIVITY ARCHIVE</span>
-          <h1>你的工作，按时间留下痕迹。</h1>
-          <p>每个片段来自十分钟本地活动，经过隐私过滤后写入 Markdown。</p>
-        </div>
-        <button
-          className="secondary"
-          onClick={() => void run(() => window.computerHistory.revealStorage())}
-        >
-          <Icon name="folder" />
-          显示文件
-        </button>
-      </header>
+      <PageHeader
+        eyebrow="活动记录"
+        title="时间线"
+        description="查看按十分钟整理的本地活动片段。内容经过隐私过滤，并以 Markdown 长期保存。"
+        action={
+          <button
+            className="secondary"
+            onClick={() => void run(() => window.computerHistory.revealStorage())}
+          >
+            <Icon name="folder" />
+            显示文件
+          </button>
+        }
+      />
       <div className="archive-summary">
         <div>
           <strong>{agent?.documents.length ?? 0}</strong>
@@ -331,19 +354,19 @@ function HealthView({
   ] as const;
   return (
     <>
-      <header className="content-header compact">
-        <div>
-          <span className="section-kicker">NATIVE COLLECTOR</span>
-          <h1>采集健康</h1>
-          <p>Electron 只负责展示；下面的数据来自签名后的 Swift Agent。</p>
-        </div>
-        <button
-          className="secondary"
-          onClick={() => void run(() => window.computerHistory.refreshPermissions())}
-        >
-          重新检查
-        </button>
-      </header>
+      <PageHeader
+        eyebrow="原生采集器"
+        title="采集健康"
+        description="Electron 负责展示，下面的数据来自签名后的 Swift Agent。"
+        action={
+          <button
+            className="secondary"
+            onClick={() => void run(() => window.computerHistory.refreshPermissions())}
+          >
+            重新检查
+          </button>
+        }
+      />
       <section className="health-layout">
         <div className="health-primary">
           {rows.map(([label, healthy, description]) => (
@@ -428,13 +451,11 @@ function SettingsView({
   }, [agent?.llm.enabled, agent?.llm.model, agent?.llm.endpoint]);
   return (
     <>
-      <header className="content-header compact">
-        <div>
-          <span className="section-kicker">PREFERENCES</span>
-          <h1>设置</h1>
-          <p>密钥由 Swift Agent 写入 macOS Keychain，不会进入 renderer。</p>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="偏好设置"
+        title="设置"
+        description="配置语义摘要与观察范围。密钥由 Swift Agent 写入 macOS Keychain。"
+      />
       <section className="settings-sheet">
         <div className="settings-section">
           <div className="settings-copy">

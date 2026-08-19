@@ -81,7 +81,7 @@ async function createWindow(): Promise<void> {
     minWidth: 860,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
-    backgroundColor: "#f0ede4",
+    backgroundColor: "#fafafa",
     show: false,
     webPreferences: {
       contextIsolation: true,
