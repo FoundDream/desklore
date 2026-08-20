@@ -5,6 +5,9 @@ import Foundation
 
 struct InteractionCapture: Sendable {
     let screenLocation: CGPoint?
+    let semanticTarget: HistoryEvent.Target?
+    let text: String?
+    let selectedText: String?
     let keyEquivalent: String?
     let modifiers: [String]?
     let mouseButton: String?
@@ -14,6 +17,9 @@ struct InteractionCapture: Sendable {
 
     init(
         screenLocation: CGPoint? = nil,
+        semanticTarget: HistoryEvent.Target? = nil,
+        text: String? = nil,
+        selectedText: String? = nil,
         keyEquivalent: String? = nil,
         modifiers: [String]? = nil,
         mouseButton: String? = nil,
@@ -22,6 +28,9 @@ struct InteractionCapture: Sendable {
         mouseDestination: CGPoint? = nil
     ) {
         self.screenLocation = screenLocation
+        self.semanticTarget = semanticTarget
+        self.text = text
+        self.selectedText = selectedText
         self.keyEquivalent = keyEquivalent
         self.modifiers = modifiers
         self.mouseButton = mouseButton
@@ -135,10 +144,15 @@ final class AXContextReader {
             string(attribute: kAXTitleAttribute as CFString, from: $0)
         }
         let url = windowElement.flatMap(urlString(from:))
-        let target = targetElement.map(targetContext(from:))
-        let selectedText = targetElement.flatMap {
-            string(attribute: kAXSelectedTextAttribute as CFString, from: $0)
-        }
+        let target = capture?.semanticTarget ?? targetElement.map(targetContext(from:))
+        let selectedText = capture == nil
+            ? targetElement.flatMap {
+                PrivacySanitizer.clean(
+                    string(attribute: kAXSelectedTextAttribute as CFString, from: $0),
+                    limit: 4_096
+                )
+            }
+            : capture?.selectedText
         let interaction = interactionContext(
             kind: kind,
             target: target,
@@ -232,7 +246,9 @@ final class AXContextReader {
         selectedText: String?,
         capture: InteractionCapture?
     ) -> HistoryEvent.Interaction? {
-        let text = kind == .keyboardTextInput ? target?.value : nil
+        let text = kind == .keyboardTextInput
+            ? (capture?.text ?? target?.value)
+            : nil
         let selection = kind == .selectionChanged ? selectedText : nil
         guard text != nil || selection != nil || capture != nil else { return nil }
         return HistoryEvent.Interaction(

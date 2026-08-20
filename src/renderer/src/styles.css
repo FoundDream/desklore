@@ -259,14 +259,6 @@ nav button > i.warn {
   font-weight: 600;
 }
 
-.record-control small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .record-orbit {
   display: grid;
   place-items: center;

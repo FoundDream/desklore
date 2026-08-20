@@ -139,7 +139,7 @@ describe("TypeScript history core", () => {
     expect(chatWithoutTarget.kind).toBe("keyboard.submit");
   });
 
-  it("preserves focus-change semantics while dropping duplicate window callbacks", () => {
+  it("drops duplicate focus callbacks but preserves later and activation events", () => {
     const coalescer = new EventCoalescer();
     expect(coalescer.process(event({ captureReason: "window_focus" }, 1))).toBeDefined();
     expect(coalescer.process(event({ captureReason: "window_focus" }, 2))).toBeUndefined();
@@ -151,6 +151,66 @@ describe("TypeScript history core", () => {
             target: { role: "AXTextArea", placeholder: "Prompt" },
           },
           3,
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      coalescer.process(
+        event(
+          {
+            timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 4, 1)).toISOString(),
+            captureReason: "focus_change",
+          },
+          4,
+        ),
+      ),
+    ).toBeDefined();
+    expect(coalescer.process(event({ captureReason: "application_activation" }, 5))).toBeDefined();
+  });
+
+  it("keeps structural selection changes even when selected text is unavailable", () => {
+    const coalescer = new EventCoalescer();
+    const structuralSelection = event(
+      {
+        kind: "selection.changed",
+        captureReason: "ax_selection",
+        target: { role: "AXTabGroup" },
+      },
+      1,
+    );
+    expect(coalescer.process(structuralSelection)).toBeDefined();
+    expect(
+      coalescer.process(
+        event(
+          {
+            ...structuralSelection,
+            timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 1, 20)).toISOString(),
+          },
+          2,
+        ),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("preserves repeated shortcut key-down events", () => {
+    const coalescer = new EventCoalescer();
+    const first = event(
+      {
+        kind: "keyboard.shortcut",
+        captureReason: "keyboard",
+        interaction: { keyEquivalent: "down-arrow", modifiers: ["function"] },
+      },
+      1,
+    );
+    expect(coalescer.process(first)).toBeDefined();
+    expect(
+      coalescer.process(
+        event(
+          {
+            ...first,
+            timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 1, 40)).toISOString(),
+          },
+          2,
         ),
       ),
     ).toBeDefined();

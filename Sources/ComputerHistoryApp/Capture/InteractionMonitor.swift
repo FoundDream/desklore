@@ -10,15 +10,17 @@ final class InteractionMonitor {
     private var pendingLeftMouse: PendingLeftMouse?
     private let navigationKeyNames: [UInt16: String] = [
         48: "tab",
+        51: "delete",
         53: "escape",
         115: "home",
         116: "page-up",
+        117: "forward-delete",
         119: "end",
         121: "page-down",
-        123: "left",
-        124: "right",
-        125: "down",
-        126: "up",
+        123: "left-arrow",
+        124: "right-arrow",
+        125: "down-arrow",
+        126: "up-arrow",
     ]
 
     var isActive: Bool { monitor != nil }
@@ -161,17 +163,15 @@ final class InteractionMonitor {
 
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
         guard !modifiers.isEmpty else { return }
-        var components = modifierNames(event.modifierFlags)
         if let key = event.charactersIgnoringModifiers?.lowercased(), !key.isEmpty {
-            components.append(key)
-        }
-        onInteraction?(
-            .keyboardShortcut,
-            InteractionCapture(
-                keyEquivalent: components.joined(separator: "+"),
-                modifiers: modifierNames(event.modifierFlags)
+            onInteraction?(
+                .keyboardShortcut,
+                InteractionCapture(
+                    keyEquivalent: key,
+                    modifiers: modifierNames(event.modifierFlags)
+                )
             )
-        )
+        }
     }
 
     private func modifierNames(_ flags: NSEvent.ModifierFlags) -> [String] {
@@ -180,6 +180,7 @@ final class InteractionMonitor {
         if flags.contains(.control) { names.append("ctrl") }
         if flags.contains(.option) { names.append("option") }
         if flags.contains(.shift) { names.append("shift") }
+        if flags.contains(.function) { names.append("function") }
         return names
     }
 }

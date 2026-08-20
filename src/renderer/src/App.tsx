@@ -268,7 +268,6 @@ function Sidebar({
           </span>
           <div>
             <strong>{running ? "正在记录" : "记录已暂停"}</strong>
-            <small>{agent?.activeApplication?.name ?? "等待活动"}</small>
           </div>
         </button>
       </div>
@@ -287,6 +286,11 @@ function TimelineCard({
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const hasTaskDetails =
+    Boolean(document.task?.trim()) ||
+    document.progression.length > 0 ||
+    Boolean(document.outcome?.trim()) ||
+    document.openLoops.length > 0;
   return (
     <article className="timeline-entry">
       <time>{timeLabel(document.startedAt)}</time>
@@ -301,10 +305,7 @@ function TimelineCard({
           )}
         </div>
         <p>{document.description}</p>
-        {(document.task ||
-          document.progression.length ||
-          document.outcome ||
-          document.openLoops.length) && (
+        {hasTaskDetails && (
           <>
             <button className="details-toggle" onClick={() => setExpanded((value) => !value)}>
               {expanded ? "收起任务细节" : "查看任务细节"}

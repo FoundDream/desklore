@@ -75,13 +75,20 @@ export class EventCoalescer {
 
     if (event.kind === "selection.changed") {
       const selection = event.interaction?.selectedText?.trim();
-      if (!selection || elapsed < 0.2) return undefined;
-      if (previous?.interaction?.selectedText === event.interaction?.selectedText) return undefined;
+      if (elapsed < 0.08) return undefined;
+      if (
+        selection !== undefined &&
+        previous?.interaction?.selectedText === event.interaction?.selectedText &&
+        elapsed < 0.75
+      ) {
+        return undefined;
+      }
     }
 
     if (event.kind === "window.changed" && previous) {
       if (
-        event.captureReason !== "focus_change" &&
+        event.captureReason !== "application_activation" &&
+        elapsed <= 2 &&
         windowIdentity(event) === windowIdentity(previous)
       ) {
         return undefined;
@@ -91,7 +98,7 @@ export class EventCoalescer {
     let normalized = event;
     if (event.kind === "keyboard.text_input") {
       const currentText = event.interaction?.text ?? event.target?.value;
-      if (currentText === undefined || elapsed < 0.35) return undefined;
+      if (currentText === undefined || elapsed < 0.2) return undefined;
       const previousText = this.lastAcceptedTextByStream.get(stream);
       if (previousText === currentText) return undefined;
       normalized = this.replacingText(event, this.textDelta(previousText, currentText));
@@ -101,6 +108,8 @@ export class EventCoalescer {
     if (
       event.kind !== "mouse.click" &&
       event.kind !== "window.changed" &&
+      event.kind !== "keyboard.shortcut" &&
+      event.kind !== "keyboard.submit" &&
       previous &&
       elapsed <= 0.4 &&
       payload(normalized) === payload(previous)

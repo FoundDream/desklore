@@ -45,7 +45,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var nextCaptureSequence = 0
     private var nextCaptureResultSequence = 0
     private var pendingCaptureResults: [Int: AXCaptureResult] = [:]
-    private var lastFocusChangingMouseDate: Date?
+    private var lastNativeWindowCaptureByStream: [String: Date] = [:]
     private let hostBundleIdentifier = ProcessInfo.processInfo.environment[
         "COMPUTER_HISTORY_HOST_BUNDLE_ID"
     ]
@@ -64,14 +64,13 @@ final class HistoryEngine: NSObject, ObservableObject {
         accessibilityGranted = AccessibilityPermission.isTrusted(prompt: true)
         state = .running
 
-        axNotificationMonitor.onContextChanged = { [weak self] kind, reason in
+        axNotificationMonitor.onContextChanged = { [weak self] kind, reason, interaction in
             Task { @MainActor in
-                if reason == .focusChange,
-                   let date = self?.lastFocusChangingMouseDate,
-                   Date().timeIntervalSince(date) < 1 {
-                    return
-                }
-                self?.captureFrontmostApplication(kind: kind, reason: reason)
+                self?.captureFrontmostApplication(
+                    kind: kind,
+                    reason: reason,
+                    interaction: interaction
+                )
             }
         }
         interactionMonitor.onInteraction = { [weak self] kind, capture in
@@ -90,7 +89,6 @@ final class HistoryEngine: NSObject, ObservableObject {
             )
         }
         interactionMonitor.onBeforeFocusChangingInteraction = { [weak self] in
-            self?.lastFocusChangingMouseDate = Date()
             self?.axNotificationMonitor.flushPendingChanges()
         }
         interactionMonitor.start()
@@ -180,8 +178,16 @@ final class HistoryEngine: NSObject, ObservableObject {
               ) else {
             return
         }
-        let context = RunningApplicationContext(application)
         let timestamp = Date()
+        if shouldSuppressBeforeAXCapture(
+            application: application,
+            kind: kind,
+            reason: reason,
+            timestamp: timestamp
+        ) {
+            return
+        }
+        let context = RunningApplicationContext(application)
         let sequence = nextCaptureSequence
         nextCaptureSequence += 1
         axCaptureBacklog = nextCaptureSequence - nextCaptureResultSequence
@@ -192,10 +198,43 @@ final class HistoryEngine: NSObject, ObservableObject {
                 kind: kind,
                 captureReason: reason,
                 interaction: interaction,
-                includeRichSnapshot: includeRichSnapshot,
+                includeRichSnapshot: includeRichSnapshot
+                    && Self.requiresRichSnapshot(for: kind),
                 timestamp: timestamp
             )
             self?.receiveCaptureResult(result, sequence: sequence)
+        }
+    }
+
+    private func shouldSuppressBeforeAXCapture(
+        application: NSRunningApplication,
+        kind: HistoryEvent.Kind,
+        reason: HistoryEvent.CaptureReason,
+        timestamp: Date
+    ) -> Bool {
+        guard kind == .windowChanged,
+              reason != .applicationActivation else {
+            return false
+        }
+        let key = [
+            application.bundleIdentifier ?? "pid.\(application.processIdentifier)",
+            reason.rawValue,
+        ].joined(separator: "\u{1f}")
+        defer { lastNativeWindowCaptureByStream[key] = timestamp }
+        guard let previous = lastNativeWindowCaptureByStream[key] else { return false }
+        return timestamp.timeIntervalSince(previous) < 0.25
+    }
+
+    private static func requiresRichSnapshot(for kind: HistoryEvent.Kind) -> Bool {
+        switch kind {
+        case .windowChanged,
+             .mouseClick,
+             .mouseContextMenu,
+             .mouseDrag,
+             .keyboardSubmit:
+            return true
+        case .keyboardTextInput, .keyboardShortcut, .selectionChanged:
+            return false
         }
     }
 
