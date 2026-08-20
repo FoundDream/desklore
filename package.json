@@ -28,7 +28,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
-    "electron-vite-plus": "0.1.0-alpha.0",
+    "electron-vite-plus": "0.1.0-alpha.1",
     "typescript": "^5.9.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9",
     "vite-plus": "0.2.9"
