@@ -25,6 +25,8 @@ const api: ComputerHistoryAPI = {
   openDocument: (id: string) => ipcRenderer.invoke("history:open-document", id),
   deleteDocument: (id: string) => ipcRenderer.invoke("history:delete-document", id),
   revealStorage: () => invoke("history:reveal-storage"),
+  getApplicationIcon: (iconPath: string) =>
+    ipcRenderer.invoke("history:get-application-icon", iconPath),
   onSnapshot: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: DesktopSnapshot): void => {
       listener(snapshot);

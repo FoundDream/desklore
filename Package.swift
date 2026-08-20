@@ -16,10 +16,6 @@ let package = Package(
             name: "ComputerHistoryAgent",
             targets: ["ComputerHistoryAgent"]
         ),
-        .executable(
-            name: "ComputerHistoryEval",
-            targets: ["ComputerHistoryEval"]
-        ),
     ],
     targets: [
         .target(
@@ -29,10 +25,6 @@ let package = Package(
             name: "ComputerHistoryAgent",
             dependencies: ["ComputerHistoryCore"],
             path: "Sources/ComputerHistoryApp"
-        ),
-        .executableTarget(
-            name: "ComputerHistoryEval",
-            dependencies: ["ComputerHistoryCore"]
         ),
         .testTarget(
             name: "ComputerHistoryCoreTests",

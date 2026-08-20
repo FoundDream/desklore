@@ -8,8 +8,8 @@
   "main": "./out/main/index.js",
   "scripts": {
     "native:build": "./scripts/build-agent.sh",
-    "dev": "npm run native:build && electron-vite-plus dev",
-    "dev:ui": "electron-vite-plus dev",
+    "dev": "npm run native:build && electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
+    "dev:ui": "electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
     "build": "npm run native:build && electron-vite-plus build",
     "check": "vp check",
     "test": "vp test run",

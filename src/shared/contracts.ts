@@ -5,6 +5,7 @@ export type RecorderState = "stopped" | "running" | "paused";
 export interface TimelineApplication {
   bundleIdentifier: string;
   name: string;
+  iconPath?: string;
 }
 
 export interface TimelineDocument {
@@ -16,6 +17,7 @@ export interface TimelineDocument {
   activityState?: string;
   applications: TimelineApplication[];
   generatorType: string;
+  generatorFailureReason?: string;
 }
 
 export interface CaptureHealth {
@@ -87,5 +89,6 @@ export interface ComputerHistoryAPI {
   openDocument(id: string): Promise<DesktopSnapshot>;
   deleteDocument(id: string): Promise<DesktopSnapshot>;
   revealStorage(): Promise<DesktopSnapshot>;
+  getApplicationIcon(iconPath: string): Promise<string | undefined>;
   onSnapshot(listener: (snapshot: DesktopSnapshot) => void): () => void;
 }

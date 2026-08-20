@@ -288,23 +288,6 @@ nav button > i.warn {
   box-shadow: 0 0 0 3px #fee2e2;
 }
 
-.sidebar-bottom > p {
-  display: grid;
-  gap: 3px;
-  margin: 0;
-  padding: 0 9px 2px;
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.sidebar-bottom > p span {
-  color: #52525b;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
 .content {
   position: relative;
   min-width: 0;
@@ -337,14 +320,6 @@ nav button > i.warn {
   font-weight: 650;
   line-height: 1.2;
   letter-spacing: -0.025em;
-}
-
-.content-header p {
-  max-width: 620px;
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
 }
 
 button.secondary,
@@ -384,7 +359,7 @@ button.primary:hover {
 
 .archive-summary {
   display: grid;
-  grid-template-columns: 150px 150px 1fr minmax(220px, 1.4fr);
+  grid-template-columns: 1fr 1fr;
   align-items: center;
   width: min(920px, calc(100% - 64px));
   min-height: 82px;
@@ -418,20 +393,6 @@ button.primary:hover {
   font-size: 9px;
 }
 
-.summary-rule {
-  height: 1px;
-  margin: 0 18px;
-  background: var(--border);
-}
-
-.archive-summary p {
-  margin: 0;
-  padding: 0 20px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
 .archive {
   display: grid;
   gap: 24px;
@@ -463,10 +424,11 @@ button.primary:hover {
 }
 
 .timeline-entry > time {
-  padding-top: 19px;
+  align-self: baseline;
   color: var(--muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+  line-height: 1.4;
   text-align: right;
 }
 
@@ -489,6 +451,7 @@ button.primary:hover {
 }
 
 .entry-body {
+  align-self: baseline;
   min-width: 0;
   padding: 17px 18px 16px 6px;
 }
@@ -545,6 +508,22 @@ button.primary:hover {
   line-height: 1.6;
 }
 
+.summary-error {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: -5px 0 13px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.summary-error strong {
+  flex: none;
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .entry-body footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 132px;
@@ -573,17 +552,26 @@ button.primary:hover {
   font-size: 9px;
 }
 
-.app-token i {
+.app-token-icon {
   display: grid;
   place-items: center;
   width: 17px;
   height: 17px;
+  flex: none;
+  overflow: hidden;
   border-radius: 4px;
-  color: #52525b;
   background: #e4e4e7;
-  font-size: 8px;
-  font-style: normal;
-  font-weight: 700;
+}
+
+.app-token-icon.loaded {
+  background: transparent;
+}
+
+.app-token-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .duration {
@@ -640,11 +628,6 @@ button.primary:hover {
   color: var(--foreground);
   font-size: 14px;
   font-weight: 600;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 10px;
 }
 
 .empty-clock {
@@ -722,12 +705,6 @@ button.primary:hover {
   font-weight: 600;
 }
 
-.health-row p {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 9px;
-}
-
 .health-row > b {
   color: var(--muted);
   font-size: 9px;
@@ -776,7 +753,8 @@ button.primary:hover {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+  align-self: start;
 }
 
 .metric-grid > div {
@@ -785,16 +763,11 @@ button.primary:hover {
   padding: 17px 18px;
 }
 
-.metric-grid > div:nth-child(even) {
+.metric-grid > div:nth-child(n + 2) {
   border-left: 1px solid var(--border);
 }
 
-.metric-grid > div:nth-child(n + 3) {
-  border-top: 1px solid var(--border);
-}
-
-.metric-grid span,
-.metric-grid p {
+.metric-grid span {
   overflow: hidden;
   color: var(--muted);
   font-size: 9px;
@@ -819,10 +792,6 @@ button.primary:hover {
   font-weight: 500;
 }
 
-.metric-grid p {
-  margin: 4px 0 0;
-}
-
 .settings-sheet {
   padding: 20px;
 }
@@ -837,14 +806,6 @@ button.primary:hover {
   margin: 0;
   font-size: 13px;
   font-weight: 620;
-}
-
-.settings-copy p {
-  max-width: 620px;
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
 }
 
 .switch {
@@ -1108,18 +1069,6 @@ button.text-danger:hover {
   .connection-notice,
   .error-banner {
     width: min(100% - 40px, 920px);
-  }
-
-  .archive-summary {
-    grid-template-columns: 125px 125px 1fr;
-  }
-
-  .summary-rule {
-    display: none;
-  }
-
-  .archive-summary p {
-    padding-left: 18px;
   }
 
   .health-layout {

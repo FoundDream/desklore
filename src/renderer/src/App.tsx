@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AgentSnapshot, DesktopSnapshot, TimelineDocument } from "../../shared/contracts.js";
+import type {
+  AgentSnapshot,
+  DesktopSnapshot,
+  TimelineApplication,
+  TimelineDocument,
+} from "../../shared/contracts.js";
 
 type View = "timeline" | "health" | "settings";
 
@@ -12,6 +17,87 @@ const activityLabels: Record<string, string> = {
   blocked: "受阻",
   unknown: "状态未知",
 };
+
+const summaryFailureLabels: Record<string, string> = {
+  api_key_missing: "未配置 API Key",
+  invalid_json: "模型返回的不是合法 JSON",
+  invalid_fields: "模型返回字段不完整",
+  invalid_activity_state: "模型返回了未知活动状态",
+  invalid_evidence_ids: "模型引用了无效事件",
+  empty_fields: "模型返回了空标题或描述",
+  content_too_long: "模型返回内容过长",
+  missing_output: "模型没有返回摘要文本",
+  network_timeout: "模型请求超时",
+  network_dns_failed: "模型服务域名无法解析",
+  network_cannot_connect: "无法连接模型服务",
+  network_request_failed: "模型网络请求失败",
+  unexpected_error: "摘要生成出现未知错误",
+};
+
+function summaryFailureLabel(reason: string): string {
+  if (reason.startsWith("http_status_")) {
+    return `模型服务返回 HTTP ${reason.slice("http_status_".length)}`;
+  }
+  if (reason.startsWith("quality_gate_failed:")) return "旧版摘要校验未通过";
+  return summaryFailureLabels[reason] ?? "摘要生成失败";
+}
+
+const applicationIconCache = new Map<string, string | null>();
+const pendingApplicationIcons = new Map<string, Promise<string | undefined>>();
+
+function loadApplicationIcon(iconPath: string): Promise<string | undefined> {
+  const cached = applicationIconCache.get(iconPath);
+  if (cached !== undefined) return Promise.resolve(cached ?? undefined);
+
+  const pending = pendingApplicationIcons.get(iconPath);
+  if (pending) return pending;
+
+  const request = window.computerHistory
+    .getApplicationIcon(iconPath)
+    .then((source) => {
+      applicationIconCache.set(iconPath, source ?? null);
+      return source;
+    })
+    .catch(() => {
+      applicationIconCache.set(iconPath, null);
+      return undefined;
+    })
+    .finally(() => pendingApplicationIcons.delete(iconPath));
+  pendingApplicationIcons.set(iconPath, request);
+  return request;
+}
+
+function ApplicationIcon({ application }: { application: TimelineApplication }) {
+  const iconPath = application.iconPath;
+  const [source, setSource] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    if (!iconPath) {
+      setSource(undefined);
+      return;
+    }
+
+    const cached = applicationIconCache.get(iconPath);
+    if (cached !== undefined) {
+      setSource(cached ?? undefined);
+      return;
+    }
+
+    void loadApplicationIcon(iconPath).then((icon) => {
+      if (active) setSource(icon);
+    });
+    return () => {
+      active = false;
+    };
+  }, [iconPath]);
+
+  return (
+    <span className={`app-token-icon ${source ? "loaded" : ""}`} aria-hidden="true">
+      {source && <img src={source} alt="" />}
+    </span>
+  );
+}
 
 function Icon({ name }: { name: "timeline" | "health" | "settings" | "folder" }) {
   const paths = {
@@ -51,12 +137,10 @@ function Icon({ name }: { name: "timeline" | "health" | "settings" | "folder" })
 function PageHeader({
   eyebrow,
   title,
-  description,
   action,
 }: {
   eyebrow: string;
   title: string;
-  description: string;
   action?: ReactNode;
 }) {
   return (
@@ -64,7 +148,6 @@ function PageHeader({
       <div>
         <span className="section-kicker">{eyebrow}</span>
         <h1>{title}</h1>
-        <p>{description}</p>
       </div>
       {action}
     </header>
@@ -182,9 +265,6 @@ function Sidebar({
             <small>{agent?.activeApplication?.name ?? "等待活动"}</small>
           </div>
         </button>
-        <p>
-          <span>仅存本地</span> 原始活动保留在本机，界面只接收经过脱敏的时间线数据。
-        </p>
       </div>
     </aside>
   );
@@ -216,6 +296,15 @@ function TimelineCard({
           )}
         </div>
         <p>{document.description}</p>
+        {document.generatorFailureReason && (
+          <div className="summary-error" role="status">
+            <strong>摘要失败</strong>
+            <span>
+              {summaryFailureLabel(document.generatorFailureReason)}（
+              {document.generatorFailureReason}），稍后自动重试
+            </span>
+          </div>
+        )}
         <footer>
           <div className="app-list">
             {document.applications.map((application) => (
@@ -224,7 +313,7 @@ function TimelineCard({
                 title={application.bundleIdentifier}
                 key={application.bundleIdentifier}
               >
-                <i>{application.name.slice(0, 1).toUpperCase()}</i>
+                <ApplicationIcon application={application} />
                 {application.name}
               </span>
             ))}
@@ -278,7 +367,6 @@ function TimelineView({
       <PageHeader
         eyebrow="活动记录"
         title="时间线"
-        description="查看按十分钟整理的本地活动片段。内容经过隐私过滤，并以 Markdown 长期保存。"
         action={
           <button
             className="secondary"
@@ -304,8 +392,6 @@ function TimelineView({
           </strong>
           <span>出现的应用</span>
         </div>
-        <div className="summary-rule" />
-        <p>Markdown 是长期记录，原始 JSONL 只作为短期证据保留。</p>
       </div>
       <section className="archive">
         {!agent ? (
@@ -317,7 +403,6 @@ function TimelineView({
           <div className="empty-state">
             <div className="empty-clock" />
             <h2>还没有时间线</h2>
-            <p>首个有活动的完整十分钟分段会出现在这里。</p>
           </div>
         ) : (
           days.map((documents) => (
@@ -348,16 +433,15 @@ function HealthView({
 }) {
   const health = agent?.health;
   const rows = [
-    ["辅助功能权限", health?.accessibilityGranted, "读取其他应用的窗口与控件结构"],
-    ["全局交互监听", health?.interactionMonitorActive, "识别点击、Return 与组合快捷键"],
-    ["AX 语义监听", health?.axObserverActive, "订阅文本与选择变化"],
+    ["辅助功能权限", health?.accessibilityGranted],
+    ["全局交互监听", health?.interactionMonitorActive],
+    ["AX 语义监听", health?.axObserverActive],
   ] as const;
   return (
     <>
       <PageHeader
         eyebrow="原生采集器"
         title="采集健康"
-        description="Electron 负责展示，下面的数据来自签名后的 Swift Agent。"
         action={
           <button
             className="secondary"
@@ -369,14 +453,13 @@ function HealthView({
       />
       <section className="health-layout">
         <div className="health-primary">
-          {rows.map(([label, healthy, description]) => (
+          {rows.map(([label, healthy]) => (
             <div className="health-row" key={label}>
               <span className={healthy ? "health-icon ok" : "health-icon warn"}>
                 {healthy ? "✓" : "!"}
               </span>
               <div>
                 <strong>{label}</strong>
-                <p>{description}</p>
               </div>
               <b>{healthy ? "正常" : "未就绪"}</b>
             </div>
@@ -393,20 +476,11 @@ function HealthView({
         </div>
         <div className="metric-grid">
           <div>
-            <span>AX 树</span>
-            <strong>
-              {health?.lastAXSnapshotNodeCount ?? 0}
-              <small> / {health?.lastAXVisitedNodeCount ?? 0}</small>
-            </strong>
-            <p>保存 / 遍历节点</p>
-          </div>
-          <div>
             <span>采集耗时</span>
             <strong>
               {Math.round(health?.lastAXCaptureDurationMilliseconds ?? 0)}
               <small> ms</small>
             </strong>
-            <p>最近一次快照</p>
           </div>
           <div>
             <span>语义事件</span>
@@ -415,14 +489,10 @@ function HealthView({
                 (health?.keyboardShortcutCount ?? 0) +
                 (health?.textInputEventCount ?? 0)}
             </strong>
-            <p>提交、快捷键与文本</p>
           </div>
           <div>
             <span>采集队列</span>
             <strong>{health?.axCaptureBacklog ?? 0}</strong>
-            <p>
-              慢采集 {health?.axSlowCaptureCount ?? 0} · 截断 {health?.axTruncatedCaptureCount ?? 0}
-            </p>
           </div>
         </div>
       </section>
@@ -451,16 +521,11 @@ function SettingsView({
   }, [agent?.llm.enabled, agent?.llm.model, agent?.llm.endpoint]);
   return (
     <>
-      <PageHeader
-        eyebrow="偏好设置"
-        title="设置"
-        description="配置语义摘要与观察范围。密钥由 Swift Agent 写入 macOS Keychain。"
-      />
+      <PageHeader eyebrow="偏好设置" title="设置" />
       <section className="settings-sheet">
         <div className="settings-section">
           <div className="settings-copy">
             <h2>语义摘要</h2>
-            <p>对完成的十分钟片段生成标题、描述、活动状态和证据引用；失败时自动使用规则摘要。</p>
           </div>
           <label className="switch">
             <input
@@ -521,7 +586,6 @@ function SettingsView({
         <div className="settings-section observation">
           <div className="settings-copy">
             <h2>当前观察范围</h2>
-            <p>默认观察所有普通应用和域名；私密窗口、安全输入与敏感字段始终排除。</p>
           </div>
         </div>
         <div className="scope-list">

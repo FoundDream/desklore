@@ -1,19 +1,41 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import type { AgentConnectionState, AgentSnapshot, DesktopSnapshot } from "../shared/contracts.js";
+import type {
+  AgentConnectionState,
+  CaptureHealth,
+  RecorderState,
+  TimelineApplication,
+} from "../shared/contracts.js";
+import { normalizeHistoryEvent, type HistoryEvent } from "./history/types.js";
+
+export interface NativeAgentSnapshot {
+  recorderState: RecorderState;
+  activeApplication?: TimelineApplication;
+  activeDomain?: string;
+  health: CaptureHealth;
+  lastError?: string;
+}
+
+export interface CollectorConnection {
+  connectionState: AgentConnectionState;
+  agent?: NativeAgentSnapshot;
+  connectionError?: string;
+}
 
 interface AgentMessage {
-  type: "snapshot" | "error";
+  type: "snapshot" | "event" | "response" | "error";
   requestID?: string;
-  snapshot?: AgentSnapshot;
+  snapshot?: NativeAgentSnapshot;
+  event?: unknown;
+  payload?: unknown;
   error?: string;
 }
 
 interface PendingRequest {
-  resolve: (snapshot: DesktopSnapshot) => void;
+  resolve: (message: AgentMessage) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }
@@ -21,7 +43,7 @@ interface PendingRequest {
 export class AgentClient extends EventEmitter {
   private process?: ChildProcessWithoutNullStreams;
   private state: AgentConnectionState = "stopped";
-  private snapshot?: AgentSnapshot;
+  private snapshot?: NativeAgentSnapshot;
   private connectionError?: string;
   private stdoutBuffer = "";
   private readonly pending = new Map<string, PendingRequest>();
@@ -30,7 +52,7 @@ export class AgentClient extends EventEmitter {
     super();
   }
 
-  current(): DesktopSnapshot {
+  current(): CollectorConnection {
     return {
       connectionState: this.state,
       agent: this.snapshot,
@@ -38,7 +60,7 @@ export class AgentClient extends EventEmitter {
     };
   }
 
-  async start(): Promise<DesktopSnapshot> {
+  async start(): Promise<CollectorConnection> {
     if (this.process && this.process.exitCode === null) return this.current();
     const executable = await this.findExecutable();
     if (!executable) {
@@ -66,6 +88,12 @@ export class AgentClient extends EventEmitter {
       this.process = undefined;
       this.snapshot = undefined;
       const expected = code === 0 || signal === "SIGTERM";
+      if (!expected) {
+        console.error(
+          `[computer-history] Native agent exited unexpectedly: ${code ?? signal}`,
+          this.connectionError ?? "No native error output",
+        );
+      }
       this.rejectPending(new Error("Native agent stopped"));
       this.updateState(
         expected ? "stopped" : "failed",
@@ -75,7 +103,7 @@ export class AgentClient extends EventEmitter {
     return this.current();
   }
 
-  async stop(): Promise<DesktopSnapshot> {
+  async stop(): Promise<CollectorConnection> {
     const child = this.process;
     if (!child || child.exitCode !== null) {
       this.snapshot = undefined;
@@ -102,14 +130,31 @@ export class AgentClient extends EventEmitter {
     this.rejectPending(new Error("Application is quitting"));
   }
 
-  async request(command: string, payload: Record<string, unknown> = {}): Promise<DesktopSnapshot> {
+  async request(
+    command: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<CollectorConnection> {
+    await this.requestMessage(command, payload);
+    return this.current();
+  }
+
+  async requestPayload<T>(
+    command: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<T | undefined> {
+    return (await this.requestMessage(command, payload)).payload as T | undefined;
+  }
+
+  private async requestMessage(
+    command: string,
+    payload: Record<string, unknown>,
+  ): Promise<AgentMessage> {
     if (!this.process || this.process.exitCode !== null) await this.start();
     if (!this.process || this.process.exitCode !== null) {
       throw new Error(this.connectionError ?? "Native agent is unavailable");
     }
-
     const id = randomUUID();
-    return new Promise<DesktopSnapshot>((resolve, reject) => {
+    return new Promise<AgentMessage>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Native agent timed out while handling ${command}`));
@@ -150,10 +195,18 @@ export class AgentClient extends EventEmitter {
       this.updateState("failed", "Native agent emitted invalid JSON");
       return;
     }
-
     if (message.snapshot) {
       this.snapshot = message.snapshot;
       this.updateState("connected");
+    }
+    if (message.type === "event" && message.event) {
+      try {
+        this.emit("event", normalizeHistoryEvent(message.event) satisfies HistoryEvent);
+      } catch (error) {
+        this.connectionError = error instanceof Error ? error.message : "Invalid native event";
+        console.error("[computer-history] Rejected an invalid native event:", error);
+        this.emit("snapshot", this.current());
+      }
     }
     if (message.requestID) {
       const pending = this.pending.get(message.requestID);
@@ -163,7 +216,7 @@ export class AgentClient extends EventEmitter {
         if (message.type === "error") {
           pending.reject(new Error(message.error ?? "Native agent command failed"));
         } else {
-          pending.resolve(this.current());
+          pending.resolve(message);
         }
       }
     }

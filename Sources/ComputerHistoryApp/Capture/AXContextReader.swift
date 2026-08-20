@@ -136,18 +136,8 @@ final class AXContextReader {
         let selectedText = targetElement.flatMap {
             string(attribute: kAXSelectedTextAttribute as CFString, from: $0)
         }
-        let resolvedKind: HistoryEvent.Kind
-        if kind == .keyboardShortcut {
-            resolvedKind = KeyboardEventClassifier.classify(
-                keyEquivalent: capture?.keyEquivalent,
-                modifiers: capture?.modifiers,
-                target: target
-            )
-        } else {
-            resolvedKind = kind
-        }
         let interaction = interactionContext(
-            kind: resolvedKind,
+            kind: kind,
             target: target,
             selectedText: selectedText,
             capture: capture
@@ -163,7 +153,7 @@ final class AXContextReader {
 
         let event = HistoryEvent(
             timestamp: timestamp,
-            kind: resolvedKind,
+            kind: kind,
             application: .init(
                 bundleIdentifier: application.bundleIdentifier,
                 name: application.name

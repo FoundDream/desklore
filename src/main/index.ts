@@ -7,18 +7,38 @@ import {
   Tray,
   type IpcMainInvokeEvent,
 } from "electron";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { DesktopSnapshot, LLMConfigurationInput } from "../shared/contracts.js";
 import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
+import { HistoryService } from "./history/service.js";
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
 
 const projectRoot = process.cwd();
-const agent = new AgentClient(
+const collector = new AgentClient(
   agentExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
 );
+const history = new HistoryService(
+  collector,
+  path.join(app.getPath("appData"), "ComputerHistoryDesktop"),
+);
+const applicationIconCache = new Map<string, Promise<string | undefined>>();
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const preferredICNSImageTypes = [
+  "icp6",
+  "ic12",
+  "ic07",
+  "ic13",
+  "ic08",
+  "ic09",
+  "ic10",
+  "icp5",
+  "ic11",
+  "icp4",
+];
 
 function assertRenderer(event: IpcMainInvokeEvent): void {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
@@ -31,6 +51,53 @@ function documentID(value: unknown): string {
     throw new Error("Invalid timeline document ID");
   }
   return value;
+}
+
+function validatedApplicationIconPath(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 4_096) {
+    throw new Error("Invalid application icon path");
+  }
+  const normalized = path.normalize(value);
+  const resourcesSegment = `${path.sep}Contents${path.sep}Resources${path.sep}`;
+  if (
+    !path.isAbsolute(normalized) ||
+    path.extname(normalized).toLowerCase() !== ".icns" ||
+    !normalized.includes(resourcesSegment)
+  ) {
+    throw new Error("Invalid application icon path");
+  }
+  return normalized;
+}
+
+async function readICNSIconDataURL(iconPath: string): Promise<string | undefined> {
+  const data = await readFile(iconPath);
+  if (data.length < 8 || data.toString("ascii", 0, 4) !== "icns") return undefined;
+
+  const images = new Map<string, Buffer>();
+  let offset = 8;
+  while (offset + 8 <= data.length) {
+    const type = data.toString("ascii", offset, offset + 4);
+    const length = data.readUInt32BE(offset + 4);
+    if (length < 8 || offset + length > data.length) break;
+    const payload = data.subarray(offset + 8, offset + length);
+    const signatureOffset = payload.indexOf(pngSignature);
+    if (signatureOffset >= 0) images.set(type, payload.subarray(signatureOffset));
+    offset += length;
+  }
+
+  const image = preferredICNSImageTypes
+    .map((type) => images.get(type))
+    .find((candidate) => candidate !== undefined);
+  return image ? `data:image/png;base64,${image.toString("base64")}` : undefined;
+}
+
+function applicationIconDataURL(iconPath: string): Promise<string | undefined> {
+  const cached = applicationIconCache.get(iconPath);
+  if (cached) return cached;
+
+  const request = readICNSIconDataURL(iconPath).catch(() => undefined);
+  applicationIconCache.set(iconPath, request);
+  return request;
 }
 
 function showWindow(): void {
@@ -58,10 +125,10 @@ function rebuildTray(snapshot: DesktopSnapshot): void {
       { label: "打开时间线", click: showWindow },
       { type: "separator" },
       snapshot.connectionState !== "connected"
-        ? { label: "启动采集器", click: () => void agent.start() }
+        ? { label: "启动采集器", click: () => void history.start() }
         : running
-          ? { label: "暂停记录", click: () => void agent.request("pause") }
-          : { label: "继续记录", click: () => void agent.request("resume") },
+          ? { label: "暂停记录", click: () => void history.pause() }
+          : { label: "继续记录", click: () => void history.resume() },
       { type: "separator" },
       {
         label: "退出 Computer History",
@@ -110,33 +177,60 @@ async function createWindow(): Promise<void> {
 function registerIPC(): void {
   ipcMain.handle("history:get-snapshot", (event) => {
     assertRenderer(event);
-    return agent.current();
+    return history.current();
+  });
+  ipcMain.handle("history:get-application-icon", (event, value: unknown) => {
+    assertRenderer(event);
+    return applicationIconDataURL(validatedApplicationIconPath(value));
   });
   ipcMain.handle("history:start-agent", async (event) => {
     assertRenderer(event);
-    return agent.start();
+    return history.start();
   });
   ipcMain.handle("history:stop-agent", async (event) => {
     assertRenderer(event);
-    return agent.stop();
+    return history.stop();
   });
-
-  const command = (channel: string, name: string): void => {
-    ipcMain.handle(channel, async (event) => {
-      assertRenderer(event);
-      return agent.request(name);
-    });
-  };
-  command("history:pause", "pause");
-  command("history:resume", "resume");
-  command("history:refresh-permissions", "refreshPermissions");
-  command("history:request-permissions", "requestPermissions");
-  command("history:allow-active-application", "allowActiveApplication");
-  command("history:block-active-application", "blockActiveApplication");
-  command("history:allow-active-domain", "allowActiveDomain");
-  command("history:block-active-domain", "blockActiveDomain");
-  command("history:remove-llm-key", "removeLLMAPIKey");
-  command("history:reveal-storage", "revealStorage");
+  ipcMain.handle("history:pause", async (event) => {
+    assertRenderer(event);
+    return history.pause();
+  });
+  ipcMain.handle("history:resume", async (event) => {
+    assertRenderer(event);
+    return history.resume();
+  });
+  ipcMain.handle("history:refresh-permissions", async (event) => {
+    assertRenderer(event);
+    return history.requestNative("refreshPermissions");
+  });
+  ipcMain.handle("history:request-permissions", async (event) => {
+    assertRenderer(event);
+    return history.requestNative("requestPermissions");
+  });
+  ipcMain.handle("history:allow-active-application", async (event) => {
+    assertRenderer(event);
+    return history.setActiveApplicationAllowed(true);
+  });
+  ipcMain.handle("history:block-active-application", async (event) => {
+    assertRenderer(event);
+    return history.setActiveApplicationAllowed(false);
+  });
+  ipcMain.handle("history:allow-active-domain", async (event) => {
+    assertRenderer(event);
+    return history.setActiveDomainAllowed(true);
+  });
+  ipcMain.handle("history:block-active-domain", async (event) => {
+    assertRenderer(event);
+    return history.setActiveDomainAllowed(false);
+  });
+  ipcMain.handle("history:remove-llm-key", async (event) => {
+    assertRenderer(event);
+    return history.removeLLMAPIKey();
+  });
+  ipcMain.handle("history:reveal-storage", async (event) => {
+    assertRenderer(event);
+    return history.revealStorage();
+  });
 
   ipcMain.handle("history:configure-llm", async (event, input: LLMConfigurationInput) => {
     assertRenderer(event);
@@ -152,42 +246,53 @@ function registerIPC(): void {
     ) {
       throw new Error("Invalid LLM configuration");
     }
-    return agent.request("configureLLM", input as unknown as Record<string, unknown>);
+    return history.configureLLM(input);
   });
   ipcMain.handle("history:open-document", async (event, id: unknown) => {
     assertRenderer(event);
-    return agent.request("openDocument", { documentID: documentID(id) });
+    return history.openDocument(documentID(id));
   });
   ipcMain.handle("history:delete-document", async (event, id: unknown) => {
     assertRenderer(event);
-    return agent.request("deleteDocument", { documentID: documentID(id) });
+    return history.deleteDocument(documentID(id));
   });
 }
 
-if (!app.requestSingleInstanceLock()) {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  console.error(
+    "[computer-history] Another desktop instance already owns the single-instance lock.",
+  );
   app.quit();
 } else {
   app.on("second-instance", showWindow);
-  void app.whenReady().then(async () => {
-    registerIPC();
-    await createWindow();
-    tray = new Tray(trayIcon());
-    tray.on("click", showWindow);
-    rebuildTray(agent.current());
-    agent.on("snapshot", (snapshot: DesktopSnapshot) => {
-      rebuildTray(snapshot);
-      if (!mainWindow?.isDestroyed()) {
-        mainWindow?.webContents.send("history:snapshot", snapshot);
-      }
+  void app
+    .whenReady()
+    .then(async () => {
+      registerIPC();
+      await createWindow();
+      tray = new Tray(trayIcon());
+      tray.on("click", showWindow);
+      rebuildTray(history.current());
+      history.on("snapshot", (snapshot: DesktopSnapshot) => {
+        rebuildTray(snapshot);
+        if (!mainWindow?.isDestroyed()) {
+          mainWindow?.webContents.send("history:snapshot", snapshot);
+        }
+      });
+      await history.start();
+    })
+    .catch((error: unknown) => {
+      console.error("[computer-history] Failed to start the desktop app:", error);
+      app.exit(1);
     });
-    await agent.start();
-  });
 }
 
 app.on("activate", showWindow);
 app.on("before-quit", () => {
   quitting = true;
-  agent.terminate();
+  history.terminate();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

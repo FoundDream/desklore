@@ -6,27 +6,13 @@ import Foundation
 private struct AgentCommand: Decodable {
     let id: String
     let command: String
-    let documentID: String?
-    let enabled: Bool?
-    let model: String?
-    let endpoint: String?
-    let apiKey: String?
+    let bundleIdentifiers: [String]?
 }
 
 private struct AgentApplicationDTO: Encodable {
     let bundleIdentifier: String
     let name: String
-}
-
-private struct AgentTimelineDTO: Encodable {
-    let id: String
-    let startedAt: String
-    let endedAt: String
-    let title: String
-    let description: String
-    let activityState: String?
-    let applications: [AgentApplicationDTO]
-    let generatorType: String
+    let iconPath: String?
 }
 
 private struct AgentHealthDTO: Encodable {
@@ -48,23 +34,11 @@ private struct AgentHealthDTO: Encodable {
     let axCaptureBacklog: Int
 }
 
-private struct AgentLLMDTO: Encodable {
-    let enabled: Bool
-    let model: String
-    let endpoint: String
-    let apiKeyConfigured: Bool
-}
-
 private struct AgentSnapshotDTO: Encodable {
     let recorderState: String
-    let storageRoot: String
     let activeApplication: AgentApplicationDTO?
-    let activeApplicationAllowed: Bool?
     let activeDomain: String?
-    let activeDomainAllowed: Bool?
-    let documents: [AgentTimelineDTO]
     let health: AgentHealthDTO
-    let llm: AgentLLMDTO
     let lastError: String?
 }
 
@@ -72,6 +46,21 @@ private struct AgentSnapshotMessage: Encodable {
     let type = "snapshot"
     let requestID: String?
     let snapshot: AgentSnapshotDTO
+}
+
+private struct AgentEventMessage: Encodable {
+    let type = "event"
+    let event: HistoryEvent
+}
+
+private struct AgentIconPayload: Encodable {
+    let iconPaths: [String: String]
+}
+
+private struct AgentIconResponse: Encodable {
+    let type = "response"
+    let requestID: String
+    let payload: AgentIconPayload
 }
 
 private struct AgentErrorMessage: Encodable {
@@ -119,27 +108,27 @@ private final class AgentInputReader: @unchecked Sendable {
             buffer.removeSubrange(...newline)
         }
         lock.unlock()
-        for line in lines where !line.isEmpty {
-            onLine(line)
-        }
+        for line in lines where !line.isEmpty { onLine(line) }
     }
 }
 
 @MainActor
 final class AgentBridge {
     private let engine: HistoryEngine
-    private let encoder = JSONEncoder()
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
     private var cancellables: Set<AnyCancellable> = []
+    private var applicationIconPaths: [String: String] = [:]
+    private var unresolvedApplicationIconIdentifiers: Set<String> = []
     private lazy var inputReader = AgentInputReader(
         onLine: { [weak self] data in
-            Task { @MainActor [weak self] in
-                self?.handle(data)
-            }
+            Task { @MainActor [weak self] in self?.handle(data) }
         },
         onEOF: {
-            Task { @MainActor in
-                NSApplication.shared.terminate(nil)
-            }
+            Task { @MainActor in NSApplication.shared.terminate(nil) }
         }
     )
 
@@ -148,8 +137,11 @@ final class AgentBridge {
     }
 
     func start() {
+        engine.onEvent = { [weak self] event in
+            self?.write(AgentEventMessage(event: event))
+        }
         engine.objectWillChange
-            .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] in self?.sendSnapshot() }
             .store(in: &cancellables)
         inputReader.start()
@@ -157,6 +149,7 @@ final class AgentBridge {
     }
 
     func stop() {
+        engine.onEvent = nil
         inputReader.stop()
         cancellables.removeAll()
     }
@@ -181,59 +174,27 @@ final class AgentBridge {
             engine.refreshCapturePermissions()
         case "requestPermissions":
             engine.requestAccessibilityPermission()
-        case "allowActiveApplication":
-            engine.allowActiveApplication()
-        case "blockActiveApplication":
-            engine.blockActiveApplication()
-        case "allowActiveDomain":
-            engine.allowActiveDomain()
-        case "blockActiveDomain":
-            engine.blockActiveDomain()
-        case "configureLLM":
-            guard let enabled = command.enabled,
-                  let model = command.model,
-                  let endpoint = command.endpoint else {
-                sendError("Missing LLM configuration", requestID: command.id)
-                return
-            }
-            engine.configureLLM(
-                enabled: enabled,
-                model: model,
-                endpoint: endpoint,
-                apiKey: command.apiKey ?? ""
+        case "resolveApplicationIcons":
+            let identifiers = command.bundleIdentifiers ?? []
+            let paths = Dictionary(uniqueKeysWithValues: identifiers.compactMap { identifier in
+                applicationIconPath(for: identifier).map { (identifier, $0) }
+            })
+            write(
+                AgentIconResponse(
+                    requestID: command.id,
+                    payload: AgentIconPayload(iconPaths: paths)
+                )
             )
-        case "removeLLMAPIKey":
-            engine.removeLLMAPIKey()
-        case "openDocument":
-            guard let document = document(command.documentID) else {
-                sendError("Timeline document not found", requestID: command.id)
-                return
-            }
-            engine.openMarkdown(document)
-        case "deleteDocument":
-            guard let document = document(command.documentID) else {
-                sendError("Timeline document not found", requestID: command.id)
-                return
-            }
-            engine.delete(document)
-        case "revealStorage":
-            engine.revealStorageInFinder()
+            return
         case "quit":
             sendSnapshot(requestID: command.id)
-            DispatchQueue.main.async {
-                NSApplication.shared.terminate(nil)
-            }
+            DispatchQueue.main.async { NSApplication.shared.terminate(nil) }
             return
         default:
             sendError("Unsupported agent command", requestID: command.id)
             return
         }
         sendSnapshot(requestID: command.id)
-    }
-
-    private func document(_ id: String?) -> TimelineDocument? {
-        guard let id else { return nil }
-        return engine.documents.first { $0.id == id }
     }
 
     private func sendSnapshot(requestID: String? = nil) {
@@ -253,37 +214,8 @@ final class AgentBridge {
     private func snapshot() -> AgentSnapshotDTO {
         AgentSnapshotDTO(
             recorderState: engine.state.rawValue,
-            storageRoot: engine.storageRoot.path,
-            activeApplication: engine.activeApplication.map {
-                AgentApplicationDTO(
-                    bundleIdentifier: $0.bundleIdentifier,
-                    name: $0.name
-                )
-            },
-            activeApplicationAllowed: engine.activeApplication == nil
-                ? nil
-                : engine.isActiveApplicationAllowed(),
+            activeApplication: engine.activeApplication.map(applicationDTO),
             activeDomain: engine.activeDomain,
-            activeDomainAllowed: engine.activeDomain == nil
-                ? nil
-                : engine.isActiveDomainAllowed(),
-            documents: engine.documents.map { document in
-                AgentTimelineDTO(
-                    id: document.id,
-                    startedAt: Self.dateString(document.startedAt),
-                    endedAt: Self.dateString(document.endedAt),
-                    title: document.title,
-                    description: document.description,
-                    activityState: document.activityState?.rawValue,
-                    applications: document.applications.map {
-                        AgentApplicationDTO(
-                            bundleIdentifier: $0.bundleIdentifier,
-                            name: $0.name
-                        )
-                    },
-                    generatorType: document.generator.type
-                )
-            },
             health: AgentHealthDTO(
                 accessibilityGranted: engine.accessibilityGranted,
                 interactionMonitorActive: engine.interactionMonitorActive,
@@ -303,19 +235,43 @@ final class AgentBridge {
                 axTruncatedCaptureCount: engine.axTruncatedCaptureCount,
                 axCaptureBacklog: engine.axCaptureBacklog
             ),
-            llm: AgentLLMDTO(
-                enabled: engine.llmEnabled,
-                model: engine.llmModel,
-                endpoint: engine.llmEndpoint,
-                apiKeyConfigured: engine.llmAPIKeyConfigured
-            ),
             lastError: engine.lastError
         )
     }
 
-    private static func dateString(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
+    private func applicationDTO(
+        _ application: HistoryEvent.Application
+    ) -> AgentApplicationDTO {
+        AgentApplicationDTO(
+            bundleIdentifier: application.bundleIdentifier,
+            name: application.name,
+            iconPath: applicationIconPath(for: application.bundleIdentifier)
+        )
+    }
+
+    private func applicationIconPath(for bundleIdentifier: String) -> String? {
+        if let cached = applicationIconPaths[bundleIdentifier] { return cached }
+        guard !unresolvedApplicationIconIdentifiers.contains(bundleIdentifier),
+              let bundleURL = NSWorkspace.shared.urlForApplication(
+                  withBundleIdentifier: bundleIdentifier
+              ),
+              let bundle = Bundle(url: bundleURL),
+              let iconName = bundle.object(
+                  forInfoDictionaryKey: "CFBundleIconFile"
+              ) as? String else {
+            unresolvedApplicationIconIdentifiers.insert(bundleIdentifier)
+            return nil
+        }
+        let iconExtension = (iconName as NSString).pathExtension
+        let iconResource = (iconName as NSString).deletingPathExtension
+        guard let iconURL = bundle.url(
+            forResource: iconResource,
+            withExtension: iconExtension.isEmpty ? "icns" : iconExtension
+        ) else {
+            unresolvedApplicationIconIdentifiers.insert(bundleIdentifier)
+            return nil
+        }
+        applicationIconPaths[bundleIdentifier] = iconURL.path
+        return iconURL.path
     }
 }
