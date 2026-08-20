@@ -314,6 +314,13 @@ nav button > i.warn {
   letter-spacing: -0.025em;
 }
 
+.header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
 button.secondary,
 button.primary {
   display: inline-flex;
@@ -481,13 +488,66 @@ button.primary:hover {
   padding: 0 0 72px;
 }
 
-.day-group > h2 {
-  margin: 0 0 9px 2px;
+.day-switcher {
+  display: grid;
+  grid-template-columns: 26px minmax(96px, 118px) 26px;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.day-switcher > button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
   color: #52525b;
-  font-size: 11px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.day-switcher > button:hover:not(:disabled) {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.day-switcher > button:disabled {
+  color: var(--muted-soft);
+  cursor: default;
+}
+
+.day-switcher-current {
+  min-width: 0;
+}
+
+.day-switcher-current select {
+  width: 100%;
+  height: 28px;
+  border: 0;
+  color: var(--foreground);
+  background: transparent;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
+  text-align: center;
+  cursor: pointer;
+}
+
+.day-switcher-current select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+.day-switcher svg {
+  width: 14px;
+  height: 14px;
 }
 
 .timeline-entry {

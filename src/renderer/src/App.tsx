@@ -197,6 +197,14 @@ function durationLabel(document: TimelineDocument): string {
   return `${minutes} 分钟`;
 }
 
+function Chevron({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
+    </svg>
+  );
+}
+
 function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
   if (!desktop || desktop.connectionState === "connected") return null;
   const labels = {
@@ -390,6 +398,65 @@ function TimelineCard({
   );
 }
 
+interface TimelineDay {
+  date: string;
+  documents: TimelineDocument[];
+}
+
+function DaySwitcher({
+  days,
+  selectedDate,
+  onSelect,
+}: {
+  days: TimelineDay[];
+  selectedDate: string;
+  onSelect: (date: string) => void;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    days.findIndex((day) => day.date === selectedDate),
+  );
+  const selectedDay = days[selectedIndex];
+  const olderDay = days[selectedIndex + 1];
+  const newerDay = days[selectedIndex - 1];
+
+  return (
+    <div className="day-switcher" role="group" aria-label="切换时间线日期">
+      <button
+        type="button"
+        disabled={!olderDay}
+        onClick={() => olderDay && onSelect(olderDay.date)}
+        aria-label="查看更早日期"
+        title="查看更早日期"
+      >
+        <Chevron direction="left" />
+      </button>
+      <div className="day-switcher-current">
+        <select
+          aria-label="选择日期"
+          value={selectedDay.date}
+          onChange={(event) => onSelect(event.target.value)}
+        >
+          {days.map((day) => (
+            <option key={day.date} value={day.date}>
+              {dayLabel(day.documents[0].startedAt)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <button
+        type="button"
+        disabled={!newerDay}
+        onClick={() => newerDay && onSelect(newerDay.date)}
+        aria-label="查看更晚日期"
+        title="查看更晚日期"
+      >
+        <Chevron direction="right" />
+      </button>
+    </div>
+  );
+}
+
 function TimelineView({
   agent,
   run,
@@ -400,14 +467,24 @@ function TimelineView({
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<HistorySearchResponse>();
   const [searching, setSearching] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>();
   const days = useMemo(() => {
     const groups = new Map<string, TimelineDocument[]>();
-    for (const document of agent?.documents ?? []) {
+    const documents = [...(agent?.documents ?? [])].sort(
+      (lhs, rhs) => Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt),
+    );
+    for (const document of documents) {
       const key = dateKey(document.startedAt);
       groups.set(key, [...(groups.get(key) ?? []), document]);
     }
-    return [...groups.values()];
+    return [...groups.entries()].map(([date, documents]) => ({ date, documents }));
   }, [agent?.documents]);
+  const selectedDay = days.find((day) => day.date === selectedDate) ?? days[0];
+
+  useEffect(() => {
+    if (selectedDate && days.some((day) => day.date === selectedDate)) return;
+    setSelectedDate(days[0]?.date);
+  }, [days, selectedDate]);
 
   const action = async (name: "open" | "delete", id: string): Promise<void> => {
     await run(() =>
@@ -437,13 +514,18 @@ function TimelineView({
         eyebrow="活动记录"
         title="时间线"
         action={
-          <button
-            className="secondary"
-            onClick={() => void run(() => window.computerHistory.revealStorage())}
-          >
-            <Icon name="folder" />
-            显示文件
-          </button>
+          <div className="header-actions">
+            <button
+              className="secondary"
+              onClick={() => void run(() => window.computerHistory.revealStorage())}
+            >
+              <Icon name="folder" />
+              显示文件
+            </button>
+            {selectedDay && (
+              <DaySwitcher days={days} selectedDate={selectedDay.date} onSelect={setSelectedDate} />
+            )}
+          </div>
         }
       />
       <div className="archive-summary">
@@ -509,21 +591,18 @@ function TimelineView({
             <div className="empty-clock" />
             <h2>还没有时间线</h2>
           </div>
-        ) : (
-          days.map((documents) => (
-            <div className="day-group" key={dateKey(documents[0].startedAt)}>
-              <h2>{dayLabel(documents[0].startedAt)}</h2>
-              {documents.map((document, index) => (
-                <TimelineCard
-                  key={document.id}
-                  document={document}
-                  isLast={index === documents.length - 1}
-                  onAction={action}
-                />
-              ))}
-            </div>
-          ))
-        )}
+        ) : selectedDay ? (
+          <div className="day-group" key={selectedDay.date}>
+            {selectedDay.documents.map((document, index) => (
+              <TimelineCard
+                key={document.id}
+                document={document}
+                isLast={index === selectedDay.documents.length - 1}
+                onAction={action}
+              />
+            ))}
+          </div>
+        ) : null}
       </section>
     </>
   );
