@@ -12,6 +12,18 @@ public struct HistoryEvent: Codable, Equatable, Identifiable, Sendable {
         case selectionChanged = "selection.changed"
     }
 
+    public enum CaptureReason: String, Codable, CaseIterable, Sendable {
+        case applicationActivation = "application_activation"
+        case windowFocus = "window_focus"
+        case titleChange = "title_change"
+        case focusChange = "focus_change"
+        case poll
+        case axValue = "ax_value"
+        case axSelection = "ax_selection"
+        case mouse
+        case keyboard
+    }
+
     public struct Application: Codable, Equatable, Hashable, Sendable {
         public let bundleIdentifier: String
         public let name: String
@@ -129,6 +141,7 @@ public struct HistoryEvent: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let timestamp: Date
     public let kind: Kind
+    public let captureReason: CaptureReason?
     public let occurrenceCount: Int?
     public let application: Application
     public let window: Window?
@@ -140,6 +153,7 @@ public struct HistoryEvent: Codable, Equatable, Identifiable, Sendable {
         id: UUID = UUID(),
         timestamp: Date,
         kind: Kind,
+        captureReason: CaptureReason? = nil,
         occurrenceCount: Int? = nil,
         application: Application,
         window: Window? = nil,
@@ -150,6 +164,7 @@ public struct HistoryEvent: Codable, Equatable, Identifiable, Sendable {
         self.id = id
         self.timestamp = timestamp
         self.kind = kind
+        self.captureReason = captureReason
         self.occurrenceCount = occurrenceCount
         self.application = application
         self.window = window

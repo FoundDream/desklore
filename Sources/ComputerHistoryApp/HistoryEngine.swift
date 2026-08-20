@@ -45,8 +45,14 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var nextCaptureSequence = 0
     private var nextCaptureResultSequence = 0
     private var pendingCaptureResults: [Int: AXCaptureResult] = [:]
+    private var lastFocusChangingMouseDate: Date?
     private let hostBundleIdentifier = ProcessInfo.processInfo.environment[
         "COMPUTER_HISTORY_HOST_BUNDLE_ID"
+    ]
+    private let blockedSystemBundleIdentifiers: Set<String> = [
+        "com.apple.loginwindow",
+        "com.apple.SecurityAgent",
+        "com.apple.ScreenSaver.Engine",
     ]
 
     func start() {
@@ -58,9 +64,14 @@ final class HistoryEngine: NSObject, ObservableObject {
         accessibilityGranted = AccessibilityPermission.isTrusted(prompt: true)
         state = .running
 
-        axNotificationMonitor.onContextChanged = { [weak self] kind in
+        axNotificationMonitor.onContextChanged = { [weak self] kind, reason in
             Task { @MainActor in
-                self?.captureFrontmostApplication(kind: kind)
+                if reason == .focusChange,
+                   let date = self?.lastFocusChangingMouseDate,
+                   Date().timeIntervalSince(date) < 1 {
+                    return
+                }
+                self?.captureFrontmostApplication(kind: kind, reason: reason)
             }
         }
         interactionMonitor.onInteraction = { [weak self] kind, capture in
@@ -69,9 +80,17 @@ final class HistoryEngine: NSObject, ObservableObject {
                 self?.returnKeyEventCount += 1
                 self?.axNotificationMonitor.flushPendingTextChange()
             }
-            self?.captureFrontmostApplication(kind: kind, interaction: capture)
+            let reason: HistoryEvent.CaptureReason = kind == .keyboardShortcut
+                ? .keyboard
+                : .mouse
+            self?.captureFrontmostApplication(
+                kind: kind,
+                reason: reason,
+                interaction: capture
+            )
         }
         interactionMonitor.onBeforeFocusChangingInteraction = { [weak self] in
+            self?.lastFocusChangingMouseDate = Date()
             self?.axNotificationMonitor.flushPendingChanges()
         }
         interactionMonitor.start()
@@ -81,7 +100,11 @@ final class HistoryEngine: NSObject, ObservableObject {
             self?.activeApplication = Self.application(from: application)
             self?.axNotificationMonitor.observe(application)
             self?.refreshSemanticListenerHealth()
-            self?.capture(application, kind: .windowChanged)
+            self?.capture(
+                application,
+                kind: .windowChanged,
+                reason: .applicationActivation
+            )
         }
         workspaceMonitor.start()
 
@@ -127,41 +150,49 @@ final class HistoryEngine: NSObject, ObservableObject {
             return
         }
         activeApplication = Self.application(from: application)
-        capture(application, kind: .windowChanged, includeRichSnapshot: false)
+        axNotificationMonitor.observe(application)
+        refreshSemanticListenerHealth()
     }
 
     private func captureFrontmostApplication(
         kind: HistoryEvent.Kind,
+        reason: HistoryEvent.CaptureReason,
         interaction: InteractionCapture? = nil
     ) {
         guard state == .running,
               let application = NSWorkspace.shared.frontmostApplication else {
             return
         }
-        capture(application, kind: kind, interaction: interaction)
+        capture(application, kind: kind, reason: reason, interaction: interaction)
     }
 
     private func capture(
         _ application: NSRunningApplication,
         kind: HistoryEvent.Kind,
+        reason: HistoryEvent.CaptureReason,
         interaction: InteractionCapture? = nil,
         includeRichSnapshot: Bool = true
     ) {
-        guard state == .running else { return }
+        guard state == .running,
+              application.bundleIdentifier != hostBundleIdentifier,
+              !blockedSystemBundleIdentifiers.contains(
+                  application.bundleIdentifier ?? ""
+              ) else {
+            return
+        }
         let context = RunningApplicationContext(application)
         let timestamp = Date()
         let sequence = nextCaptureSequence
         nextCaptureSequence += 1
         axCaptureBacklog = nextCaptureSequence - nextCaptureResultSequence
         let coordinator = axCaptureCoordinator
-        let shouldIncludeRichSnapshot = includeRichSnapshot
-            && application.bundleIdentifier != hostBundleIdentifier
         Task { [weak self] in
             let result = await coordinator.capture(
                 application: context,
                 kind: kind,
+                captureReason: reason,
                 interaction: interaction,
-                includeRichSnapshot: shouldIncludeRichSnapshot,
+                includeRichSnapshot: includeRichSnapshot,
                 timestamp: timestamp
             )
             self?.receiveCaptureResult(result, sequence: sequence)

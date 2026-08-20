@@ -54,6 +54,13 @@ function documentID(value: unknown): string {
   return value;
 }
 
+function historyQuery(value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 500) {
+    throw new Error("Invalid history query");
+  }
+  return value.trim();
+}
+
 function validatedApplicationIconPath(value: unknown): string {
   if (typeof value !== "string" || value.length < 1 || value.length > 4_096) {
     throw new Error("Invalid application icon path");
@@ -183,6 +190,10 @@ function registerIPC(): void {
   ipcMain.handle("history:get-application-icon", (event, value: unknown) => {
     assertRenderer(event);
     return applicationIconDataURL(validatedApplicationIconPath(value));
+  });
+  ipcMain.handle("history:search-memory", (event, value: unknown) => {
+    assertRenderer(event);
+    return history.searchMemory(historyQuery(value));
   });
   ipcMain.handle("history:start-agent", async (event) => {
     assertRenderer(event);

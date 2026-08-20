@@ -20,6 +20,12 @@ const secretPatterns = [
   /\b(?:\d[ -]?){13,19}\b/g,
 ];
 
+const alwaysBlockedBundleIdentifiers = new Set([
+  "com.apple.loginwindow",
+  "com.apple.SecurityAgent",
+  "com.apple.ScreenSaver.Engine",
+]);
+
 export const defaultObservationPolicy: ObservationPolicy = {
   defaultApplicationBehavior: "observe",
   defaultURLBehavior: "observe",
@@ -131,7 +137,11 @@ function domainMatches(domain: string, rules: string[]): boolean {
 }
 
 export function allowsApplication(policy: ObservationPolicy, bundleIdentifier: string): boolean {
-  if (!bundleIdentifier || policy.blockedBundleIdentifiers.includes(bundleIdentifier)) {
+  if (
+    !bundleIdentifier ||
+    alwaysBlockedBundleIdentifiers.has(bundleIdentifier) ||
+    policy.blockedBundleIdentifiers.includes(bundleIdentifier)
+  ) {
     return false;
   }
   return (
@@ -150,6 +160,13 @@ export function applyObservationPolicy(
   event: HistoryEvent,
 ): HistoryEvent | undefined {
   if (!allowsApplication(policy, event.application.bundleIdentifier)) return undefined;
+  if (
+    event.application.bundleIdentifier === "com.ziwen.computer-history.desktop" ||
+    (event.application.bundleIdentifier === "com.github.Electron" &&
+      event.window?.title === "Computer History")
+  ) {
+    return undefined;
+  }
   if (event.window?.isPrivateBrowsing || isSensitiveTarget(event.target)) return undefined;
   const domain = domainFromURL(event.window?.url);
   if (domain && !allowsDomain(policy, domain)) return undefined;

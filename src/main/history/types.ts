@@ -8,6 +8,17 @@ export type HistoryEventKind =
   | "keyboard.submit"
   | "selection.changed";
 
+export type HistoryCaptureReason =
+  | "application_activation"
+  | "window_focus"
+  | "title_change"
+  | "focus_change"
+  | "poll"
+  | "ax_value"
+  | "ax_selection"
+  | "mouse"
+  | "keyboard";
+
 export interface HistoryApplication {
   bundleIdentifier: string;
   name: string;
@@ -17,6 +28,7 @@ export interface HistoryEvent {
   id: string;
   timestamp: string;
   kind: HistoryEventKind;
+  captureReason?: HistoryCaptureReason;
   occurrenceCount?: number;
   application: HistoryApplication;
   window?: {
@@ -55,6 +67,10 @@ export interface SegmentMetadata {
   endedAt?: string;
   eventCount: number;
   suppressedEventCount: number;
+  capturedEventCount: number;
+  policyBlockedEventCount: number;
+  deduplicatedEventCount: number;
+  burstCoalescedEventCount: number;
   eventsFile: string;
 }
 
@@ -74,13 +90,18 @@ export type TimelineActivityState =
   | "unknown";
 
 export interface TimelineDocumentRecord {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   id: string;
   sourceSegmentID: string;
   startedAt: string;
   endedAt: string;
   title: string;
   description: string;
+  task?: string;
+  progression: string[];
+  outcome?: string;
+  openLoops: string[];
+  claims: TimelineClaim[];
   activityState?: TimelineActivityState;
   applications: HistoryApplication[];
   evidenceEventIDs: string[];
@@ -95,6 +116,57 @@ export interface TimelineDocumentRecord {
   filePath?: string;
 }
 
+export interface TimelineClaim {
+  text: string;
+  evidenceEventIDs: string[];
+}
+
+export type MemoryBucketKind = "6h" | "day";
+
+export interface MemoryRollupRecord {
+  schemaVersion: 1;
+  id: string;
+  kind: MemoryBucketKind;
+  startedAt: string;
+  endedAt: string;
+  title: string;
+  description: string;
+  tasks: string[];
+  outcomes: string[];
+  openLoops: string[];
+  applications: HistoryApplication[];
+  sourceDocumentIDs: string[];
+  sourceSegmentIDs: string[];
+  sourceDigest: string;
+  generator: {
+    type: "deterministic" | "llm";
+    version: number;
+    model?: string;
+    failureReason?: string;
+  };
+  createdAt: string;
+  body: string;
+  filePath?: string;
+}
+
+export interface HistorySearchMatch {
+  id: string;
+  kind: "10min" | MemoryBucketKind;
+  startedAt: string;
+  endedAt: string;
+  title: string;
+  description: string;
+  score: number;
+  sourceDocumentIDs: string[];
+  sourceSegmentIDs: string[];
+}
+
+export interface HistorySearchResponse {
+  query: string;
+  answer: string;
+  matches: HistorySearchMatch[];
+}
+
 export interface ObservationPolicy {
   defaultApplicationBehavior: "observe" | "do_not_observe";
   defaultURLBehavior: "observe" | "do_not_observe";
@@ -106,6 +178,7 @@ export interface ObservationPolicy {
 
 export interface TimelineLLMSettings {
   enabled: boolean;
+  memorySynthesisEnabled: boolean;
   model: string;
   endpoint: string;
 }
@@ -138,6 +211,9 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
   const id = string(source?.id);
   const timestamp = string(source?.timestamp);
   const kind = string(source?.kind) as HistoryEventKind | undefined;
+  const captureReason = string(source?.captureReason ?? source?.capture_reason) as
+    | HistoryCaptureReason
+    | undefined;
   const bundleIdentifier = string(application?.bundleIdentifier ?? application?.bundle_identifier);
   const name = string(application?.name);
   if (!id || !timestamp || !kind || !bundleIdentifier || !name) {
@@ -154,6 +230,7 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
     id: id.toLowerCase(),
     timestamp,
     kind,
+    captureReason,
     occurrenceCount: number(source?.occurrenceCount ?? source?.occurrence_count),
     application: { bundleIdentifier, name },
     window: window
@@ -202,6 +279,7 @@ export function eventForDisk(event: HistoryEvent): UnknownRecord {
     id: event.id,
     timestamp: event.timestamp,
     kind: event.kind,
+    capture_reason: event.captureReason,
     occurrence_count: event.occurrenceCount,
     application: {
       bundle_identifier: event.application.bundleIdentifier,
@@ -238,6 +316,10 @@ export function metadataForDisk(metadata: SegmentMetadata): UnknownRecord {
     ended_at: metadata.endedAt,
     event_count: metadata.eventCount,
     suppressed_event_count: metadata.suppressedEventCount,
+    captured_event_count: metadata.capturedEventCount,
+    policy_blocked_event_count: metadata.policyBlockedEventCount,
+    deduplicated_event_count: metadata.deduplicatedEventCount,
+    burst_coalesced_event_count: metadata.burstCoalescedEventCount,
     events_file: metadata.eventsFile,
   });
 }
@@ -254,6 +336,18 @@ export function normalizeMetadata(value: unknown): SegmentMetadata {
     eventCount: number(source?.eventCount ?? source?.event_count) ?? 0,
     suppressedEventCount:
       number(source?.suppressedEventCount ?? source?.suppressed_event_count) ?? 0,
+    capturedEventCount:
+      number(source?.capturedEventCount ?? source?.captured_event_count) ??
+      number(source?.eventCount ?? source?.event_count) ??
+      0,
+    policyBlockedEventCount:
+      number(source?.policyBlockedEventCount ?? source?.policy_blocked_event_count) ??
+      number(source?.suppressedEventCount ?? source?.suppressed_event_count) ??
+      0,
+    deduplicatedEventCount:
+      number(source?.deduplicatedEventCount ?? source?.deduplicated_event_count) ?? 0,
+    burstCoalescedEventCount:
+      number(source?.burstCoalescedEventCount ?? source?.burst_coalesced_event_count) ?? 0,
     eventsFile: string(source?.eventsFile ?? source?.events_file) ?? "events.jsonl",
   };
 }

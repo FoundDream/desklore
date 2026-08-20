@@ -59,6 +59,7 @@ actor AXCaptureCoordinator {
     func capture(
         application: RunningApplicationContext,
         kind: HistoryEvent.Kind,
+        captureReason: HistoryEvent.CaptureReason,
         interaction: InteractionCapture?,
         includeRichSnapshot: Bool,
         timestamp: Date
@@ -66,6 +67,7 @@ actor AXCaptureCoordinator {
         reader.event(
             for: application,
             kind: kind,
+            captureReason: captureReason,
             interaction: interaction,
             includeRichSnapshot: includeRichSnapshot,
             at: timestamp
@@ -111,6 +113,7 @@ final class AXContextReader {
     func event(
         for application: RunningApplicationContext,
         kind: HistoryEvent.Kind = .windowChanged,
+        captureReason: HistoryEvent.CaptureReason = .windowFocus,
         interaction capture: InteractionCapture? = nil,
         includeRichSnapshot: Bool = true,
         at timestamp: Date = Date()
@@ -154,6 +157,7 @@ final class AXContextReader {
         let event = HistoryEvent(
             timestamp: timestamp,
             kind: kind,
+            captureReason: captureReason,
             application: .init(
                 bundleIdentifier: application.bundleIdentifier,
                 name: application.name

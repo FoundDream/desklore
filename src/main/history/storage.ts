@@ -1,5 +1,6 @@
 import {
   appendFile,
+  chmod,
   lstat,
   mkdir,
   readFile,
@@ -25,24 +26,60 @@ export interface StorageLayout {
   root: string;
   segments: string;
   timeline: string;
+  memory: string;
+  memorySixHour: string;
+  memoryDay: string;
   state: string;
 }
 
 export function makeStorageLayout(root: string): StorageLayout {
+  const memory = path.join(root, "memory");
   return {
     root,
     segments: path.join(root, "segments"),
     timeline: path.join(root, "timeline"),
+    memory,
+    memorySixHour: path.join(memory, "6h"),
+    memoryDay: path.join(memory, "day"),
     state: path.join(root, "state"),
   };
 }
 
 export async function ensureStorage(layout: StorageLayout): Promise<void> {
   await Promise.all(
-    [layout.root, layout.segments, layout.timeline, layout.state].map((directory) =>
-      mkdir(directory, { recursive: true }),
-    ),
+    [
+      layout.root,
+      layout.segments,
+      layout.timeline,
+      layout.memory,
+      layout.memorySixHour,
+      layout.memoryDay,
+      layout.state,
+    ].map(async (directory) => {
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await chmod(directory, 0o700);
+    }),
   );
+}
+
+/** Tightens permissions without following links outside the application-owned tree. */
+export async function hardenStoragePermissions(layout: StorageLayout): Promise<void> {
+  await ensureStorage(layout);
+  const pending = [layout.root];
+  while (pending.length) {
+    const directory = pending.pop();
+    if (!directory) continue;
+    const directoryStats = await lstat(directory);
+    if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory()) continue;
+    await chmod(directory, 0o700);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      const stats = await lstat(entryPath);
+      if (stats.isSymbolicLink()) continue;
+      if (stats.isDirectory()) pending.push(entryPath);
+      else if (stats.isFile()) await chmod(entryPath, 0o600);
+    }
+  }
 }
 
 export function segmentStart(date: Date): Date {
@@ -60,9 +97,12 @@ export function segmentIdentifier(date: Date): string {
 
 async function atomicWrite(filePath: string, contents: string | Uint8Array): Promise<void> {
   const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents);
+  await writeFile(temporary, contents, { mode: 0o600 });
   await rename(temporary, filePath);
+  await chmod(filePath, 0o600);
 }
+
+export type SegmentMetric = "captured" | "policyBlocked" | "deduplicated" | "burstCoalesced";
 
 export class SegmentStore {
   private current?: SegmentMetadata;
@@ -83,8 +123,9 @@ export class SegmentStore {
     await appendFile(
       path.join(directoryPath, metadata.eventsFile),
       `${JSON.stringify(eventForDisk(event))}\n`,
-      "utf8",
+      { encoding: "utf8", mode: 0o600 },
     );
+    await chmod(path.join(directoryPath, metadata.eventsFile), 0o600);
     metadata.eventCount += 1;
     await this.writeMetadata(metadata);
     this.current = metadata;
@@ -92,6 +133,14 @@ export class SegmentStore {
   }
 
   async recordSuppressed(timestamp: string): Promise<ClosedSegment | undefined> {
+    return this.recordMetric(timestamp, "policyBlocked");
+  }
+
+  async recordMetric(
+    timestamp: string,
+    metric: SegmentMetric,
+    count = 1,
+  ): Promise<ClosedSegment | undefined> {
     await ensureStorage(this.layout);
     const id = segmentIdentifier(new Date(timestamp));
     let closed: ClosedSegment | undefined;
@@ -100,7 +149,14 @@ export class SegmentStore {
       this.current = undefined;
     }
     const metadata = await this.loadOrCreateMetadata(id, timestamp);
-    metadata.suppressedEventCount += 1;
+    if (metric === "captured") metadata.capturedEventCount += count;
+    if (metric === "policyBlocked") metadata.policyBlockedEventCount += count;
+    if (metric === "deduplicated") metadata.deduplicatedEventCount += count;
+    if (metric === "burstCoalesced") metadata.burstCoalescedEventCount += count;
+    metadata.suppressedEventCount =
+      metadata.policyBlockedEventCount +
+      metadata.deduplicatedEventCount +
+      metadata.burstCoalescedEventCount;
     await this.writeMetadata(metadata);
     this.current = metadata;
     return closed;
@@ -202,6 +258,10 @@ export class SegmentStore {
         startedAt: segmentStart(new Date(timestamp)).toISOString(),
         eventCount: 0,
         suppressedEventCount: 0,
+        capturedEventCount: 0,
+        policyBlockedEventCount: 0,
+        deduplicatedEventCount: 0,
+        burstCoalescedEventCount: 0,
         eventsFile: "events.jsonl",
       }
     );

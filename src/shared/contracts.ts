@@ -14,10 +14,44 @@ export interface TimelineDocument {
   endedAt: string;
   title: string;
   description: string;
+  task?: string;
+  progression: string[];
+  outcome?: string;
+  openLoops: string[];
   activityState?: string;
   applications: TimelineApplication[];
   generatorType: string;
   generatorFailureReason?: string;
+}
+
+export interface MemoryRollup {
+  id: string;
+  kind: "6h" | "day";
+  startedAt: string;
+  endedAt: string;
+  title: string;
+  description: string;
+  tasks: string[];
+  outcomes: string[];
+  openLoops: string[];
+}
+
+export interface HistorySearchMatch {
+  id: string;
+  kind: "10min" | "6h" | "day";
+  startedAt: string;
+  endedAt: string;
+  title: string;
+  description: string;
+  score: number;
+  sourceDocumentIDs: string[];
+  sourceSegmentIDs: string[];
+}
+
+export interface HistorySearchResponse {
+  query: string;
+  answer: string;
+  matches: HistorySearchMatch[];
 }
 
 export interface CaptureHealth {
@@ -31,6 +65,11 @@ export interface CaptureHealth {
   keyboardShortcutCount: number;
   textInputEventCount: number;
   selectionEventCount: number;
+  capturedEventCount: number;
+  persistedEventCount: number;
+  policyBlockedEventCount: number;
+  deduplicatedEventCount: number;
+  burstCoalescedEventCount: number;
   lastAXSnapshotNodeCount: number;
   lastAXVisitedNodeCount: number;
   lastAXCaptureDurationMilliseconds: number;
@@ -41,6 +80,7 @@ export interface CaptureHealth {
 
 export interface LLMSettings {
   enabled: boolean;
+  memorySynthesisEnabled: boolean;
   model: string;
   endpoint: string;
   apiKeyConfigured: boolean;
@@ -54,6 +94,7 @@ export interface AgentSnapshot {
   activeDomain?: string;
   activeDomainAllowed?: boolean;
   documents: TimelineDocument[];
+  memories: MemoryRollup[];
   health: CaptureHealth;
   llm: LLMSettings;
   lastError?: string;
@@ -67,6 +108,7 @@ export interface DesktopSnapshot {
 
 export interface LLMConfigurationInput {
   enabled: boolean;
+  memorySynthesisEnabled: boolean;
   model: string;
   endpoint: string;
   apiKey: string;
@@ -90,5 +132,6 @@ export interface ComputerHistoryAPI {
   deleteDocument(id: string): Promise<DesktopSnapshot>;
   revealStorage(): Promise<DesktopSnapshot>;
   getApplicationIcon(iconPath: string): Promise<string | undefined>;
+  searchMemory(query: string): Promise<HistorySearchResponse>;
   onSnapshot(listener: (snapshot: DesktopSnapshot) => void): () => void;
 }

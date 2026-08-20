@@ -8,6 +8,18 @@ final class InteractionMonitor {
     var onBeforeFocusChangingInteraction: (() -> Void)?
     private var monitor: Any?
     private var pendingLeftMouse: PendingLeftMouse?
+    private let navigationKeyNames: [UInt16: String] = [
+        48: "tab",
+        53: "escape",
+        115: "home",
+        116: "page-up",
+        119: "end",
+        121: "page-down",
+        123: "left",
+        124: "right",
+        125: "down",
+        126: "up",
+    ]
 
     var isActive: Bool { monitor != nil }
 
@@ -130,6 +142,17 @@ final class InteractionMonitor {
                 .keyboardShortcut,
                 InteractionCapture(
                     keyEquivalent: event.keyCode == 76 ? "numpad-enter" : "return",
+                    modifiers: modifierNames(event.modifierFlags)
+                )
+            )
+            return
+        }
+
+        if let keyName = navigationKeyNames[event.keyCode] {
+            onInteraction?(
+                .keyboardShortcut,
+                InteractionCapture(
+                    keyEquivalent: keyName,
                     modifiers: modifierNames(event.modifierFlags)
                 )
             )

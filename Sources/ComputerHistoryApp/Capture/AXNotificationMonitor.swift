@@ -4,13 +4,19 @@ import ComputerHistoryCore
 import Foundation
 
 final class AXNotificationMonitor: @unchecked Sendable {
-    var onContextChanged: (@Sendable (HistoryEvent.Kind) -> Void)?
+    var onContextChanged: (
+        @Sendable (HistoryEvent.Kind, HistoryEvent.CaptureReason) -> Void
+    )?
 
     private var observer: AXObserver?
     private var applicationElement: AXUIElement?
     private var valueElements: [AXUIElement] = []
     private var selectionElements: [AXUIElement] = []
     private var processIdentifier: pid_t?
+    private var focusedElement: AXUIElement?
+    private var fallbackTimer: Timer?
+    private var lastFocusedValue: String?
+    private var lastSelectedText: String?
     private var pendingTextChange: DispatchWorkItem?
     private var pendingSelectionChange: DispatchWorkItem?
     private var hasPendingTextChange = false
@@ -61,6 +67,12 @@ final class AXNotificationMonitor: @unchecked Sendable {
         self.applicationElement = applicationElement
         processIdentifier = application.processIdentifier
         refreshFocusedElementSubscriptions()
+        fallbackTimer = Timer.scheduledTimer(
+            withTimeInterval: 1,
+            repeats: true
+        ) { [weak self] _ in
+            self?.pollFocusedSemantics()
+        }
     }
 
     func stop() {
@@ -70,6 +82,8 @@ final class AXNotificationMonitor: @unchecked Sendable {
         pendingSelectionChange?.cancel()
         pendingSelectionChange = nil
         hasPendingSelectionChange = false
+        fallbackTimer?.invalidate()
+        fallbackTimer = nil
         removeFocusedElementSubscriptions()
         if let observer {
             CFRunLoopRemoveSource(
@@ -85,6 +99,9 @@ final class AXNotificationMonitor: @unchecked Sendable {
         valueNotificationTargetCount = 0
         selectionNotificationTargetCount = 0
         processIdentifier = nil
+        focusedElement = nil
+        lastFocusedValue = nil
+        lastSelectedText = nil
     }
 
     private func refreshFocusedElementSubscriptions() {
@@ -103,6 +120,12 @@ final class AXNotificationMonitor: @unchecked Sendable {
         }
 
         let element = unsafeDowncast(value, to: AXUIElement.self)
+        focusedElement = element
+        lastFocusedValue = safeValue(from: element)
+        lastSelectedText = string(
+            attribute: kAXSelectedTextAttribute as CFString,
+            from: element
+        )
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let semanticElements = elementAndAncestors(
             startingAt: element,
@@ -204,14 +227,30 @@ final class AXNotificationMonitor: @unchecked Sendable {
             pendingSelectionChange = nil
             hasPendingSelectionChange = false
             refreshFocusedElementSubscriptions()
+            onContextChanged?(.windowChanged, .focusChange)
+            return
         }
 
         if name == kAXSelectedTextChangedNotification as String {
+            if let focusedElement {
+                lastSelectedText = string(
+                    attribute: kAXSelectedTextAttribute as CFString,
+                    from: focusedElement
+                )
+            }
             debounceSelectionChange()
         } else if name == kAXValueChangedNotification as String {
+            if let focusedElement {
+                lastFocusedValue = safeValue(from: focusedElement)
+            }
             debounceTextChange()
+        } else if name == kAXTitleChangedNotification as String {
+            onContextChanged?(.windowChanged, .titleChange)
+        } else if name == kAXFocusedWindowChangedNotification as String
+                    || name == kAXWindowCreatedNotification as String {
+            onContextChanged?(.windowChanged, .windowFocus)
         } else {
-            onContextChanged?(.windowChanged)
+            return
         }
     }
 
@@ -220,7 +259,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
         let workItem = DispatchWorkItem { [weak self] in
             self?.hasPendingTextChange = false
             self?.pendingTextChange = nil
-            self?.onContextChanged?(.keyboardTextInput)
+            self?.onContextChanged?(.keyboardTextInput, .axValue)
         }
         hasPendingTextChange = true
         pendingTextChange = workItem
@@ -235,7 +274,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
         let workItem = DispatchWorkItem { [weak self] in
             self?.hasPendingSelectionChange = false
             self?.pendingSelectionChange = nil
-            self?.onContextChanged?(.selectionChanged)
+            self?.onContextChanged?(.selectionChanged, .axSelection)
         }
         hasPendingSelectionChange = true
         pendingSelectionChange = workItem
@@ -255,7 +294,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
         pendingTextChange?.cancel()
         pendingTextChange = nil
         hasPendingTextChange = false
-        onContextChanged?(.keyboardTextInput)
+        onContextChanged?(.keyboardTextInput, .axValue)
     }
 
     private func flushPendingSelectionChange() {
@@ -263,7 +302,41 @@ final class AXNotificationMonitor: @unchecked Sendable {
         pendingSelectionChange?.cancel()
         pendingSelectionChange = nil
         hasPendingSelectionChange = false
-        onContextChanged?(.selectionChanged)
+        onContextChanged?(.selectionChanged, .axSelection)
+    }
+
+    private func pollFocusedSemantics() {
+        guard let focusedElement else { return }
+        let value = safeValue(from: focusedElement)
+        if value != lastFocusedValue {
+            lastFocusedValue = value
+            if value != nil { debounceTextChange() }
+        }
+        let selection = string(
+            attribute: kAXSelectedTextAttribute as CFString,
+            from: focusedElement
+        )
+        if selection != lastSelectedText {
+            lastSelectedText = selection
+            if let selection, !selection.isEmpty { debounceSelectionChange() }
+        }
+    }
+
+    private func safeValue(from element: AXUIElement) -> String? {
+        let role = string(attribute: kAXRoleAttribute as CFString, from: element)
+        guard role != "AXSecureTextField" else { return nil }
+        return string(attribute: kAXValueAttribute as CFString, from: element)
+    }
+
+    private func string(attribute: CFString, from element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value else {
+            return nil
+        }
+        if let string = value as? String { return string }
+        if let attributed = value as? NSAttributedString { return attributed.string }
+        return nil
     }
 
     private static let callback: AXObserverCallback = {

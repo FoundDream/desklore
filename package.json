@@ -13,6 +13,7 @@
     "build": "npm run native:build && electron-vite-plus build",
     "check": "vp check",
     "test": "vp test run",
+    "eval:history": "node scripts/eval-history-data.mjs",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
     "package:mac": "npm run build && electron-builder --mac"

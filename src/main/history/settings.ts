@@ -9,6 +9,7 @@ import type { StorageLayout } from "./storage.js";
 
 const defaultLLMSettings: TimelineLLMSettings = {
   enabled: false,
+  memorySynthesisEnabled: false,
   model: "gpt-5.6-luna",
   endpoint: "https://api.openai.com/v1/responses",
 };
@@ -18,8 +19,9 @@ const legacyKeychainService = "com.ziwen.computer-history.desktop.agent.llm";
 
 async function atomicWrite(filePath: string, contents: string | Uint8Array): Promise<void> {
   const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents);
+  await writeFile(temporary, contents, { mode: 0o600 });
   await rename(temporary, filePath);
+  await chmod(filePath, 0o600);
 }
 
 async function readJSON(filePath: string): Promise<unknown> {
@@ -76,6 +78,7 @@ export class HistorySettingsStore {
     if (!source) return { ...defaultLLMSettings };
     const settings = {
       enabled: source.enabled === true,
+      memorySynthesisEnabled: source.memorySynthesisEnabled === true,
       model: typeof source.model === "string" ? source.model : defaultLLMSettings.model,
       endpoint: typeof source.endpoint === "string" ? source.endpoint : defaultLLMSettings.endpoint,
     };
@@ -163,6 +166,7 @@ export class HistorySettingsStore {
     if (!enabled && !model && !endpoint) return undefined;
     return {
       enabled: enabled === "1" || enabled?.toLowerCase() === "true",
+      memorySynthesisEnabled: false,
       model,
       endpoint,
     };

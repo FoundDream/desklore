@@ -64,6 +64,14 @@ describe("TypeScript history core", () => {
     );
     expect(safe.interaction?.text).toBe("[REDACTED]");
     expect(safe.window?.url).toBe("https://example.com/path");
+    expect(
+      applyObservationPolicy(
+        defaultObservationPolicy,
+        event({
+          application: { bundleIdentifier: "com.apple.loginwindow", name: "loginwindow" },
+        }),
+      ),
+    ).toBeUndefined();
   });
 
   it("coalesces text deltas and short click bursts", () => {
@@ -85,7 +93,10 @@ describe("TypeScript history core", () => {
     expect(second?.interaction?.text).toBe("lo");
 
     const bursts = new EventBurstCoalescer();
-    expect(bursts.ingest(event({ kind: "mouse.click" }, 3))).toEqual([]);
+    expect(bursts.ingest(event({ kind: "mouse.click" }, 3))).toEqual({
+      ready: [],
+      coalescedCount: 0,
+    });
     expect(
       bursts.ingest(
         event(
@@ -96,7 +107,7 @@ describe("TypeScript history core", () => {
           4,
         ),
       ),
-    ).toEqual([]);
+    ).toEqual({ ready: [], coalescedCount: 1 });
     expect(bursts.flushAll()[0]?.occurrenceCount).toBe(2);
   });
 
@@ -115,22 +126,57 @@ describe("TypeScript history core", () => {
         interaction: { keyEquivalent: "return", modifiers: [] },
       }),
     );
+    const chatWithoutTarget = classifyKeyboardEvent(
+      event({
+        kind: "keyboard.shortcut",
+        application: { bundleIdentifier: "com.tencent.xinWeChat", name: "微信" },
+        target: undefined,
+        interaction: { keyEquivalent: "return", modifiers: [] },
+      }),
+    );
     expect(submit.kind).toBe("keyboard.submit");
     expect(multiline.kind).toBe("keyboard.shortcut");
+    expect(chatWithoutTarget.kind).toBe("keyboard.submit");
+  });
+
+  it("preserves focus-change semantics while dropping duplicate window callbacks", () => {
+    const coalescer = new EventCoalescer();
+    expect(coalescer.process(event({ captureReason: "window_focus" }, 1))).toBeDefined();
+    expect(coalescer.process(event({ captureReason: "window_focus" }, 2))).toBeUndefined();
+    expect(
+      coalescer.process(
+        event(
+          {
+            captureReason: "focus_change",
+            target: { role: "AXTextArea", placeholder: "Prompt" },
+          },
+          3,
+        ),
+      ),
+    ).toBeDefined();
   });
 
   it("writes the legacy-compatible snake_case JSONL and ten-minute metadata", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
     temporaryDirectories.push(root);
     const store = new SegmentStore(makeStorageLayout(root));
-    const input = event({}, 1);
+    const input = event({ captureReason: "mouse" }, 1);
+    await store.recordMetric(input.timestamp, "captured");
     await store.append(input);
     const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
     expect(segmentIdentifier(new Date(input.timestamp))).toBe("2026-08-20T13-40-00Z");
-    expect(closed?.metadata).toMatchObject({ eventCount: 1, suppressedEventCount: 0 });
+    expect(closed?.metadata).toMatchObject({
+      eventCount: 1,
+      suppressedEventCount: 0,
+      capturedEventCount: 1,
+      policyBlockedEventCount: 0,
+      deduplicatedEventCount: 0,
+      burstCoalescedEventCount: 0,
+    });
     const line = await readFile(closed!.eventsPath, "utf8");
     expect(line).toContain('"bundle_identifier":"com.example.editor"');
     expect(line).toContain('"is_private_browsing":false');
+    expect(line).toContain('"capture_reason":"mouse"');
     await expect(store.readEvents(closed!)).resolves.toEqual([input]);
   });
 
@@ -143,6 +189,9 @@ describe("TypeScript history core", () => {
       endedAt: "2026-08-20T13:50:00.000Z",
       title: "Computer History migration",
       description: "Migrated timeline generation and persistence from Swift into TypeScript.",
+      progression: [],
+      openLoops: [],
+      claims: [],
       activityState: "implementation_completed",
       applications: [{ bundleIdentifier: "com.example.editor", name: "Editor" }],
       evidenceEventIDs: ["event-1"],
@@ -160,6 +209,31 @@ describe("TypeScript history core", () => {
     expect(decodeTimelineMarkdown(markdown)).toEqual(document);
   });
 
+  it("round-trips schema v3 task progression outcome and evidence-linked claims", () => {
+    const document: TimelineDocumentRecord = {
+      schemaVersion: 3,
+      id: "document-v3",
+      sourceSegmentID: "2026-08-20T13-40-00Z",
+      startedAt: "2026-08-20T13:40:00.000Z",
+      endedAt: "2026-08-20T13:50:00.000Z",
+      title: "完成语义摘要 v3",
+      description: "摘要记录了任务进展、结果和未完成事项。",
+      task: "升级语义摘要",
+      progression: ["扩展 JSON Schema", "验证证据引用"],
+      outcome: "v3 Markdown 可以往返读取。",
+      openLoops: ["运行真实数据评测"],
+      claims: [{ text: "v3 Markdown 可以往返读取。", evidenceEventIDs: ["event-1"] }],
+      activityState: "validated",
+      applications: [{ bundleIdentifier: "com.example.editor", name: "Editor" }],
+      evidenceEventIDs: ["event-1"],
+      generator: { type: "llm", version: 2, model: "gpt-5.6-luna" },
+      createdAt: "2026-08-20T13:50:01.000Z",
+      body: "## Recording summary\n\nv3 summary.",
+    };
+
+    expect(decodeTimelineMarkdown(encodeTimelineMarkdown(document))).toEqual(document);
+  });
+
   it("persists an explicit failure reason and later retries the raw activity", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
     temporaryDirectories.push(root);
@@ -171,6 +245,7 @@ describe("TypeScript history core", () => {
     let apiKeyConfigured = false;
     const settings = {
       enabled: true,
+      memorySynthesisEnabled: false,
       model: "gpt-5.6-luna",
       endpoint: "https://api.openai.com/v1/responses",
     };
@@ -203,6 +278,16 @@ describe("TypeScript history core", () => {
                     text: JSON.stringify({
                       title: "继续迁移 Computer History",
                       description: "完成了 TypeScript 迁移链路的实现工作。",
+                      task: "迁移 Computer History 的 TypeScript 数据链路",
+                      progression: ["完成 TypeScript 迁移实现"],
+                      outcome: "迁移实现已完成。",
+                      open_loops: [],
+                      claims: [
+                        {
+                          text: "完成了 TypeScript 迁移链路的实现工作。",
+                          evidence_event_ids: [input.id],
+                        },
+                      ],
                       activity_state: "implementation_completed",
                       evidence_event_ids: [input.id],
                     }),
@@ -230,15 +315,12 @@ describe("TypeScript history core", () => {
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     const store = new SegmentStore(layout);
-    const input = event(
-      {
-        accessibility: {
-          mode: "fullTree",
-          text: "仍未看到 PR 已创建、实现完成或验证通过的证据。",
-        },
+    const input = event({
+      accessibility: {
+        mode: "fullTree",
+        text: "仍未看到 PR 已创建、实现完成或验证通过的证据。",
       },
-      10,
-    );
+    });
     await store.append(input);
     const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
     vi.stubGlobal(
@@ -254,6 +336,16 @@ describe("TypeScript history core", () => {
                     text: JSON.stringify({
                       title: "准备迁移 Computer History",
                       description: "活动仍处于规划阶段，尚未观察到实现或验证完成。",
+                      task: "规划 Computer History 迁移",
+                      progression: ["检查当前迁移状态"],
+                      outcome: "",
+                      open_loops: ["继续实现并验证迁移"],
+                      claims: [
+                        {
+                          text: "活动仍处于规划阶段。",
+                          evidence_event_ids: [input.id],
+                        },
+                      ],
                       activity_state: "planning",
                       evidence_event_ids: [input.id],
                     }),
@@ -269,6 +361,7 @@ describe("TypeScript history core", () => {
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
         enabled: true,
+        memorySynthesisEnabled: false,
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
       },
@@ -343,6 +436,16 @@ describe("TypeScript history core", () => {
         return llmResponse({
           title: "恢复 Computer History 的结构化活动摘要",
           description: "模型输出中断后缩小输入范围，并成功生成了结构化的活动时间线摘要。",
+          task: "恢复结构化活动摘要",
+          progression: ["缩小模型输入", "重新生成摘要"],
+          outcome: "成功生成结构化摘要。",
+          open_loops: [],
+          claims: [
+            {
+              text: "缩小输入后成功生成摘要。",
+              evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
+            },
+          ],
           activity_state: "validated",
           evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
         });
@@ -351,6 +454,7 @@ describe("TypeScript history core", () => {
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
         enabled: true,
+        memorySynthesisEnabled: false,
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
       },
@@ -400,6 +504,10 @@ describe("TypeScript history core", () => {
         endedAt: "2026-08-20T13:50:00.000Z",
         eventCount: 1,
         suppressedEventCount: 0,
+        capturedEventCount: 1,
+        policyBlockedEventCount: 0,
+        deduplicatedEventCount: 0,
+        burstCoalescedEventCount: 0,
         eventsFile: "events.jsonl",
       },
       directoryPath: "/tmp/segment",

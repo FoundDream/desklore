@@ -4,6 +4,7 @@ import type {
   AgentSnapshot,
   DesktopSnapshot,
   LLMConfigurationInput,
+  MemoryRollup,
   TimelineApplication,
   TimelineDocument,
 } from "../../shared/contracts.js";
@@ -16,9 +17,18 @@ import {
   defaultObservationPolicy,
 } from "./policy.js";
 import { HistorySettingsStore, validateLLMSettings } from "./settings.js";
-import { ensureStorage, makeStorageLayout, SegmentStore } from "./storage.js";
+import {
+  ensureStorage,
+  hardenStoragePermissions,
+  makeStorageLayout,
+  SegmentStore,
+  segmentIdentifier,
+} from "./storage.js";
 import { TimelineRepository, type LLMRuntime, type LLMUnavailable } from "./timeline.js";
+import { MemoryRepository } from "./memory.js";
 import type {
+  HistorySearchResponse,
+  MemoryRollupRecord,
   HistoryEvent,
   ObservationPolicy,
   TimelineDocumentRecord,
@@ -30,17 +40,20 @@ export class HistoryService extends EventEmitter {
   private readonly segments;
   private readonly settingsStore;
   private readonly timeline;
+  private readonly memory;
   private readonly coalescer = new EventCoalescer();
   private readonly burstCoalescer = new EventBurstCoalescer();
   private readonly applicationIconPaths = new Map<string, string>();
   private policy: ObservationPolicy = structuredClone(defaultObservationPolicy);
   private llmSettings: TimelineLLMSettings = {
     enabled: false,
+    memorySynthesisEnabled: false,
     model: "gpt-5.6-luna",
     endpoint: "https://api.openai.com/v1/responses",
   };
   private apiKeyConfigured = false;
   private documents: TimelineDocumentRecord[] = [];
+  private memories: MemoryRollupRecord[] = [];
   private lastError?: string;
   private initialized = false;
   private captureWork: Promise<unknown> = Promise.resolve();
@@ -48,11 +61,17 @@ export class HistoryService extends EventEmitter {
   private flushTimer?: NodeJS.Timeout;
   private maintenanceTimer?: NodeJS.Timeout;
   private receivedNativeEvent = false;
+  private currentCaptureSegmentID?: string;
   private readonly semanticHealth = {
     keyboardSubmitCount: 0,
     keyboardShortcutCount: 0,
     textInputEventCount: 0,
     selectionEventCount: 0,
+    capturedEventCount: 0,
+    persistedEventCount: 0,
+    policyBlockedEventCount: 0,
+    deduplicatedEventCount: 0,
+    burstCoalescedEventCount: 0,
   };
 
   constructor(
@@ -66,6 +85,11 @@ export class HistoryService extends EventEmitter {
     this.timeline = new TimelineRepository(this.layout, this.segments, async () =>
       this.llmRuntime(),
     );
+    this.memory = new MemoryRepository(this.layout, async () => {
+      if (!this.llmSettings.memorySynthesisEnabled) return undefined;
+      const runtime = await this.llmRuntime();
+      return runtime && !("failureReason" in runtime) ? runtime : undefined;
+    });
     collector.on("snapshot", () => this.emitSnapshot());
     collector.on("event", (event: HistoryEvent) => {
       if (!this.receivedNativeEvent) {
@@ -93,6 +117,7 @@ export class HistoryService extends EventEmitter {
             ? allowsDomain(this.policy, native.agent.activeDomain)
             : undefined,
           documents: this.documents.map((document) => this.publicDocument(document)),
+          memories: this.memories.map((record) => this.publicMemory(record)),
           health: { ...native.agent.health, ...this.semanticHealth },
           llm: { ...this.llmSettings, apiKeyConfigured: this.apiKeyConfigured },
           lastError: this.lastError ?? native.agent.lastError,
@@ -190,6 +215,7 @@ export class HistoryService extends EventEmitter {
   async configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot> {
     const next = {
       enabled: input.enabled,
+      memorySynthesisEnabled: input.memorySynthesisEnabled,
       model: input.model.trim(),
       endpoint: input.endpoint.trim(),
     };
@@ -245,36 +271,67 @@ export class HistoryService extends EventEmitter {
     return this.current();
   }
 
+  searchMemory(query: string): HistorySearchResponse {
+    return this.memory.search(query, this.documents, this.memories);
+  }
+
   private async initialize(): Promise<void> {
     if (this.initialized) return;
     await ensureStorage(this.layout);
+    await hardenStoragePermissions(this.layout);
     [this.policy, this.llmSettings] = await Promise.all([
       this.settingsStore.loadPolicy(),
       this.settingsStore.loadLLMSettings(),
     ]);
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
     this.documents = await this.timeline.loadDocuments();
+    this.memories = await this.memory.refresh(this.documents);
     this.initialized = true;
   }
 
   private async processEvent(event: HistoryEvent): Promise<void> {
+    const eventSegmentID = segmentIdentifier(new Date(event.timestamp));
+    if (this.currentCaptureSegmentID && this.currentCaptureSegmentID !== eventSegmentID) {
+      for (const pending of this.burstCoalescer.flushAll()) await this.persist(pending);
+    }
+    this.currentCaptureSegmentID = eventSegmentID;
+    this.semanticHealth.capturedEventCount += 1;
+    const capturedClosed = await this.segments.recordMetric(event.timestamp, "captured");
+    if (capturedClosed) this.scheduleTimeline(capturedClosed);
     const sanitized = applyObservationPolicy(this.policy, classifyKeyboardEvent(event));
     if (!sanitized) {
+      this.semanticHealth.policyBlockedEventCount += 1;
       const closed = await this.segments.recordSuppressed(event.timestamp);
       if (closed) this.scheduleTimeline(closed);
       return;
     }
     const normalized = this.coalescer.process(sanitized);
-    if (!normalized) return;
+    if (!normalized) {
+      this.semanticHealth.deduplicatedEventCount += 1;
+      const closed = await this.segments.recordMetric(event.timestamp, "deduplicated");
+      if (closed) this.scheduleTimeline(closed);
+      return;
+    }
     if (normalized.kind === "keyboard.submit") this.semanticHealth.keyboardSubmitCount += 1;
     if (normalized.kind === "keyboard.shortcut") this.semanticHealth.keyboardShortcutCount += 1;
     if (normalized.kind === "keyboard.text_input") this.semanticHealth.textInputEventCount += 1;
     if (normalized.kind === "selection.changed") this.semanticHealth.selectionEventCount += 1;
-    for (const ready of this.burstCoalescer.ingest(normalized)) await this.persist(ready);
+    const burst = this.burstCoalescer.ingest(normalized);
+    if (burst.coalescedCount > 0) {
+      this.semanticHealth.burstCoalescedEventCount += burst.coalescedCount;
+      const closed = await this.segments.recordMetric(
+        event.timestamp,
+        "burstCoalesced",
+        burst.coalescedCount,
+      );
+      if (closed) this.scheduleTimeline(closed);
+    }
+    for (const ready of burst.ready) await this.persist(ready);
   }
 
   private async persist(event: HistoryEvent): Promise<void> {
     const closed = await this.segments.append(event);
+    this.semanticHealth.persistedEventCount += 1;
     if (closed) this.scheduleTimeline(closed);
   }
 
@@ -291,6 +348,8 @@ export class HistoryService extends EventEmitter {
     for (const event of this.burstCoalescer.flushExpired()) await this.persist(event);
     const closed = await this.segments.closeExpired();
     if (closed) this.scheduleTimeline(closed);
+    const recovered = await this.segments.recoverExpiredSegments();
+    for (const segment of recovered) this.scheduleTimeline(segment);
     const completed = await this.segments.pendingClosedSegments();
     await this.segments.pruneSegments(new Date(Date.now() - 48 * 60 * 60 * 1_000));
     void this.enqueueTimeline(async () => {
@@ -301,6 +360,7 @@ export class HistoryService extends EventEmitter {
 
   private async refreshDocuments(): Promise<void> {
     this.documents = await this.timeline.loadDocuments();
+    this.memories = await this.memory.refresh(this.documents);
     const bundleIdentifiers = [
       ...new Set(
         this.documents
@@ -332,6 +392,10 @@ export class HistoryService extends EventEmitter {
       endedAt: document.endedAt,
       title: document.title,
       description: document.description,
+      task: document.task,
+      progression: document.progression,
+      outcome: document.outcome,
+      openLoops: document.openLoops,
       activityState: document.activityState,
       applications: document.applications.map((application): TimelineApplication => ({
         ...application,
@@ -339,6 +403,20 @@ export class HistoryService extends EventEmitter {
       })),
       generatorType: document.generator.type,
       generatorFailureReason: document.generator.failureReason,
+    };
+  }
+
+  private publicMemory(record: MemoryRollupRecord): MemoryRollup {
+    return {
+      id: record.id,
+      kind: record.kind,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      title: record.title,
+      description: record.description,
+      tasks: record.tasks,
+      outcomes: record.outcomes,
+      openLoops: record.openLoops,
     };
   }
 

@@ -34,6 +34,15 @@ export function encodeTimelineMarkdown(document: TimelineDocumentRecord): string
     `description: ${quoted(document.description)}`,
   ];
   if (document.activityState) lines.push(`activity_state: ${quoted(document.activityState)}`);
+  if (document.task) lines.push(`task: ${quoted(document.task)}`);
+  if (document.outcome) lines.push(`outcome: ${quoted(document.outcome)}`);
+  const appendStringList = (name: string, values: string[]): void => {
+    lines.push(`${name}:`);
+    if (!values.length) lines.push("  []");
+    else lines.push(...values.map((value) => `  - ${quoted(value)}`));
+  };
+  appendStringList("progression", document.progression);
+  appendStringList("open_loops", document.openLoops);
   lines.push("applications:");
   if (!document.applications.length) {
     lines.push("  []");
@@ -46,6 +55,15 @@ export function encodeTimelineMarkdown(document: TimelineDocumentRecord): string
   lines.push("evidence_event_ids:");
   if (!document.evidenceEventIDs.length) lines.push("  []");
   else lines.push(...document.evidenceEventIDs.map((id) => `  - ${quoted(id)}`));
+  lines.push("claims:");
+  if (!document.claims.length) {
+    lines.push("  []");
+  } else {
+    for (const claim of document.claims) {
+      lines.push(`  - text: ${quoted(claim.text)}`);
+      lines.push(`    evidence_ids: ${quoted(claim.evidenceEventIDs.join(","))}`);
+    }
+  }
   lines.push("generator:");
   lines.push(`  type: ${quoted(document.generator.type)}`);
   lines.push(`  version: ${document.generator.version}`);
@@ -85,7 +103,8 @@ export function decodeTimelineMarkdown(
     if (!value) throw new Error(`Missing timeline field: ${key}`);
     return value;
   };
-  if (Number(required("schema_version")) !== 2) throw new Error("Unsupported timeline schema");
+  const schemaVersion = Number(required("schema_version"));
+  if (schemaVersion !== 2 && schemaVersion !== 3) throw new Error("Unsupported timeline schema");
 
   const parseIndented = (section: string): string[] => {
     const start = frontmatter.indexOf(`${section}:`);
@@ -117,6 +136,33 @@ export function decodeTimelineMarkdown(
     .map((line) => line.trim())
     .filter((line) => line.startsWith("-"))
     .map((line) => unquoted(line.slice(1)));
+  const parseStringList = (name: string): string[] =>
+    parseIndented(name)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("-"))
+      .map((line) => unquoted(line.slice(1)));
+  const claims: TimelineDocumentRecord["claims"] = [];
+  let pendingClaim: { text?: string; evidenceEventIDs?: string[] } = {};
+  for (const line of parseIndented("claims")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("- text:")) {
+      if (pendingClaim.text && pendingClaim.evidenceEventIDs?.length) {
+        claims.push({
+          text: pendingClaim.text,
+          evidenceEventIDs: pendingClaim.evidenceEventIDs,
+        });
+      }
+      pendingClaim = { text: valueAfterColon(trimmed) };
+    } else if (trimmed.startsWith("evidence_ids:")) {
+      pendingClaim.evidenceEventIDs = valueAfterColon(trimmed)
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+    }
+  }
+  if (pendingClaim.text && pendingClaim.evidenceEventIDs?.length) {
+    claims.push({ text: pendingClaim.text, evidenceEventIDs: pendingClaim.evidenceEventIDs });
+  }
   const generatorLines = parseIndented("generator").map((line) => line.trim());
   const generatorValue = (key: string): string | undefined => {
     const line = generatorLines.find((candidate) => candidate.startsWith(`${key}:`));
@@ -128,13 +174,18 @@ export function decodeTimelineMarkdown(
 
   const activityState = scalars.get("activity_state") as TimelineActivityState | undefined;
   return {
-    schemaVersion: 2,
+    schemaVersion,
     id: required("id"),
     sourceSegmentID: required("source_segment_id"),
     startedAt: required("started_at"),
     endedAt: required("ended_at"),
     title: required("title"),
     description: required("description"),
+    task: scalars.get("task"),
+    progression: parseStringList("progression"),
+    outcome: scalars.get("outcome"),
+    openLoops: parseStringList("open_loops"),
+    claims,
     activityState,
     applications,
     evidenceEventIDs,

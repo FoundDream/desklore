@@ -5,6 +5,7 @@ export function classifyKeyboardEvent(event: HistoryEvent): HistoryEvent {
   const key = event.interaction?.keyEquivalent?.toLowerCase() ?? "";
   if (!["return", "enter", "numpad-enter"].includes(key)) return event;
   const modifiers = new Set(event.interaction?.modifiers ?? []);
+  if (modifiers.has("shift") || modifiers.has("option")) return event;
   const role = event.target?.role ?? "";
   const label = [
     event.target?.identifier,
@@ -29,11 +30,18 @@ export function classifyKeyboardEvent(event: HistoryEvent): HistoryEvent {
     "回复",
     "输入问题",
   ];
+  const knownSubmitApplications = [
+    "com.openai.codex",
+    "com.openai.chat",
+    "com.bytedance.macos.feishu",
+    "com.tencent.xinWeChat",
+  ];
   const submits =
     modifiers.has("cmd") ||
     modifiers.has("ctrl") ||
     ["AXTextField", "AXSearchField", "AXComboBox"].includes(role) ||
-    submitMarkers.some((marker) => label.includes(marker));
+    submitMarkers.some((marker) => label.includes(marker)) ||
+    knownSubmitApplications.includes(event.application.bundleIdentifier);
   return submits ? { ...event, kind: "keyboard.submit" } : event;
 }
 
@@ -52,6 +60,10 @@ function payload(event: HistoryEvent): string {
   });
 }
 
+function windowIdentity(event: HistoryEvent): string {
+  return JSON.stringify({ application: event.application, window: event.window });
+}
+
 export class EventCoalescer {
   private readonly lastAcceptedByStream = new Map<string, HistoryEvent>();
   private readonly lastAcceptedTextByStream = new Map<string, string>();
@@ -68,25 +80,11 @@ export class EventCoalescer {
     }
 
     if (event.kind === "window.changed" && previous) {
-      const sameWindow =
-        payload({
-          ...event,
-          target: undefined,
-          interaction: undefined,
-          accessibility: undefined,
-        }) ===
-        payload({
-          ...previous,
-          target: undefined,
-          interaction: undefined,
-          accessibility: undefined,
-        });
-      if (sameWindow) {
-        if (elapsed <= 0.4) return undefined;
-        const hasNewAXContext =
-          event.accessibility !== undefined &&
-          JSON.stringify(event.accessibility) !== JSON.stringify(previous.accessibility);
-        if (!hasNewAXContext) return undefined;
+      if (
+        event.captureReason !== "focus_change" &&
+        windowIdentity(event) === windowIdentity(previous)
+      ) {
+        return undefined;
       }
     }
 
@@ -154,21 +152,21 @@ function burstWindow(kind: HistoryEventKind): number | undefined {
 export class EventBurstCoalescer {
   private readonly pendingByStream = new Map<string, HistoryEvent>();
 
-  ingest(event: HistoryEvent): HistoryEvent[] {
+  ingest(event: HistoryEvent): { ready: HistoryEvent[]; coalescedCount: number } {
     const window = burstWindow(event.kind);
-    if (window === undefined) return [event];
+    if (window === undefined) return { ready: [event], coalescedCount: 0 };
     const key = this.streamKey(event);
     const previous = this.pendingByStream.get(key);
     if (!previous) {
       this.pendingByStream.set(key, event);
-      return [];
+      return { ready: [], coalescedCount: 0 };
     }
     if (elapsedSeconds(event, previous) <= window) {
       this.pendingByStream.set(key, this.merge(previous, event));
-      return [];
+      return { ready: [], coalescedCount: event.occurrenceCount ?? 1 };
     }
     this.pendingByStream.set(key, event);
-    return [previous];
+    return { ready: [previous], coalescedCount: 0 };
   }
 
   flushExpired(date = new Date()): HistoryEvent[] {

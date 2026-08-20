@@ -27,6 +27,7 @@ const api: ComputerHistoryAPI = {
   revealStorage: () => invoke("history:reveal-storage"),
   getApplicationIcon: (iconPath: string) =>
     ipcRenderer.invoke("history:get-application-icon", iconPath),
+  searchMemory: (query: string) => ipcRenderer.invoke("history:search-memory", query),
   onSnapshot: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: DesktopSnapshot): void => {
       listener(snapshot);

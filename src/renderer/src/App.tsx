@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import type {
   AgentSnapshot,
   DesktopSnapshot,
+  HistorySearchResponse,
   TimelineApplication,
   TimelineDocument,
 } from "../../shared/contracts.js";
@@ -285,6 +286,7 @@ function TimelineCard({
   onAction: (action: "open" | "delete", id: string) => Promise<void>;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   return (
     <article className="timeline-entry">
       <time>{timeLabel(document.startedAt)}</time>
@@ -299,6 +301,52 @@ function TimelineCard({
           )}
         </div>
         <p>{document.description}</p>
+        {(document.task ||
+          document.progression.length ||
+          document.outcome ||
+          document.openLoops.length) && (
+          <>
+            <button className="details-toggle" onClick={() => setExpanded((value) => !value)}>
+              {expanded ? "收起任务细节" : "查看任务细节"}
+            </button>
+            {expanded && (
+              <div className="entry-details">
+                {document.task && (
+                  <>
+                    <strong>任务</strong>
+                    <p>{document.task}</p>
+                  </>
+                )}
+                {document.progression.length > 0 && (
+                  <>
+                    <strong>进展</strong>
+                    <ul>
+                      {document.progression.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {document.outcome && (
+                  <>
+                    <strong>结果</strong>
+                    <p>{document.outcome}</p>
+                  </>
+                )}
+                {document.openLoops.length > 0 && (
+                  <>
+                    <strong>未完成</strong>
+                    <ul>
+                      {document.openLoops.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
         {document.generatorFailureReason && (
           <div className="summary-error" role="status">
             <strong>摘要失败</strong>
@@ -348,6 +396,9 @@ function TimelineView({
   agent?: AgentSnapshot;
   run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
 }) {
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState<HistorySearchResponse>();
+  const [searching, setSearching] = useState(false);
   const days = useMemo(() => {
     const groups = new Map<string, TimelineDocument[]>();
     for (const document of agent?.documents ?? []) {
@@ -363,6 +414,20 @@ function TimelineView({
         ? window.computerHistory.openDocument(id)
         : window.computerHistory.deleteDocument(id),
     );
+  };
+
+  const submitSearch = async (): Promise<void> => {
+    const value = query.trim();
+    if (!value) {
+      setSearch(undefined);
+      return;
+    }
+    setSearching(true);
+    try {
+      setSearch(await window.computerHistory.searchMemory(value));
+    } finally {
+      setSearching(false);
+    }
   };
 
   return (
@@ -395,7 +460,43 @@ function TimelineView({
           </strong>
           <span>出现的应用</span>
         </div>
+        <div>
+          <strong>{agent?.memories.length ?? 0}</strong>
+          <span>长期记忆</span>
+        </div>
       </div>
+      <section className="memory-search">
+        <div>
+          <span className="section-kicker">本地记忆检索</span>
+          <h2>询问最近的工作</h2>
+        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitSearch();
+          }}
+        >
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="例如：Computer History 打包最后是什么状态？"
+            maxLength={500}
+          />
+          <button disabled={searching}>{searching ? "检索中" : "检索"}</button>
+        </form>
+        {search && (
+          <div className="memory-answer">
+            <p>{search.answer}</p>
+            <div>
+              {search.matches.slice(0, 5).map((match) => (
+                <span key={`${match.kind}-${match.id}`}>
+                  {match.kind} · {match.title}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
       <section className="archive">
         {!agent ? (
           <div className="empty-state">
@@ -497,6 +598,26 @@ function HealthView({
             <span>采集队列</span>
             <strong>{health?.axCaptureBacklog ?? 0}</strong>
           </div>
+          <div>
+            <span>原始事件</span>
+            <strong>{health?.capturedEventCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>已写入</span>
+            <strong>{health?.persistedEventCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>策略拦截</span>
+            <strong>{health?.policyBlockedEventCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>重复丢弃</span>
+            <strong>{health?.deduplicatedEventCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>合并事件</span>
+            <strong>{health?.burstCoalescedEventCount ?? 0}</strong>
+          </div>
         </div>
       </section>
     </>
@@ -511,6 +632,9 @@ function SettingsView({
   run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
 }) {
   const [enabled, setEnabled] = useState(agent?.llm.enabled ?? false);
+  const [memorySynthesisEnabled, setMemorySynthesisEnabled] = useState(
+    agent?.llm.memorySynthesisEnabled ?? false,
+  );
   const [model, setModel] = useState(agent?.llm.model ?? "gpt-5.6-luna");
   const [endpoint, setEndpoint] = useState(
     agent?.llm.endpoint ?? "https://api.openai.com/v1/responses",
@@ -519,9 +643,15 @@ function SettingsView({
   useEffect(() => {
     if (!agent) return;
     setEnabled(agent.llm.enabled);
+    setMemorySynthesisEnabled(agent.llm.memorySynthesisEnabled);
     setModel(agent.llm.model);
     setEndpoint(agent.llm.endpoint);
-  }, [agent?.llm.enabled, agent?.llm.model, agent?.llm.endpoint]);
+  }, [
+    agent?.llm.enabled,
+    agent?.llm.memorySynthesisEnabled,
+    agent?.llm.model,
+    agent?.llm.endpoint,
+  ]);
   return (
     <>
       <PageHeader eyebrow="偏好设置" title="设置" />
@@ -565,6 +695,7 @@ function SettingsView({
               void run(async () => {
                 const result = await window.computerHistory.configureLLM({
                   enabled,
+                  memorySynthesisEnabled,
                   model,
                   endpoint,
                   apiKey,
@@ -584,6 +715,26 @@ function SettingsView({
               移除密钥
             </button>
           )}
+        </div>
+        <div className="settings-subtoggle">
+          <div>
+            <strong>模型归纳长期记忆</strong>
+            <span>将本地十分钟摘要发送到同一模型 endpoint，生成 6 小时和每日综合记忆。</span>
+          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={memorySynthesisEnabled}
+              onChange={(event) => setMemorySynthesisEnabled(event.target.checked)}
+            />
+            <span />
+          </label>
+        </div>
+        <div className="privacy-boundary">
+          <strong>数据边界</strong>
+          <span>
+            原始事件、时间线和长期记忆保存在本机。开启语义摘要会发送经过过滤的事件样本；“模型归纳长期记忆”另行发送本地十分钟摘要。两个开关均关闭时，检索与确定性聚合完全离线。
+          </span>
         </div>
         <div className="settings-divider" />
         <div className="settings-section observation">
