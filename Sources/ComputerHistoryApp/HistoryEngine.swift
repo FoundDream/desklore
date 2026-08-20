@@ -45,6 +45,9 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var nextCaptureSequence = 0
     private var nextCaptureResultSequence = 0
     private var pendingCaptureResults: [Int: AXCaptureResult] = [:]
+    private let hostBundleIdentifier = ProcessInfo.processInfo.environment[
+        "COMPUTER_HISTORY_HOST_BUNDLE_ID"
+    ]
 
     func start() {
         guard !started else {
@@ -151,12 +154,14 @@ final class HistoryEngine: NSObject, ObservableObject {
         nextCaptureSequence += 1
         axCaptureBacklog = nextCaptureSequence - nextCaptureResultSequence
         let coordinator = axCaptureCoordinator
+        let shouldIncludeRichSnapshot = includeRichSnapshot
+            && application.bundleIdentifier != hostBundleIdentifier
         Task { [weak self] in
             let result = await coordinator.capture(
                 application: context,
                 kind: kind,
                 interaction: interaction,
-                includeRichSnapshot: includeRichSnapshot,
+                includeRichSnapshot: shouldIncludeRichSnapshot,
                 timestamp: timestamp
             )
             self?.receiveCaptureResult(result, sequence: sequence)

@@ -48,7 +48,10 @@ export class AgentClient extends EventEmitter {
   private stdoutBuffer = "";
   private readonly pending = new Map<string, PendingRequest>();
 
-  constructor(private readonly executableCandidates: string[]) {
+  constructor(
+    private readonly executableCandidates: string[],
+    private readonly hostBundleIdentifier?: string,
+  ) {
     super();
   }
 
@@ -69,7 +72,13 @@ export class AgentClient extends EventEmitter {
     }
 
     this.updateState("starting");
-    const child = spawn(executable, [], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(executable, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        COMPUTER_HISTORY_HOST_BUNDLE_ID: this.hostBundleIdentifier,
+      },
+    });
     this.process = child;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.consume(chunk));

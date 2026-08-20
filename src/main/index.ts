@@ -20,6 +20,7 @@ let quitting = false;
 const projectRoot = process.cwd();
 const collector = new AgentClient(
   agentExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
+  app.isPackaged ? "com.ziwen.computer-history.desktop" : "com.github.Electron",
 );
 const history = new HistoryService(
   collector,

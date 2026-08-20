@@ -7,7 +7,11 @@ import { sampleTimelineEvents } from "./lifecycle.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
 import { applyObservationPolicy, defaultObservationPolicy, sanitizeEvent } from "./policy.js";
 import { makeStorageLayout, SegmentStore, segmentIdentifier } from "./storage.js";
-import { rawActivityRecord, TimelineRepository } from "./timeline.js";
+import {
+  prepareTimelineEventsForModel,
+  rawActivityRecord,
+  TimelineRepository,
+} from "./timeline.js";
 import type { HistoryEvent, TimelineDocumentRecord } from "./types.js";
 
 const temporaryDirectories: string[] = [];
@@ -28,6 +32,16 @@ function event(overrides: Partial<HistoryEvent> = {}, index = 0): HistoryEvent {
     window: { title: "Computer History implementation", isPrivateBrowsing: false },
     ...overrides,
   };
+}
+
+function llmResponse(draft: Record<string, unknown>): Response {
+  return new Response(
+    JSON.stringify({
+      status: "completed",
+      output: [{ content: [{ type: "output_text", text: JSON.stringify(draft) }] }],
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 describe("TypeScript history core", () => {
@@ -265,6 +279,89 @@ describe("TypeScript history core", () => {
 
     expect(document?.generator.type).toBe("llm");
     expect(document?.activityState).toBe("planning");
+  });
+
+  it("bounds model input by total bytes while preserving temporal endpoints", () => {
+    const events = Array.from({ length: 400 }, (_, index) =>
+      event(
+        {
+          timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 0, index)).toISOString(),
+          accessibility: {
+            mode: "diffFromPrevious",
+            text: `${index} ${"rich accessibility context ".repeat(500)}`,
+          },
+        },
+        index,
+      ),
+    );
+
+    const prepared = prepareTimelineEventsForModel(events);
+
+    expect(prepared.length).toBeLessThanOrEqual(64);
+    expect(Buffer.byteLength(JSON.stringify(prepared), "utf8")).toBeLessThanOrEqual(120 * 1_024);
+    expect(prepared.some((item) => item.id === events[0]?.id)).toBe(true);
+    expect(prepared.some((item) => item.id === events.at(-1)?.id)).toBe(true);
+  });
+
+  it("retries an incomplete response with a smaller model input", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const events = Array.from({ length: 80 }, (_, index) =>
+      event(
+        {
+          timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, index)).toISOString(),
+          accessibility: {
+            mode: "diffFromPrevious",
+            text: "AXTreeDiff v2\n" + "context ".repeat(1_000),
+          },
+        },
+        index,
+      ),
+    );
+    for (const input of events) await store.append(input);
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    const requestSizes: number[] = [];
+    let requestCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        requestCount += 1;
+        const requestBody = typeof init?.body === "string" ? init.body : "";
+        requestSizes.push(Buffer.byteLength(requestBody, "utf8"));
+        if (requestCount === 1) {
+          return new Response(
+            JSON.stringify({
+              status: "incomplete",
+              incomplete_details: { reason: "max_output_tokens" },
+              output: [],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return llmResponse({
+          title: "恢复 Computer History 的结构化活动摘要",
+          description: "模型输出中断后缩小输入范围，并成功生成了结构化的活动时间线摘要。",
+          activity_state: "validated",
+          evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
+        });
+      }),
+    );
+    const repository = new TimelineRepository(layout, store, async () => ({
+      settings: {
+        enabled: true,
+        model: "gpt-5.6-luna",
+        endpoint: "https://api.openai.com/v1/responses",
+      },
+      apiKey: "test-key",
+    }));
+
+    const document = await repository.generateIfNeeded(closed!);
+
+    expect(document?.generator.type).toBe("llm");
+    expect(requestCount).toBe(2);
+    expect(requestSizes[1]).toBeLessThan(requestSizes[0]!);
   });
 
   it("keeps high-information accessibility evidence in a crowded sample", () => {

@@ -309,7 +309,10 @@ final class AXContextReader {
         let maximumVisitedNodes = 1_200
         let maximumOutputNodes = 800
         let maximumDepth = 20
-        let focusedPath = focusedElement.map(focusedPathIDs(from:)) ?? []
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.7
+        let focusedPath = focusedElement.map {
+            focusedPathIDs(from: $0, deadline: deadline)
+        } ?? []
         let focusedElementID = focusedElement.map(elementID)
         var metadataCache: [String: NodeMetadata] = [:]
         var stack = [
@@ -334,7 +337,8 @@ final class AXContextReader {
 
         while let pending = stack.popLast(),
               visitedNodeCount < maximumVisitedNodes,
-              nodes.count < maximumOutputNodes {
+              nodes.count < maximumOutputNodes,
+              ProcessInfo.processInfo.systemUptime < deadline {
             let id = elementID(pending.element)
             guard visitedIDs.insert(id).inserted else { continue }
             visitedNodeCount += 1
@@ -384,8 +388,10 @@ final class AXContextReader {
                 )
             }
 
-            let prioritizedChildren = childElements.enumerated().map { index, child in
-                (
+            var prioritizedChildren: [(pending: PendingElement, priority: Int)] = []
+            for (index, child) in childElements.enumerated() {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+                prioritizedChildren.append((
                     pending: PendingElement(
                         element: child,
                         parentID: id,
@@ -396,7 +402,7 @@ final class AXContextReader {
                         metadata: metadata(for: child),
                         isOnFocusedPath: focusedPath.contains(elementID(child))
                     )
-                )
+                ))
             }
             // The stack is LIFO, so append lower-priority nodes first.
             stack.append(contentsOf: prioritizedChildren
@@ -411,6 +417,7 @@ final class AXContextReader {
         let wasTruncated = !stack.isEmpty
             || visitedNodeCount >= maximumVisitedNodes
             || nodes.count >= maximumOutputNodes
+            || ProcessInfo.processInfo.systemUptime >= deadline
         return AXTreeSnapshot(
             nodes: nodes,
             visitedNodeCount: visitedNodeCount,
@@ -459,11 +466,16 @@ final class AXContextReader {
         return PrivacySanitizer.clean(raw, limit: 1_024)
     }
 
-    private func focusedPathIDs(from focusedElement: AXUIElement) -> Set<String> {
+    private func focusedPathIDs(
+        from focusedElement: AXUIElement,
+        deadline: TimeInterval
+    ) -> Set<String> {
         var result: Set<String> = []
         var current: AXUIElement? = focusedElement
         var depth = 0
-        while let element = current, depth < 32 {
+        while let element = current,
+              depth < 32,
+              ProcessInfo.processInfo.systemUptime < deadline {
             let id = elementID(element)
             guard result.insert(id).inserted else { break }
             current = self.element(

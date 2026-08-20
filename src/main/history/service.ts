@@ -121,6 +121,7 @@ export class HistoryService extends EventEmitter {
           (lhs, rhs) => Date.parse(lhs.metadata.startedAt) - Date.parse(rhs.metadata.startedAt),
         ),
       );
+      await this.timeline.retryFallbackDocuments([...byID.values()], new Date(), 0);
       await this.refreshDocuments();
     }).catch((error) => this.captureError(error));
     return this.current();

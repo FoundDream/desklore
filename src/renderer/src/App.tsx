@@ -27,6 +27,11 @@ const summaryFailureLabels: Record<string, string> = {
   empty_fields: "模型返回了空标题或描述",
   content_too_long: "模型返回内容过长",
   missing_output: "模型没有返回摘要文本",
+  incomplete_max_output_tokens: "模型输出达到长度上限",
+  incomplete_content_filter: "模型输出被内容过滤中断",
+  incomplete_unknown: "模型输出未完成",
+  model_refusal: "模型拒绝生成摘要",
+  response_failed: "模型响应执行失败",
   network_timeout: "模型请求超时",
   network_dns_failed: "模型服务域名无法解析",
   network_cannot_connect: "无法连接模型服务",
@@ -283,9 +288,7 @@ function TimelineCard({
   return (
     <article className="timeline-entry">
       <time>{timeLabel(document.startedAt)}</time>
-      <div className={`timeline-rail ${isLast ? "last" : ""}`}>
-        <span />
-      </div>
+      <div className={`timeline-rail ${isLast ? "last" : ""}`} />
       <div className="entry-body">
         <div className="entry-title">
           <h3>{document.title}</h3>
