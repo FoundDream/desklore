@@ -6,6 +6,7 @@ import Foundation
 final class InteractionMonitor {
     var onInteraction: ((HistoryEvent.Kind, InteractionCapture) -> Void)?
     var onBeforeFocusChangingInteraction: (() -> Void)?
+    var onTypingActivity: (() -> Void)?
     private var monitor: Any?
     private var pendingLeftMouse: PendingLeftMouse?
     private let navigationKeyNames: [UInt16: String] = [
@@ -139,6 +140,7 @@ final class InteractionMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
+        if isTypingActivity(event) { onTypingActivity?() }
         if event.keyCode == 36 || event.keyCode == 76 {
             onInteraction?(
                 .keyboardShortcut,
@@ -171,6 +173,24 @@ final class InteractionMonitor {
                     modifiers: modifierNames(event.modifierFlags)
                 )
             )
+        }
+    }
+
+    private func isTypingActivity(_ event: NSEvent) -> Bool {
+        if event.keyCode == 51 || event.keyCode == 117 { return true }
+        if navigationKeyNames[event.keyCode] != nil { return false }
+        let commandModifiers = event.modifierFlags.intersection([.command, .control, .option])
+        if commandModifiers == [.command] {
+            let key = event.charactersIgnoringModifiers?.lowercased()
+            return key == "v" || key == "x" || key == "z"
+        }
+        guard commandModifiers.isEmpty,
+              let characters = event.characters,
+              !characters.isEmpty else {
+            return false
+        }
+        return characters.unicodeScalars.contains {
+            !CharacterSet.controlCharacters.contains($0)
         }
     }
 

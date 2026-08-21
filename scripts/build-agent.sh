@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-EXPECTED_ROOT="/Users/ziwen/code/computer-history"
+GIT_TOP_LEVEL="$(git -C "$PROJECT_ROOT" rev-parse --path-format=absolute --show-toplevel)"
 
-if [[ "$PROJECT_ROOT" != "$EXPECTED_ROOT" ]]; then
-  echo "Refusing to package from unexpected project root: $PROJECT_ROOT" >&2
+if [[ "$PROJECT_ROOT" != "$GIT_TOP_LEVEL" ]]; then
+  echo "Refusing to package outside the Computer History repository: $PROJECT_ROOT" >&2
   exit 1
 fi
 

@@ -91,6 +91,9 @@ final class HistoryEngine: NSObject, ObservableObject {
         interactionMonitor.onBeforeFocusChangingInteraction = { [weak self] in
             self?.axNotificationMonitor.flushPendingChanges()
         }
+        interactionMonitor.onTypingActivity = { [weak self] in
+            self?.axNotificationMonitor.noteTypingActivity()
+        }
         interactionMonitor.start()
         interactionMonitorActive = interactionMonitor.isActive
 

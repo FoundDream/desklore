@@ -1,6 +1,7 @@
 import AppKit
 @preconcurrency import ApplicationServices
 import ComputerHistoryCore
+import CryptoKit
 import Foundation
 
 struct InteractionCapture: Sendable {
@@ -48,9 +49,17 @@ struct RunningApplicationContext: Sendable {
     @MainActor
     init(_ application: NSRunningApplication) {
         processIdentifier = application.processIdentifier
+        let resolvedName = application.localizedName ?? "Unknown application"
+        name = resolvedName
         bundleIdentifier = application.bundleIdentifier
-            ?? "pid.\(application.processIdentifier)"
-        name = application.localizedName ?? "Unknown application"
+            ?? application.bundleURL.flatMap { Bundle(url: $0)?.bundleIdentifier }
+            ?? Self.fallbackBundleIdentifier(for: resolvedName)
+    }
+
+    private static func fallbackBundleIdentifier(for name: String) -> String {
+        let digest = SHA256.hash(data: Data(name.utf8))
+        let suffix = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return "local.unbundled.\(suffix)"
     }
 }
 

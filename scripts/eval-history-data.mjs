@@ -49,6 +49,10 @@ export function normalizedEvent(value, source) {
       value.application?.bundleIdentifier ??
       value.application?.bundle_identifier ??
       value.app?.bundleIdentifier,
+    captureReason:
+      typeof (value.captureReason ?? value.capture_reason) === "string"
+        ? (value.captureReason ?? value.capture_reason)
+        : undefined,
     url: typeof value.window?.url === "string" ? value.window.url : undefined,
     axText:
       (candidate ? value.accessibility?.text : value.ax?.text) ??
@@ -120,6 +124,10 @@ function multisetIntersection(lhs, rhs, key) {
 
 function appIdentity(event) {
   return event.bundleIdentifier || event.app;
+}
+
+function isUnstableBundleIdentifier(value) {
+  return typeof value === "string" && /^pid\.\d+$/.test(value);
 }
 
 function eventKey(event) {
@@ -272,6 +280,88 @@ export function evaluateEvents(candidateEvents, referenceEvents, toleranceMillis
   };
 }
 
+export function diagnosticSummary(candidateEvents, referenceEvents, toleranceMilliseconds) {
+  const segmentIDs = new Set([
+    ...candidateEvents.map((event) => event.segmentID).filter(Boolean),
+    ...referenceEvents.map((event) => event.segmentID).filter(Boolean),
+  ]);
+  const perSegment = [...segmentIDs]
+    .sort((lhs, rhs) => lhs.localeCompare(rhs))
+    .map((segmentID) => {
+      const candidate = candidateEvents.filter((event) => event.segmentID === segmentID);
+      const reference = referenceEvents.filter((event) => event.segmentID === segmentID);
+      return {
+        segmentID,
+        candidate: candidate.length,
+        reference: reference.length,
+        ...evaluateEvents(candidate, reference, toleranceMilliseconds).tolerant,
+      };
+    });
+
+  const streamKeys = new Set([...candidateEvents.map(eventKey), ...referenceEvents.map(eventKey)]);
+  const largestStreamGaps = [...streamKeys]
+    .map((key) => {
+      const separator = key.indexOf("\u001f");
+      const kind = key.slice(0, separator);
+      const application = key.slice(separator + 1);
+      const candidate = candidateEvents.filter((event) => eventKey(event) === key);
+      const reference = referenceEvents.filter((event) => eventKey(event) === key);
+      const matches = tolerantMatchCount(candidate, reference, toleranceMilliseconds);
+      return {
+        kind,
+        application,
+        candidate: candidate.length,
+        reference: reference.length,
+        difference: candidate.length - reference.length,
+        ...score(matches, candidate.length, reference.length),
+      };
+    })
+    .sort(
+      (lhs, rhs) =>
+        Math.abs(rhs.difference) - Math.abs(lhs.difference) ||
+        rhs.candidate + rhs.reference - (lhs.candidate + lhs.reference),
+    )
+    .slice(0, 20);
+
+  const captureReasons = { candidate: new Map(), reference: new Map() };
+  for (const event of candidateEvents) {
+    increment(captureReasons.candidate, `${event.kind} / ${event.captureReason ?? "<missing>"}`);
+  }
+  for (const event of referenceEvents) {
+    increment(captureReasons.reference, `${event.kind} / ${event.captureReason ?? "<missing>"}`);
+  }
+  const unstableApplications = { candidate: new Map(), reference: new Map() };
+  for (const event of candidateEvents) {
+    if (isUnstableBundleIdentifier(event.bundleIdentifier)) {
+      increment(unstableApplications.candidate, `${event.bundleIdentifier} / ${event.app}`);
+    }
+  }
+  for (const event of referenceEvents) {
+    if (isUnstableBundleIdentifier(event.bundleIdentifier)) {
+      increment(unstableApplications.reference, `${event.bundleIdentifier} / ${event.app}`);
+    }
+  }
+  const candidateKinds = new Set(candidateEvents.map((event) => event.kind));
+  const referenceOnlyKinds = new Map();
+  for (const event of referenceEvents) {
+    if (!candidateKinds.has(event.kind)) increment(referenceOnlyKinds, event.kind);
+  }
+
+  return {
+    perSegment,
+    largestStreamGaps,
+    captureReasons: {
+      candidate: objectFromCounts(captureReasons.candidate),
+      reference: objectFromCounts(captureReasons.reference),
+    },
+    unstableApplications: {
+      candidate: objectFromCounts(unstableApplications.candidate),
+      reference: objectFromCounts(unstableApplications.reference),
+    },
+    referenceOnlyKinds: objectFromCounts(referenceOnlyKinds),
+  };
+}
+
 function evaluateSlice(
   candidateDataset,
   referenceDataset,
@@ -287,6 +377,7 @@ function evaluateSlice(
     candidate: summarize(candidateDataset, segmentIDs, excludedBundles),
     reference: summarize(referenceDataset, segmentIDs, excludedBundles),
     matches: evaluateEvents(candidateEvents, referenceEvents, toleranceMilliseconds),
+    diagnostics: diagnosticSummary(candidateEvents, referenceEvents, toleranceMilliseconds),
   };
 }
 
@@ -294,11 +385,43 @@ function percent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function markdownCell(value) {
+  return String(value).replaceAll("|", "\\|").replaceAll(/\r?\n/g, " ");
+}
+
 function sliceMarkdown(title, slice, toleranceMilliseconds) {
   const rows = Object.entries(slice.matches.byKind)
     .map(
       ([kind, value]) =>
         `| ${kind} | ${value.candidate} | ${value.reference} | ${value.matches} | ${percent(value.precision)} | ${percent(value.recall)} | ${percent(value.f1)} |`,
+    )
+    .join("\n");
+  const segmentRows = slice.diagnostics.perSegment
+    .map(
+      (value) =>
+        `| ${markdownCell(value.segmentID)} | ${value.candidate} | ${value.reference} | ${percent(value.precision)} | ${percent(value.recall)} | ${percent(value.f1)} |`,
+    )
+    .join("\n");
+  const streamGapRows = slice.diagnostics.largestStreamGaps
+    .map(
+      (value) =>
+        `| ${markdownCell(value.kind)} | ${markdownCell(value.application)} | ${value.candidate} | ${value.reference} | ${value.difference} | ${percent(value.precision)} | ${percent(value.recall)} |`,
+    )
+    .join("\n");
+  const captureReasonKeys = new Set([
+    ...Object.keys(slice.diagnostics.captureReasons.candidate),
+    ...Object.keys(slice.diagnostics.captureReasons.reference),
+  ]);
+  const captureReasonRows = [...captureReasonKeys]
+    .sort(
+      (lhs, rhs) =>
+        (slice.diagnostics.captureReasons.candidate[rhs] ?? 0) -
+        (slice.diagnostics.captureReasons.candidate[lhs] ?? 0),
+    )
+    .slice(0, 20)
+    .map(
+      (key) =>
+        `| ${markdownCell(key)} | ${slice.diagnostics.captureReasons.candidate[key] ?? 0} | ${slice.diagnostics.captureReasons.reference[key] ?? 0} |`,
     )
     .join("\n");
   return (
@@ -309,7 +432,16 @@ function sliceMarkdown(title, slice, toleranceMilliseconds) {
     `- Exact timestamp/kind/app matches: ${slice.matches.exact.matches} (F1 ${percent(slice.matches.exact.f1)})\n` +
     `- ±${toleranceMilliseconds} ms kind/app matches: ${slice.matches.tolerant.matches} (precision ${percent(slice.matches.tolerant.precision)}, recall ${percent(slice.matches.tolerant.recall)}, F1 ${percent(slice.matches.tolerant.f1)})\n\n` +
     `| Event kind | Candidate | Reference | ± tolerance matches | Precision | Recall | F1 |\n` +
-    `| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n${rows}\n`
+    `| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n${rows}\n\n` +
+    `### Per-segment diagnostics\n\n` +
+    `| Segment | Candidate | Reference | Precision | Recall | F1 |\n` +
+    `| --- | ---: | ---: | ---: | ---: | ---: |\n${segmentRows}\n\n` +
+    `### Largest kind/application count gaps\n\n` +
+    `| Kind | Application identity | Candidate | Reference | Difference | Precision | Recall |\n` +
+    `| --- | --- | ---: | ---: | ---: | ---: | ---: |\n${streamGapRows}\n\n` +
+    `### Capture-reason diagnostics\n\n` +
+    `| Kind / reason | Candidate | Reference |\n` +
+    `| --- | ---: | ---: |\n${captureReasonRows}\n`
   );
 }
 
