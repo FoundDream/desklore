@@ -4,6 +4,11 @@ import ComputerHistoryCore
 import Foundation
 
 final class AXNotificationMonitor: @unchecked Sendable {
+    private struct NotificationSubscription {
+        let element: AXUIElement
+        let notification: CFString
+    }
+
     var onContextChanged: (
         @Sendable (
             HistoryEvent.Kind,
@@ -14,8 +19,8 @@ final class AXNotificationMonitor: @unchecked Sendable {
 
     private var observer: AXObserver?
     private var applicationElement: AXUIElement?
-    private var valueElements: [AXUIElement] = []
-    private var selectionElements: [AXUIElement] = []
+    private var valueSubscriptions: [NotificationSubscription] = []
+    private var selectionSubscriptions: [NotificationSubscription] = []
     private var processIdentifier: pid_t?
     private var focusedElement: AXUIElement?
     private var fallbackTimer: Timer?
@@ -23,12 +28,17 @@ final class AXNotificationMonitor: @unchecked Sendable {
     private var lastSelectedText: String?
     private var pendingTextChange: DispatchWorkItem?
     private var pendingSelectionChange: DispatchWorkItem?
+    private var pendingTitleChange: DispatchWorkItem?
     private var pendingTextCapture: InteractionCapture?
     private var pendingSelectionCapture: InteractionCapture?
     private var pendingTextStartedAt: Date?
     private var pendingSelectionStartedAt: Date?
+    private var pendingTitleStartedAt: Date?
     private var hasPendingTextChange = false
     private var hasPendingSelectionChange = false
+    private var hasPendingTitleChange = false
+    private var lastTypingActivityAt: Date?
+    private var semanticEventGate = SemanticEventGate()
 
     private static let selectionNotifications: [CFString] = [
         kAXSelectedTextChangedNotification as CFString,
@@ -36,6 +46,28 @@ final class AXNotificationMonitor: @unchecked Sendable {
         kAXSelectedRowsChangedNotification as CFString,
         kAXSelectedColumnsChangedNotification as CFString,
         kAXSelectedCellsChangedNotification as CFString,
+    ]
+    private static let selectionNotificationAttributes: [(CFString, CFString)] = [
+        (
+            kAXSelectedTextChangedNotification as CFString,
+            kAXSelectedTextAttribute as CFString
+        ),
+        (
+            kAXSelectedChildrenChangedNotification as CFString,
+            kAXSelectedChildrenAttribute as CFString
+        ),
+        (
+            kAXSelectedRowsChangedNotification as CFString,
+            kAXSelectedRowsAttribute as CFString
+        ),
+        (
+            kAXSelectedColumnsChangedNotification as CFString,
+            kAXSelectedColumnsAttribute as CFString
+        ),
+        (
+            kAXSelectedCellsChangedNotification as CFString,
+            kAXSelectedCellsAttribute as CFString
+        ),
     ]
 
     private(set) var valueNotificationTargetCount = 0
@@ -63,8 +95,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
             kAXFocusedUIElementChangedNotification as CFString,
             kAXWindowCreatedNotification as CFString,
             kAXTitleChangedNotification as CFString,
-            kAXValueChangedNotification as CFString,
-        ] + Self.selectionNotifications
+        ]
 
         for notification in notifications {
             _ = AXObserverAddNotification(
@@ -103,6 +134,10 @@ final class AXNotificationMonitor: @unchecked Sendable {
         pendingSelectionCapture = nil
         pendingSelectionStartedAt = nil
         hasPendingSelectionChange = false
+        pendingTitleChange?.cancel()
+        pendingTitleChange = nil
+        pendingTitleStartedAt = nil
+        hasPendingTitleChange = false
         fallbackTimer?.invalidate()
         fallbackTimer = nil
         removeFocusedElementSubscriptions()
@@ -115,14 +150,23 @@ final class AXNotificationMonitor: @unchecked Sendable {
         }
         observer = nil
         applicationElement = nil
-        valueElements = []
-        selectionElements = []
+        valueSubscriptions = []
+        selectionSubscriptions = []
         valueNotificationTargetCount = 0
         selectionNotificationTargetCount = 0
         processIdentifier = nil
         focusedElement = nil
         lastFocusedValue = nil
         lastSelectedText = nil
+        lastTypingActivityAt = nil
+        semanticEventGate.reset()
+    }
+
+    func noteTypingActivity() {
+        lastTypingActivityAt = Date()
+        if valueSubscriptions.isEmpty {
+            refreshFocusedElementSubscriptions()
+        }
     }
 
     private func refreshFocusedElementSubscriptions() {
@@ -142,7 +186,6 @@ final class AXNotificationMonitor: @unchecked Sendable {
 
         let element = unsafeDowncast(value, to: AXUIElement.self)
         focusedElement = element
-        lastFocusedValue = safeValue(from: element)
         lastSelectedText = string(
             attribute: kAXSelectedTextAttribute as CFString,
             from: element
@@ -152,64 +195,123 @@ final class AXNotificationMonitor: @unchecked Sendable {
             startingAt: element,
             maximumDepth: 12
         )
-        var valueElements: [AXUIElement] = []
-        var selectionElements: [AXUIElement] = []
-        for semanticElement in semanticElements {
-            if AXObserverAddNotification(
-                observer,
-                semanticElement,
-                kAXValueChangedNotification as CFString,
-                refcon
-            ) == .success {
-                valueElements.append(semanticElement)
+        let candidates = semanticElements.map { element in
+            (element: element, attributes: attributeNames(from: element))
+        }
+        let valueNotification = kAXValueChangedNotification as CFString
+        let valueTarget = candidates.first {
+            $0.attributes.contains(kAXValueAttribute as String)
+                && isEditableTextElement($0.element)
+        }?.element
+        lastFocusedValue = valueTarget.flatMap(safeValue)
+        let registeredValueTarget = valueTarget.flatMap {
+            register(
+                notification: valueNotification,
+                preferredElement: $0,
+                fallbackElement: applicationElement,
+                observer: observer,
+                refcon: refcon
+            )
+        }
+        valueSubscriptions = registeredValueTarget.map {
+            [NotificationSubscription(element: $0, notification: valueNotification)]
+        } ?? []
+
+        selectionSubscriptions = Self.selectionNotificationAttributes.compactMap {
+            notification, attribute in
+            guard let preferredElement = candidates.first(where: {
+                $0.attributes.contains(attribute as String)
+            })?.element else {
+                return nil
             }
-            var observesSelection = false
-            for notification in Self.selectionNotifications where AXObserverAddNotification(
-                observer,
-                semanticElement,
-                notification,
-                refcon
-            ) == .success {
-                observesSelection = true
-            }
-            if observesSelection {
-                selectionElements.append(semanticElement)
+            return register(
+                notification: notification,
+                preferredElement: preferredElement,
+                fallbackElement: applicationElement,
+                observer: observer,
+                refcon: refcon
+            ).map {
+                NotificationSubscription(element: $0, notification: notification)
             }
         }
-        self.valueElements = valueElements
-        self.selectionElements = selectionElements
-        valueNotificationTargetCount = valueElements.count
-        selectionNotificationTargetCount = selectionElements.count
+        valueNotificationTargetCount = uniqueElementCount(
+            valueSubscriptions.map(\.element)
+        )
+        selectionNotificationTargetCount = uniqueElementCount(
+            selectionSubscriptions.map(\.element)
+        )
     }
 
     private func removeFocusedElementSubscriptions() {
         guard let observer else {
-            valueElements = []
-            selectionElements = []
+            valueSubscriptions = []
+            selectionSubscriptions = []
             valueNotificationTargetCount = 0
             selectionNotificationTargetCount = 0
             return
         }
-        for valueElement in valueElements {
+        for subscription in valueSubscriptions {
             _ = AXObserverRemoveNotification(
                 observer,
-                valueElement,
-                kAXValueChangedNotification as CFString
+                subscription.element,
+                subscription.notification
             )
         }
-        for selectionElement in selectionElements {
-            for notification in Self.selectionNotifications {
-                _ = AXObserverRemoveNotification(
-                    observer,
-                    selectionElement,
-                    notification
-                )
-            }
+        for subscription in selectionSubscriptions {
+            _ = AXObserverRemoveNotification(
+                observer,
+                subscription.element,
+                subscription.notification
+            )
         }
-        valueElements = []
-        selectionElements = []
+        valueSubscriptions = []
+        selectionSubscriptions = []
         valueNotificationTargetCount = 0
         selectionNotificationTargetCount = 0
+    }
+
+    private func register(
+        notification: CFString,
+        preferredElement: AXUIElement?,
+        fallbackElement: AXUIElement,
+        observer: AXObserver,
+        refcon: UnsafeMutableRawPointer
+    ) -> AXUIElement? {
+        if let preferredElement,
+           AXObserverAddNotification(
+               observer,
+               preferredElement,
+               notification,
+               refcon
+           ) == .success {
+            return preferredElement
+        }
+        guard AXObserverAddNotification(
+            observer,
+            fallbackElement,
+            notification,
+            refcon
+        ) == .success else {
+            return nil
+        }
+        return fallbackElement
+    }
+
+    private func attributeNames(from element: AXUIElement) -> Set<String> {
+        var names: CFArray?
+        guard AXUIElementCopyAttributeNames(element, &names) == .success,
+              let names else {
+            return []
+        }
+        return Set((names as? [String]) ?? [])
+    }
+
+    private func uniqueElementCount(_ elements: [AXUIElement]) -> Int {
+        elements.reduce(into: [AXUIElement]()) { unique, element in
+            if !unique.contains(where: { CFEqual($0, element) }) {
+                unique.append(element)
+            }
+        }.count
     }
 
     private func elementAndAncestors(
@@ -258,26 +360,32 @@ final class AXNotificationMonitor: @unchecked Sendable {
             if let focusedElement, CFEqual(semanticElement, focusedElement) {
                 lastSelectedText = selection
             }
-            debounceSelectionChange(
-                capture: semanticCapture(
-                    from: semanticElement,
-                    selectedText: selection
-                )
+            let capture = semanticCapture(
+                from: semanticElement,
+                selectedText: selection
             )
+            guard semanticEventGate.acceptsSelection(
+                streamID: selectionStreamID(notification: name, capture: capture),
+                selectedText: selection
+            ) else { return }
+            debounceSelectionChange(capture: capture)
         } else if name == kAXValueChangedNotification as String {
             let semanticElement = normalizedSemanticElement(element)
+            guard isEditableTextElement(semanticElement), hasRecentTypingActivity else { return }
             let value = safeValue(from: semanticElement)
-            if let focusedElement, CFEqual(semanticElement, focusedElement) {
-                lastFocusedValue = value
-            }
             guard value != nil else { return }
+            let previousValue = lastFocusedValue
+            guard value != previousValue else { return }
+            lastFocusedValue = value
+            if previousValue == nil, value?.isEmpty == true { return }
             debounceTextChange(
                 capture: semanticCapture(from: semanticElement, text: value)
             )
         } else if name == kAXTitleChangedNotification as String {
-            onContextChanged?(.windowChanged, .titleChange, nil)
+            debounceTitleChange()
         } else if name == kAXFocusedWindowChangedNotification as String
                     || name == kAXWindowCreatedNotification as String {
+            discardPendingTitleChange()
             onContextChanged?(.windowChanged, .windowFocus, nil)
         } else {
             return
@@ -289,7 +397,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
         pendingTextCapture = capture
         if pendingTextStartedAt == nil { pendingTextStartedAt = now }
         if let startedAt = pendingTextStartedAt,
-           now.timeIntervalSince(startedAt) >= 0.75 {
+           now.timeIntervalSince(startedAt) >= 1 {
             flushPendingTextChange()
             return
         }
@@ -300,7 +408,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
         hasPendingTextChange = true
         pendingTextChange = workItem
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + 0.25,
+            deadline: .now() + 0.35,
             execute: workItem
         )
     }
@@ -322,6 +430,26 @@ final class AXNotificationMonitor: @unchecked Sendable {
         pendingSelectionChange = workItem
         DispatchQueue.main.asyncAfter(
             deadline: .now() + 0.08,
+            execute: workItem
+        )
+    }
+
+    private func debounceTitleChange() {
+        let now = Date()
+        if pendingTitleStartedAt == nil { pendingTitleStartedAt = now }
+        if let startedAt = pendingTitleStartedAt,
+           now.timeIntervalSince(startedAt) >= 20 {
+            flushPendingTitleChange()
+            return
+        }
+        pendingTitleChange?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.flushPendingTitleChange()
+        }
+        hasPendingTitleChange = true
+        pendingTitleChange = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + 1,
             execute: workItem
         )
     }
@@ -353,12 +481,31 @@ final class AXNotificationMonitor: @unchecked Sendable {
         onContextChanged?(.selectionChanged, .axSelection, capture)
     }
 
+    private func flushPendingTitleChange() {
+        guard hasPendingTitleChange else { return }
+        pendingTitleChange?.cancel()
+        pendingTitleChange = nil
+        pendingTitleStartedAt = nil
+        hasPendingTitleChange = false
+        onContextChanged?(.windowChanged, .titleChange, nil)
+    }
+
+    private func discardPendingTitleChange() {
+        pendingTitleChange?.cancel()
+        pendingTitleChange = nil
+        pendingTitleStartedAt = nil
+        hasPendingTitleChange = false
+    }
+
     private func pollFocusedSemantics() {
         guard let focusedElement else { return }
-        let value = safeValue(from: focusedElement)
+        let value = isEditableTextElement(focusedElement) && hasRecentTypingActivity
+            ? safeValue(from: focusedElement)
+            : nil
         if value != lastFocusedValue {
+            let previousValue = lastFocusedValue
             lastFocusedValue = value
-            if let value {
+            if let value, previousValue != nil || !value.isEmpty {
                 debounceTextChange(
                     capture: semanticCapture(from: focusedElement, text: value)
                 )
@@ -394,6 +541,24 @@ final class AXNotificationMonitor: @unchecked Sendable {
         )
     }
 
+    private func selectionStreamID(
+        notification: String,
+        capture: InteractionCapture
+    ) -> String {
+        let target = capture.semanticTarget
+        return [
+            notification,
+            target?.role,
+            target?.subrole,
+            target?.identifier,
+            target?.title,
+            target?.description,
+            target?.placeholder,
+        ]
+        .map { $0 ?? "" }
+        .joined(separator: "\u{1f}")
+    }
+
     private func targetContext(from element: AXUIElement) -> HistoryEvent.Target {
         let target = HistoryEvent.Target(
             role: clean(kAXRoleAttribute as CFString, from: element, limit: 128),
@@ -419,8 +584,38 @@ final class AXNotificationMonitor: @unchecked Sendable {
             title: target.title,
             description: target.description,
             placeholder: target.placeholder,
-            value: safeValue(from: element)
+            value: isEditableTextElement(element) && hasRecentTypingActivity
+                ? safeValue(from: element)
+                : nil
         )
+    }
+
+    private func isEditableTextElement(_ element: AXUIElement) -> Bool {
+        let role = string(attribute: kAXRoleAttribute as CFString, from: element)
+        if role == "AXSecureTextField" { return false }
+        let explicitTextRoles: Set<String> = [
+            "AXTextField",
+            "AXTextArea",
+            "AXSearchField",
+            "AXComboBox",
+        ]
+        if let role, explicitTextRoles.contains(role) { return true }
+
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(
+            element,
+            kAXValueAttribute as CFString,
+            &settable
+        ) == .success,
+        settable.boolValue else {
+            return false
+        }
+        return true
+    }
+
+    private var hasRecentTypingActivity: Bool {
+        guard let lastTypingActivityAt else { return false }
+        return Date().timeIntervalSince(lastTypingActivityAt) <= 2
     }
 
     private func selectedText(from element: AXUIElement) -> String? {

@@ -111,6 +111,54 @@ describe("TypeScript history core", () => {
     expect(bursts.flushAll()[0]?.occurrenceCount).toBe(2);
   });
 
+  it("rejects non-editable and initial empty text value notifications", () => {
+    const coalescer = new EventCoalescer();
+    expect(
+      coalescer.process(
+        event({
+          kind: "keyboard.text_input",
+          target: { role: "AXStaticText", value: "rendered output" },
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      coalescer.process(
+        event({
+          kind: "keyboard.text_input",
+          target: { role: "AXTextField", value: "" },
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps activations immediate and coalesces title churn to the latest window", () => {
+    const bursts = new EventBurstCoalescer();
+    const activation = event({ captureReason: "application_activation" }, 1);
+    expect(bursts.ingest(activation)).toEqual({ ready: [activation], coalescedCount: 0 });
+
+    const firstTitle = event(
+      {
+        captureReason: "title_change",
+        window: { title: "Loading", isPrivateBrowsing: false },
+      },
+      2,
+    );
+    const settledTitle = event(
+      {
+        timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 3)).toISOString(),
+        captureReason: "title_change",
+        window: { title: "Settled", isPrivateBrowsing: false },
+      },
+      3,
+    );
+    expect(bursts.ingest(firstTitle).ready).toEqual([]);
+    expect(bursts.ingest(settledTitle)).toEqual({ ready: [], coalescedCount: 1 });
+    expect(bursts.flushAll()[0]).toMatchObject({
+      window: { title: "Settled" },
+      occurrenceCount: 2,
+    });
+  });
+
   it("classifies Return semantics in TypeScript using the captured AX target", () => {
     const submit = classifyKeyboardEvent(
       event({
@@ -190,6 +238,46 @@ describe("TypeScript history core", () => {
         ),
       ),
     ).toBeUndefined();
+    expect(
+      coalescer.process(
+        event(
+          {
+            ...structuralSelection,
+            timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 4, 100)).toISOString(),
+          },
+          3,
+        ),
+      ),
+    ).toBeDefined();
+    expect(
+      coalescer.process(
+        event(
+          {
+            ...structuralSelection,
+            timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 4, 200)).toISOString(),
+            target: { role: "AXRow", identifier: "next-row" },
+          },
+          4,
+        ),
+      ),
+    ).toBeDefined();
+  });
+
+  it("drops noisy selection roles and empty text caret changes", () => {
+    const coalescer = new EventCoalescer();
+    expect(
+      coalescer.process(event({ kind: "selection.changed", target: { role: "AXLink" } }, 1)),
+    ).toBeUndefined();
+
+    const caret = event(
+      {
+        kind: "selection.changed",
+        target: { role: "AXWebArea" },
+        interaction: { selectedText: "" },
+      },
+      2,
+    );
+    expect(coalescer.process(caret)).toBeUndefined();
   });
 
   it("preserves repeated shortcut key-down events", () => {

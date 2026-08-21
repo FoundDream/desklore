@@ -152,12 +152,15 @@ npm run eval:history -- \
 The ignored `.eval-data/history/report.json` and `report.md` contain both the
 overall retained-data result and a recent 12-segment slice. Matching uses bundle
 identifiers, reports exact and default ±2-second one-to-one matches, and breaks
-precision/recall/F1 down by event kind. The development Electron host and this
-app's packaged bundle are excluded by default because the native collector does
-not observe itself. Use `--tolerance-ms`, `--recent-segments`, `--since`, or
-`--exclude-bundles id.one,id.two` to adjust those boundaries. Keep the candidate
-and reference running together for meaningful paired results; use `--since` after
-deploying a collector change so older implementations do not dominate the score.
+precision/recall/F1 down by event kind. The report also surfaces per-segment
+scores, the largest kind/application count gaps, capture-reason counts, unstable
+application identities, and kinds seen only in the reference. The development
+Electron host and this app's packaged bundle are excluded by default because the
+native collector does not observe itself. Use `--tolerance-ms`,
+`--recent-segments`, `--since`, or `--exclude-bundles id.one,id.two` to adjust
+those boundaries. Keep the candidate and reference running together for
+meaningful paired results; use `--since` after deploying a collector change so
+older implementations do not dominate the score.
 
 ## Verify
 

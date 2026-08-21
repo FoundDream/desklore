@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateEvents, normalizedEvent, tolerantMatchCount } from "./eval-history-data.mjs";
+import {
+  diagnosticSummary,
+  evaluateEvents,
+  normalizedEvent,
+  tolerantMatchCount,
+} from "./eval-history-data.mjs";
 
 function event(timestamp, kind = "mouse.click", bundleIdentifier = "com.example.app") {
   return { timestamp, kind, app: "Example", bundleIdentifier };
@@ -17,6 +22,7 @@ test("normalizes candidate and Codex application schemas", () => {
     kind: "window.changed",
     app: "Example",
     bundleIdentifier: "com.example.app",
+    captureReason: undefined,
     url: undefined,
     axText: undefined,
     raw,
@@ -32,6 +38,30 @@ test("normalizes candidate and Codex application schemas", () => {
     ).bundleIdentifier,
     "com.example.app",
   );
+});
+
+test("diagnostics preserve headline scoring while exposing segment and stream gaps", () => {
+  const candidate = [
+    { ...event("2026-08-20T12:00:00.000Z"), segmentID: "segment-a" },
+    {
+      ...event("2026-08-20T12:00:01.000Z", "selection.changed", "pid.42"),
+      app: "Preview",
+      segmentID: "segment-a",
+      captureReason: "ax_selection",
+    },
+  ];
+  const reference = [
+    { ...event("2026-08-20T12:00:00.500Z"), segmentID: "segment-a" },
+    { ...event("2026-08-20T12:00:02.000Z", "session.started"), segmentID: "segment-b" },
+  ];
+
+  const diagnostics = diagnosticSummary(candidate, reference, 1_000);
+  assert.equal(diagnostics.perSegment.length, 2);
+  assert.equal(diagnostics.perSegment[0].matches, 1);
+  assert.equal(diagnostics.largestStreamGaps[0].difference, 1);
+  assert.equal(diagnostics.captureReasons.candidate["selection.changed / ax_selection"], 1);
+  assert.equal(diagnostics.unstableApplications.candidate["pid.42 / Preview"], 1);
+  assert.equal(diagnostics.referenceOnlyKinds["session.started"], 1);
 });
 
 test("tolerant matching is one-to-one within each kind and app stream", () => {

@@ -1,4 +1,32 @@
-import type { HistoryEvent, HistoryEventKind } from "./types.js";
+import type { HistoryEvent } from "./types.js";
+
+const knownNonEditableTextRoles = new Set([
+  "AXButton",
+  "AXCell",
+  "AXGroup",
+  "AXHeading",
+  "AXImage",
+  "AXLink",
+  "AXList",
+  "AXOutline",
+  "AXRow",
+  "AXSlider",
+  "AXStaticText",
+  "AXTabGroup",
+]);
+const structuralSelectionRoles = new Set([
+  "AXCell",
+  "AXColumn",
+  "AXList",
+  "AXMenu",
+  "AXMenuItem",
+  "AXOutline",
+  "AXRadioButton",
+  "AXRadioGroup",
+  "AXRow",
+  "AXTabGroup",
+  "AXTable",
+]);
 
 export function classifyKeyboardEvent(event: HistoryEvent): HistoryEvent {
   if (event.kind !== "keyboard.shortcut") return event;
@@ -64,6 +92,21 @@ function windowIdentity(event: HistoryEvent): string {
   return JSON.stringify({ application: event.application, window: event.window });
 }
 
+function semanticTargetIdentity(event: HistoryEvent): string {
+  return JSON.stringify({
+    role: event.target?.role,
+    subrole: event.target?.subrole,
+    identifier: event.target?.identifier,
+    title: event.target?.title,
+    description: event.target?.description,
+    placeholder: event.target?.placeholder,
+  });
+}
+
+function isKnownNonEditableTextTarget(event: HistoryEvent): boolean {
+  return knownNonEditableTextRoles.has(event.target?.role ?? "");
+}
+
 export class EventCoalescer {
   private readonly lastAcceptedByStream = new Map<string, HistoryEvent>();
   private readonly lastAcceptedTextByStream = new Map<string, string>();
@@ -74,14 +117,27 @@ export class EventCoalescer {
     const elapsed = previous ? elapsedSeconds(event, previous) : Number.POSITIVE_INFINITY;
 
     if (event.kind === "selection.changed") {
-      const selection = event.interaction?.selectedText?.trim();
+      const trimmedSelection = event.interaction?.selectedText?.trim();
+      const selection = trimmedSelection ? trimmedSelection : undefined;
       if (elapsed < 0.08) return undefined;
-      if (
-        selection !== undefined &&
-        previous?.interaction?.selectedText === event.interaction?.selectedText &&
-        elapsed < 0.75
-      ) {
-        return undefined;
+      if (previous) {
+        const trimmedPreviousSelection = previous.interaction?.selectedText?.trim();
+        const previousSelection = trimmedPreviousSelection ? trimmedPreviousSelection : undefined;
+        if (selection !== undefined && selection === previousSelection && elapsed < 1.5) {
+          return undefined;
+        }
+        if (
+          selection === undefined &&
+          previousSelection === undefined &&
+          semanticTargetIdentity(event) === semanticTargetIdentity(previous) &&
+          elapsed < 0.4
+        ) {
+          return undefined;
+        }
+      }
+      if (selection === undefined) {
+        const role = event.target?.role ?? "";
+        if (!structuralSelectionRoles.has(role)) return undefined;
       }
     }
 
@@ -97,9 +153,11 @@ export class EventCoalescer {
 
     let normalized = event;
     if (event.kind === "keyboard.text_input") {
+      if (isKnownNonEditableTextTarget(event)) return undefined;
       const currentText = event.interaction?.text ?? event.target?.value;
       if (currentText === undefined || elapsed < 0.2) return undefined;
-      const previousText = this.lastAcceptedTextByStream.get(stream);
+      const previousText = elapsed > 30 ? undefined : this.lastAcceptedTextByStream.get(stream);
+      if (currentText.length === 0 && previousText === undefined) return undefined;
       if (previousText === currentText) return undefined;
       normalized = this.replacingText(event, this.textDelta(previousText, currentText));
       this.lastAcceptedTextByStream.set(stream, currentText);
@@ -123,11 +181,21 @@ export class EventCoalescer {
 
   private streamKey(event: HistoryEvent): string {
     const components = [event.kind, event.application.bundleIdentifier];
-    if (event.kind === "keyboard.text_input" || event.kind === "selection.changed") {
+    if (event.kind === "keyboard.text_input") {
       components.push(
-        event.window?.title ?? "",
+        event.window?.url ?? "",
         event.target?.identifier ?? "",
         event.target?.role ?? "",
+        event.target?.title ?? "",
+        event.target?.description ?? "",
+        event.target?.placeholder ?? "",
+      );
+    } else if (event.kind === "selection.changed") {
+      components.push(
+        event.window?.url ?? "",
+        event.target?.identifier ?? "",
+        event.target?.role ?? "",
+        event.target?.subrole ?? "",
         event.target?.title ?? "",
         event.target?.description ?? "",
         event.target?.placeholder ?? "",
@@ -152,9 +220,13 @@ export class EventCoalescer {
   }
 }
 
-function burstWindow(kind: HistoryEventKind): number | undefined {
-  if (kind === "mouse.click") return 0.8;
-  if (kind === "window.changed") return 0.75;
+function burstWindow(event: HistoryEvent): number | undefined {
+  if (event.kind === "mouse.click") return 0.8;
+  if (event.kind === "window.changed") {
+    if (event.captureReason === "application_activation") return undefined;
+    if (event.captureReason === "title_change") return 2;
+    return 0.75;
+  }
   return undefined;
 }
 
@@ -162,7 +234,7 @@ export class EventBurstCoalescer {
   private readonly pendingByStream = new Map<string, HistoryEvent>();
 
   ingest(event: HistoryEvent): { ready: HistoryEvent[]; coalescedCount: number } {
-    const window = burstWindow(event.kind);
+    const window = burstWindow(event);
     if (window === undefined) return { ready: [event], coalescedCount: 0 };
     const key = this.streamKey(event);
     const previous = this.pendingByStream.get(key);
@@ -181,7 +253,7 @@ export class EventBurstCoalescer {
   flushExpired(date = new Date()): HistoryEvent[] {
     const ready: HistoryEvent[] = [];
     for (const [key, event] of this.pendingByStream) {
-      const window = burstWindow(event.kind);
+      const window = burstWindow(event);
       if (
         window !== undefined &&
         (date.getTime() - Date.parse(event.timestamp)) / 1_000 >= window
@@ -202,12 +274,15 @@ export class EventBurstCoalescer {
   }
 
   private streamKey(event: HistoryEvent): string {
-    const components = [
-      event.kind,
-      event.application.bundleIdentifier,
-      event.window?.title ?? "",
-      event.window?.url ?? "",
-    ];
+    const components = [event.kind, event.application.bundleIdentifier];
+    if (event.kind === "window.changed") {
+      components.push(event.captureReason ?? "");
+      if (event.captureReason !== "title_change") {
+        components.push(event.window?.title ?? "", event.window?.url ?? "");
+      }
+    } else {
+      components.push(event.window?.title ?? "", event.window?.url ?? "");
+    }
     if (event.kind === "mouse.click") {
       components.push(
         event.target?.role ?? "",
