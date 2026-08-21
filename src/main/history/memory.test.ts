@@ -17,19 +17,15 @@ afterEach(async () => {
 
 function document(overrides: Partial<TimelineDocumentRecord> = {}): TimelineDocumentRecord {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: "document-1",
     sourceSegmentID: "2026-08-20T06-10-00Z",
     startedAt: "2026-08-20T06:10:00.000Z",
     endedAt: "2026-08-20T06:20:00.000Z",
     title: "实现 Computer History 的分层记忆",
     description: "完成了六小时和每日记忆聚合，并保留来源时间线引用。",
-    task: "实现分层记忆",
-    progression: ["聚合十分钟时间线", "写入六小时记忆"],
-    outcome: "分层记忆已可检索。",
-    openLoops: ["补充真实数据评测"],
+    continuationHint: "补充真实数据评测",
     claims: [{ text: "分层记忆已可检索。", evidenceEventIDs: ["event-1"] }],
-    activityState: "implementation_completed",
     applications: [{ bundleIdentifier: "com.openai.codex", name: "Codex" }],
     evidenceEventIDs: ["event-1"],
     generator: { type: "llm", version: 2, model: "gpt-5.6-luna" },
@@ -86,9 +82,7 @@ describe("History memory", () => {
                       title: "Computer History 分层记忆实现",
                       description: "实现并验证了本地分层记忆。",
                       narrative: "工作从十分钟摘要扩展到六小时和每日归纳，并保留确定性的来源引用。",
-                      tasks: ["实现分层记忆"],
-                      outcomes: ["本地记忆已可检索"],
-                      open_loops: ["继续真实数据评测"],
+                      continuation_hint: "补充真实数据评测",
                       important_context: ["来源 ID 由本地代码生成"],
                     }),
                   },
@@ -109,7 +103,11 @@ describe("History memory", () => {
     const second = await repository.refresh([document()]);
 
     expect(first.every((record) => record.generator.type === "llm")).toBe(true);
+    expect(first.every((record) => record.continuationHint === "补充真实数据评测")).toBe(true);
     expect(first.every((record) => record.body.includes("timeline:document-1"))).toBe(true);
+    expect(first.every((record) => !record.body.includes("## Tasks"))).toBe(true);
+    expect(first.every((record) => !record.body.includes("## Outcomes"))).toBe(true);
+    expect(first.every((record) => !record.body.includes("## Open loops"))).toBe(true);
     expect(second.map((record) => record.sourceDigest)).toEqual(
       first.map((record) => record.sourceDigest),
     );

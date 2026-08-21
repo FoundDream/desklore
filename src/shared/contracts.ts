@@ -14,11 +14,6 @@ export interface TimelineDocument {
   endedAt: string;
   title: string;
   description: string;
-  task?: string;
-  progression: string[];
-  outcome?: string;
-  openLoops: string[];
-  activityState?: string;
   applications: TimelineApplication[];
   generatorType: string;
   generatorFailureReason?: string;
@@ -31,9 +26,9 @@ export interface MemoryRollup {
   endedAt: string;
   title: string;
   description: string;
-  tasks: string[];
-  outcomes: string[];
-  openLoops: string[];
+  continuationHint?: string;
+  applications: TimelineApplication[];
+  sourceDocumentIDs: string[];
 }
 
 export interface HistorySearchMatch {

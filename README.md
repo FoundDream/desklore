@@ -12,8 +12,9 @@ The storage model stays deliberately small:
   and short bursts are normalized before persistence.
 - Segment metadata distinguishes captured, persisted, policy-blocked,
   deduplicated, and burst-coalesced events so capture loss is observable.
-- Completed segments produce schema-v3 Markdown with task, progression, outcome,
-  open loops, and evidence-linked claims. Existing schema-v2 files remain readable.
+- Completed segments produce schema-v4 Markdown with a title, stand-alone activity
+  summary, optional continuation hint, and evidence-linked claims. The old task,
+  progression, outcome, open-loop, and activity-state fields are not retained.
 - Six-hour and daily Markdown rollups form a deterministic local memory layer.
   An independent opt-in can synthesize them with the configured model; source
   fingerprints prevent repeat calls. Retrieval searches all three granularities
@@ -93,15 +94,16 @@ then enable semantic summaries. Electron main encrypts the key with
 `safeStorage`; only model settings are saved as JSON. `OPENAI_API_KEY` is also
 supported for development launches.
 
-Every schema-v3 model claim must cite supplied event IDs. Document-level evidence
+Every schema-v4 model claim must cite supplied event IDs. Document-level evidence
 is also checked against the exact sampled segment. Invalid or transient responses
 retry with progressively smaller inputs; otherwise an explicit raw fallback is
 persisted and can later be upgraded in place.
 
-The supported `activity_state` values are `researching`, `planning`,
-`implementation_started`, `implementation_completed`, `validated`, `blocked`,
-and `unknown`. Prior summaries are continuity hints only and cannot support claims
-about the current segment.
+Summaries use a stand-alone title and narrative description rather than task,
+progress, result, and unfinished-work fields. A single optional continuation hint
+is kept only when the observed activity explicitly supports a concrete next action.
+Prior summaries are continuity hints only and cannot support claims about the
+current segment.
 
 **模型归纳长期记忆** is a separate, default-off setting. When enabled, local
 ten-minute summaries are sent to the same endpoint to synthesize the 6-hour/day

@@ -35,6 +35,23 @@ import type {
   TimelineLLMSettings,
 } from "./types.js";
 
+const unsupportedContinuationPattern =
+  /(?:未|尚未|没有)(?:观察到|看到|发现|确认)|\b(?:not observed|not seen|no evidence)\b/i;
+const explicitContinuationPattern =
+  /^(?:(?:继续|完成|确认|检查|验证|处理|补充|更新|实现|修复|提交|回复|跟进|整理|查看|测试|部署|发布|合并|创建|配置|调查)|(?:continue|finish|complete|confirm|check|verify|follow up|update|fix|test|ship|deploy)\b)/i;
+
+function publicContinuationHint(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (
+    !normalized ||
+    unsupportedContinuationPattern.test(normalized) ||
+    !explicitContinuationPattern.test(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
 export class HistoryService extends EventEmitter {
   private readonly layout;
   private readonly segments;
@@ -392,11 +409,6 @@ export class HistoryService extends EventEmitter {
       endedAt: document.endedAt,
       title: document.title,
       description: document.description,
-      task: document.task,
-      progression: document.progression,
-      outcome: document.outcome,
-      openLoops: document.openLoops,
-      activityState: document.activityState,
       applications: document.applications.map((application): TimelineApplication => ({
         ...application,
         iconPath: this.applicationIconPaths.get(application.bundleIdentifier),
@@ -414,9 +426,12 @@ export class HistoryService extends EventEmitter {
       endedAt: record.endedAt,
       title: record.title,
       description: record.description,
-      tasks: record.tasks,
-      outcomes: record.outcomes,
-      openLoops: record.openLoops,
+      continuationHint: publicContinuationHint(record.continuationHint),
+      applications: record.applications.slice(0, 6).map((application): TimelineApplication => ({
+        ...application,
+        iconPath: this.applicationIconPaths.get(application.bundleIdentifier),
+      })),
+      sourceDocumentIDs: record.sourceDocumentIDs,
     };
   }
 

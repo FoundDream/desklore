@@ -3,27 +3,17 @@ import type {
   AgentSnapshot,
   DesktopSnapshot,
   HistorySearchResponse,
+  MemoryRollup,
   TimelineApplication,
   TimelineDocument,
 } from "../../shared/contracts.js";
 
-type View = "timeline" | "health" | "settings";
-
-const activityLabels: Record<string, string> = {
-  researching: "研究",
-  planning: "规划",
-  implementation_started: "实现中",
-  implementation_completed: "已实现",
-  validated: "已验证",
-  blocked: "受阻",
-  unknown: "状态未知",
-};
+type View = "timeline" | "memory" | "health" | "settings";
 
 const summaryFailureLabels: Record<string, string> = {
   api_key_missing: "未配置 API Key",
   invalid_json: "模型返回的不是合法 JSON",
   invalid_fields: "模型返回字段不完整",
-  invalid_activity_state: "模型返回了未知活动状态",
   invalid_evidence_ids: "模型引用了无效事件",
   empty_fields: "模型返回了空标题或描述",
   content_too_long: "模型返回内容过长",
@@ -105,13 +95,58 @@ function ApplicationIcon({ application }: { application: TimelineApplication }) 
   );
 }
 
-function Icon({ name }: { name: "timeline" | "health" | "settings" | "folder" }) {
+function ApplicationList({
+  applications,
+  trailing,
+  limit = 6,
+}: {
+  applications: TimelineApplication[];
+  trailing?: ReactNode;
+  limit?: number;
+}) {
+  const visible = applications.slice(0, limit);
+  const remaining = applications.length - visible.length;
+  return (
+    <div className="app-list">
+      {visible.map((application) => (
+        <span
+          className="app-token"
+          title={application.bundleIdentifier}
+          key={application.bundleIdentifier}
+        >
+          <ApplicationIcon application={application} />
+          {application.name}
+        </span>
+      ))}
+      {remaining > 0 && <span className="app-overflow">+{remaining}</span>}
+      {trailing}
+    </div>
+  );
+}
+
+function ContinuationHint({ item }: { item?: string }) {
+  if (!item) return null;
+  return (
+    <aside className="continuation-hints">
+      <span>接续线索</span>
+      <p>{item}</p>
+    </aside>
+  );
+}
+
+function Icon({ name }: { name: "timeline" | "memory" | "health" | "settings" | "folder" }) {
   const paths = {
     timeline: (
       <>
         <circle cx="6" cy="5" r="1.5" />
         <circle cx="6" cy="12" r="1.5" />
         <path d="M9.5 5H18M9.5 12H18M6 6.5v4" />
+      </>
+    ),
+    memory: (
+      <>
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22z" />
+        <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5a2.5 2.5 0 0 1 2.5 2z" />
       </>
     ),
     health: (
@@ -256,6 +291,11 @@ function Sidebar({
           <span>时间线</span>
           <b>{agent?.documents.length ?? "—"}</b>
         </button>
+        <button className={view === "memory" ? "active" : ""} onClick={() => onView("memory")}>
+          <Icon name="memory" />
+          <span>记忆</span>
+          <b>{agent ? agent.memories.filter((memory) => memory.kind === "day").length : "—"}</b>
+        </button>
         <button className={view === "health" ? "active" : ""} onClick={() => onView("health")}>
           <Icon name="health" />
           <span>采集健康</span>
@@ -286,76 +326,24 @@ function Sidebar({
 function TimelineCard({
   document,
   isLast,
+  referenced,
   onAction,
 }: {
   document: TimelineDocument;
   isLast: boolean;
+  referenced: boolean;
   onAction: (action: "open" | "delete", id: string) => Promise<void>;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const hasTaskDetails =
-    Boolean(document.task?.trim()) ||
-    document.progression.length > 0 ||
-    Boolean(document.outcome?.trim()) ||
-    document.openLoops.length > 0;
   return (
-    <article className="timeline-entry">
+    <article className={`timeline-entry ${referenced ? "referenced" : ""}`}>
       <time>{timeLabel(document.startedAt)}</time>
       <div className={`timeline-rail ${isLast ? "last" : ""}`} />
       <div className="entry-body">
         <div className="entry-title">
           <h3>{document.title}</h3>
-          {document.activityState && (
-            <span className={`activity ${document.activityState}`}>
-              {activityLabels[document.activityState] ?? document.activityState}
-            </span>
-          )}
         </div>
         <p>{document.description}</p>
-        {hasTaskDetails && (
-          <>
-            <button className="details-toggle" onClick={() => setExpanded((value) => !value)}>
-              {expanded ? "收起任务细节" : "查看任务细节"}
-            </button>
-            {expanded && (
-              <div className="entry-details">
-                {document.task && (
-                  <>
-                    <strong>任务</strong>
-                    <p>{document.task}</p>
-                  </>
-                )}
-                {document.progression.length > 0 && (
-                  <>
-                    <strong>进展</strong>
-                    <ul>
-                      {document.progression.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-                {document.outcome && (
-                  <>
-                    <strong>结果</strong>
-                    <p>{document.outcome}</p>
-                  </>
-                )}
-                {document.openLoops.length > 0 && (
-                  <>
-                    <strong>未完成</strong>
-                    <ul>
-                      {document.openLoops.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
-            )}
-          </>
-        )}
         {document.generatorFailureReason && (
           <div className="summary-error" role="status">
             <strong>摘要失败</strong>
@@ -366,19 +354,10 @@ function TimelineCard({
           </div>
         )}
         <footer>
-          <div className="app-list">
-            {document.applications.map((application) => (
-              <span
-                className="app-token"
-                title={application.bundleIdentifier}
-                key={application.bundleIdentifier}
-              >
-                <ApplicationIcon application={application} />
-                {application.name}
-              </span>
-            ))}
-            <span className="duration">{durationLabel(document)}</span>
-          </div>
+          <ApplicationList
+            applications={document.applications}
+            trailing={<span className="duration">{durationLabel(document)}</span>}
+          />
           <div className="entry-actions">
             <button onClick={() => void onAction("open", document.id)}>打开原文</button>
             <button
@@ -398,9 +377,9 @@ function TimelineCard({
   );
 }
 
-interface TimelineDay {
+interface DatedGroup {
   date: string;
-  documents: TimelineDocument[];
+  startedAt: string;
 }
 
 function DaySwitcher({
@@ -408,7 +387,7 @@ function DaySwitcher({
   selectedDate,
   onSelect,
 }: {
-  days: TimelineDay[];
+  days: DatedGroup[];
   selectedDate: string;
   onSelect: (date: string) => void;
 }) {
@@ -439,7 +418,7 @@ function DaySwitcher({
         >
           {days.map((day) => (
             <option key={day.date} value={day.date}>
-              {dayLabel(day.documents[0].startedAt)}
+              {dayLabel(day.startedAt)}
             </option>
           ))}
         </select>
@@ -460,14 +439,16 @@ function DaySwitcher({
 function TimelineView({
   agent,
   run,
+  selectedDate,
+  referencedDocumentIDs,
+  onSelectDate,
 }: {
   agent?: AgentSnapshot;
   run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
+  selectedDate?: string;
+  referencedDocumentIDs: string[];
+  onSelectDate: (date?: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState<HistorySearchResponse>();
-  const [searching, setSearching] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>();
   const days = useMemo(() => {
     const groups = new Map<string, TimelineDocument[]>();
     const documents = [...(agent?.documents ?? [])].sort(
@@ -477,14 +458,22 @@ function TimelineView({
       const key = dateKey(document.startedAt);
       groups.set(key, [...(groups.get(key) ?? []), document]);
     }
-    return [...groups.entries()].map(([date, documents]) => ({ date, documents }));
+    return [...groups.entries()].map(([date, documents]) => ({
+      date,
+      startedAt: documents[0].startedAt,
+      documents,
+    }));
   }, [agent?.documents]);
   const selectedDay = days.find((day) => day.date === selectedDate) ?? days[0];
+  const referencedDocuments = useMemo(
+    () => new Set(referencedDocumentIDs),
+    [referencedDocumentIDs],
+  );
 
   useEffect(() => {
     if (selectedDate && days.some((day) => day.date === selectedDate)) return;
-    setSelectedDate(days[0]?.date);
-  }, [days, selectedDate]);
+    onSelectDate(days[0]?.date);
+  }, [days, onSelectDate, selectedDate]);
 
   const action = async (name: "open" | "delete", id: string): Promise<void> => {
     await run(() =>
@@ -492,20 +481,6 @@ function TimelineView({
         ? window.computerHistory.openDocument(id)
         : window.computerHistory.deleteDocument(id),
     );
-  };
-
-  const submitSearch = async (): Promise<void> => {
-    const value = query.trim();
-    if (!value) {
-      setSearch(undefined);
-      return;
-    }
-    setSearching(true);
-    try {
-      setSearch(await window.computerHistory.searchMemory(value));
-    } finally {
-      setSearching(false);
-    }
   };
 
   return (
@@ -523,63 +498,11 @@ function TimelineView({
               显示文件
             </button>
             {selectedDay && (
-              <DaySwitcher days={days} selectedDate={selectedDay.date} onSelect={setSelectedDate} />
+              <DaySwitcher days={days} selectedDate={selectedDay.date} onSelect={onSelectDate} />
             )}
           </div>
         }
       />
-      <div className="archive-summary">
-        <div>
-          <strong>{agent?.documents.length ?? 0}</strong>
-          <span>时间线片段</span>
-        </div>
-        <div>
-          <strong>
-            {new Set(
-              agent?.documents.flatMap((item) =>
-                item.applications.map((app) => app.bundleIdentifier),
-              ),
-            ).size ?? 0}
-          </strong>
-          <span>出现的应用</span>
-        </div>
-        <div>
-          <strong>{agent?.memories.length ?? 0}</strong>
-          <span>长期记忆</span>
-        </div>
-      </div>
-      <section className="memory-search">
-        <div>
-          <span className="section-kicker">本地记忆检索</span>
-          <h2>询问最近的工作</h2>
-        </div>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitSearch();
-          }}
-        >
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="例如：Computer History 打包最后是什么状态？"
-            maxLength={500}
-          />
-          <button disabled={searching}>{searching ? "检索中" : "检索"}</button>
-        </form>
-        {search && (
-          <div className="memory-answer">
-            <p>{search.answer}</p>
-            <div>
-              {search.matches.slice(0, 5).map((match) => (
-                <span key={`${match.kind}-${match.id}`}>
-                  {match.kind} · {match.title}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
       <section className="archive">
         {!agent ? (
           <div className="empty-state">
@@ -598,9 +521,237 @@ function TimelineView({
                 key={document.id}
                 document={document}
                 isLast={index === selectedDay.documents.length - 1}
+                referenced={referencedDocuments.has(document.id)}
                 onAction={action}
               />
             ))}
+          </div>
+        ) : null}
+      </section>
+    </>
+  );
+}
+
+interface MemoryDay extends DatedGroup {
+  daily?: MemoryRollup;
+  periods: MemoryRollup[];
+}
+
+function memoryRangeLabel(memory: MemoryRollup): string {
+  return `${timeLabel(memory.startedAt)}–${timeLabel(memory.endedAt)}`;
+}
+
+function searchKindLabel(kind: "10min" | "6h" | "day"): string {
+  if (kind === "day") return "当天概览";
+  if (kind === "6h") return "活动摘要";
+  return "时间线";
+}
+
+function visibleSearchAnswer(answer: string): string {
+  return answer.replace(/\s+\[(?:10min|6h|day):[^\]]+\]/g, "");
+}
+
+function MemorySourceFooter({
+  memory,
+  onOpenTimeline,
+}: {
+  memory: MemoryRollup;
+  onOpenTimeline: (memory: MemoryRollup) => void;
+}) {
+  if (memory.sourceDocumentIDs.length === 0 && memory.applications.length === 0) return null;
+  return (
+    <footer className="memory-source">
+      <ApplicationList applications={memory.applications} />
+      {memory.sourceDocumentIDs.length > 0 && (
+        <div className="memory-source-meta">
+          <span>基于 {memory.sourceDocumentIDs.length} 段活动</span>
+          <button onClick={() => onOpenTimeline(memory)}>查看时间线</button>
+        </div>
+      )}
+    </footer>
+  );
+}
+
+function MemoryView({
+  agent,
+  run,
+  onOpenTimeline,
+}: {
+  agent?: AgentSnapshot;
+  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
+  onOpenTimeline: (memory: MemoryRollup) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState<HistorySearchResponse>();
+  const [searching, setSearching] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>();
+  const days = useMemo(() => {
+    const memories = agent?.memories ?? [];
+    const periods = memories.filter((memory) => memory.kind === "6h");
+    const coveredPeriods = new Set<string>();
+    const groups: MemoryDay[] = memories
+      .filter((memory) => memory.kind === "day")
+      .map((daily) => {
+        const startedAt = Date.parse(daily.startedAt);
+        const endedAt = Date.parse(daily.endedAt);
+        const matchingPeriods = periods
+          .filter((period) => {
+            const periodStart = Date.parse(period.startedAt);
+            const matches = periodStart >= startedAt && periodStart < endedAt;
+            if (matches) coveredPeriods.add(period.id);
+            return matches;
+          })
+          .sort((lhs, rhs) => Date.parse(lhs.startedAt) - Date.parse(rhs.startedAt));
+        return {
+          date: daily.id,
+          startedAt: daily.startedAt,
+          daily,
+          periods: matchingPeriods,
+        };
+      });
+
+    const fallbackGroups = new Map<string, MemoryRollup[]>();
+    for (const period of periods) {
+      if (coveredPeriods.has(period.id)) continue;
+      const key = dateKey(period.startedAt);
+      fallbackGroups.set(key, [...(fallbackGroups.get(key) ?? []), period]);
+    }
+    for (const [key, fallbackPeriods] of fallbackGroups) {
+      fallbackPeriods.sort((lhs, rhs) => Date.parse(lhs.startedAt) - Date.parse(rhs.startedAt));
+      groups.push({
+        date: `periods-${key}`,
+        startedAt: fallbackPeriods[0].startedAt,
+        periods: fallbackPeriods,
+      });
+    }
+    return groups.sort((lhs, rhs) => Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt));
+  }, [agent?.memories]);
+  const selectedDay = days.find((day) => day.date === selectedDate) ?? days[0];
+
+  useEffect(() => {
+    if (selectedDate && days.some((day) => day.date === selectedDate)) return;
+    setSelectedDate(days[0]?.date);
+  }, [days, selectedDate]);
+
+  const submitSearch = async (): Promise<void> => {
+    const value = query.trim();
+    if (!value) {
+      setSearch(undefined);
+      return;
+    }
+    setSearching(true);
+    try {
+      setSearch(await window.computerHistory.searchMemory(value));
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="活动上下文"
+        title="记忆"
+        action={
+          <div className="header-actions">
+            <button
+              className="secondary"
+              onClick={() => void run(() => window.computerHistory.revealStorage())}
+            >
+              <Icon name="folder" />
+              显示文件
+            </button>
+            {selectedDay && (
+              <DaySwitcher days={days} selectedDate={selectedDay.date} onSelect={setSelectedDate} />
+            )}
+          </div>
+        }
+      />
+      <section className="memory-search">
+        <div>
+          <span className="section-kicker">本地记忆检索</span>
+          <h2>询问过去的工作</h2>
+        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitSearch();
+          }}
+        >
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="例如：Computer History 打包最后是什么状态？"
+            maxLength={500}
+          />
+          <button disabled={searching}>{searching ? "检索中" : "检索"}</button>
+        </form>
+        {search && (
+          <div className="memory-answer">
+            <p>{visibleSearchAnswer(search.answer)}</p>
+            {search.matches.length > 0 && (
+              <div>
+                {search.matches.slice(0, 5).map((match) => (
+                  <span key={`${match.kind}-${match.id}`}>
+                    {searchKindLabel(match.kind)} · {match.title}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+      <section className="memory-archive">
+        {!agent ? (
+          <div className="empty-state">
+            <div className="empty-clock" />
+            <h2>正在连接本地档案</h2>
+          </div>
+        ) : days.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-clock" />
+            <h2>还没有长期记忆</h2>
+          </div>
+        ) : selectedDay ? (
+          <div className="memory-day" key={selectedDay.date}>
+            {selectedDay.daily && (
+              <article className="daily-memory">
+                <span className="section-kicker">当天概览</span>
+                <h2>{selectedDay.daily.title}</h2>
+                <p>{selectedDay.daily.description}</p>
+                <ContinuationHint item={selectedDay.daily.continuationHint} />
+                <MemorySourceFooter memory={selectedDay.daily} onOpenTimeline={onOpenTimeline} />
+              </article>
+            )}
+            {selectedDay.periods.length > 0 && (
+              <section className="memory-periods">
+                <header>
+                  <div>
+                    <span className="section-kicker">按时间</span>
+                    <h2>活动摘要</h2>
+                  </div>
+                  <span>{selectedDay.periods.length} 段</span>
+                </header>
+                <div>
+                  {selectedDay.periods.map((memory) => (
+                    <details className="memory-period" key={memory.id}>
+                      <summary>
+                        <time>{memoryRangeLabel(memory)}</time>
+                        <div>
+                          <h3>{memory.title}</h3>
+                          <p>{memory.description}</p>
+                        </div>
+                        <span>详情</span>
+                      </summary>
+                      <div className="memory-period-details">
+                        <ContinuationHint item={memory.continuationHint} />
+                        <MemorySourceFooter memory={memory} onOpenTimeline={onOpenTimeline} />
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         ) : null}
       </section>
@@ -868,6 +1019,8 @@ export function App() {
   const [desktop, setDesktop] = useState<DesktopSnapshot>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [selectedTimelineDate, setSelectedTimelineDate] = useState<string>();
+  const [referencedDocumentIDs, setReferencedDocumentIDs] = useState<string[]>([]);
 
   useEffect(() => {
     void window.computerHistory
@@ -876,6 +1029,10 @@ export function App() {
       .catch((cause: unknown) => setError(String(cause)));
     return window.computerHistory.onSnapshot(setDesktop);
   }, []);
+
+  useEffect(() => {
+    document.querySelector<HTMLElement>(".content")?.scrollTo({ top: 0 });
+  }, [view]);
 
   const run = useCallback(async (action: () => Promise<DesktopSnapshot>): Promise<void> => {
     setBusy(true);
@@ -899,6 +1056,36 @@ export function App() {
     }
   };
 
+  const selectTimelineDate = useCallback((date?: string): void => {
+    setSelectedTimelineDate(date);
+    setReferencedDocumentIDs([]);
+  }, []);
+
+  const openMemoryTimeline = useCallback(
+    (memory: MemoryRollup): void => {
+      const sourceIDs = new Set(memory.sourceDocumentIDs);
+      const documents = desktop?.agent?.documents ?? [];
+      const firstSource = [...documents]
+        .filter((document) => sourceIDs.has(document.id))
+        .sort((lhs, rhs) => Date.parse(lhs.startedAt) - Date.parse(rhs.startedAt))[0];
+      const targetDate = dateKey(firstSource?.startedAt ?? memory.startedAt);
+      const targetDayDocuments = documents.filter(
+        (document) => dateKey(document.startedAt) === targetDate,
+      );
+      const referencedOnTargetDay = targetDayDocuments.filter((document) =>
+        sourceIDs.has(document.id),
+      );
+      setSelectedTimelineDate(targetDate);
+      setReferencedDocumentIDs(
+        referencedOnTargetDay.length === targetDayDocuments.length
+          ? []
+          : referencedOnTargetDay.map((document) => document.id),
+      );
+      setView("timeline");
+    },
+    [desktop?.agent?.documents],
+  );
+
   return (
     <div className={`app-shell ${busy ? "busy" : ""}`}>
       <Sidebar
@@ -916,7 +1103,18 @@ export function App() {
             <button onClick={() => setError(undefined)}>关闭</button>
           </div>
         )}
-        {view === "timeline" && <TimelineView agent={desktop?.agent} run={run} />}
+        {view === "timeline" && (
+          <TimelineView
+            agent={desktop?.agent}
+            run={run}
+            selectedDate={selectedTimelineDate}
+            referencedDocumentIDs={referencedDocumentIDs}
+            onSelectDate={selectTimelineDate}
+          />
+        )}
+        {view === "memory" && (
+          <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
+        )}
         {view === "health" && <HealthView agent={desktop?.agent} run={run} />}
         {view === "settings" && <SettingsView agent={desktop?.agent} run={run} />}
       </main>

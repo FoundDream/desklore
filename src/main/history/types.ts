@@ -80,29 +80,16 @@ export interface ClosedSegment {
   eventsPath: string;
 }
 
-export type TimelineActivityState =
-  | "researching"
-  | "planning"
-  | "implementation_started"
-  | "implementation_completed"
-  | "validated"
-  | "blocked"
-  | "unknown";
-
 export interface TimelineDocumentRecord {
-  schemaVersion: 2 | 3;
+  schemaVersion: 4;
   id: string;
   sourceSegmentID: string;
   startedAt: string;
   endedAt: string;
   title: string;
   description: string;
-  task?: string;
-  progression: string[];
-  outcome?: string;
-  openLoops: string[];
+  continuationHint?: string;
   claims: TimelineClaim[];
-  activityState?: TimelineActivityState;
   applications: HistoryApplication[];
   evidenceEventIDs: string[];
   generator: {
@@ -124,16 +111,14 @@ export interface TimelineClaim {
 export type MemoryBucketKind = "6h" | "day";
 
 export interface MemoryRollupRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   kind: MemoryBucketKind;
   startedAt: string;
   endedAt: string;
   title: string;
   description: string;
-  tasks: string[];
-  outcomes: string[];
-  openLoops: string[];
+  continuationHint?: string;
   applications: HistoryApplication[];
   sourceDocumentIDs: string[];
   sourceSegmentIDs: string[];

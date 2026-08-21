@@ -240,19 +240,16 @@ describe("TypeScript history core", () => {
     await expect(store.readEvents(closed!)).resolves.toEqual([input]);
   });
 
-  it("round-trips schema v2 Markdown including persisted LLM failure reason", () => {
+  it("round-trips schema v4 Markdown including persisted LLM failure reason", () => {
     const document: TimelineDocumentRecord = {
-      schemaVersion: 2,
+      schemaVersion: 4,
       id: "document-1",
       sourceSegmentID: "2026-08-20T13-40-00Z",
       startedAt: "2026-08-20T13:40:00.000Z",
       endedAt: "2026-08-20T13:50:00.000Z",
       title: "Computer History migration",
       description: "Migrated timeline generation and persistence from Swift into TypeScript.",
-      progression: [],
-      openLoops: [],
       claims: [],
-      activityState: "implementation_completed",
       applications: [{ bundleIdentifier: "com.example.editor", name: "Editor" }],
       evidenceEventIDs: ["event-1"],
       generator: {
@@ -267,28 +264,27 @@ describe("TypeScript history core", () => {
     const markdown = encodeTimelineMarkdown(document);
     expect(markdown).toContain('failure_reason: "network_timeout"');
     expect(decodeTimelineMarkdown(markdown)).toEqual(document);
+    expect(() =>
+      decodeTimelineMarkdown(markdown.replace("schema_version: 4", "schema_version: 3")),
+    ).toThrow("Unsupported timeline schema");
   });
 
-  it("round-trips schema v3 task progression outcome and evidence-linked claims", () => {
+  it("round-trips a narrative summary with one optional continuation hint", () => {
     const document: TimelineDocumentRecord = {
-      schemaVersion: 3,
-      id: "document-v3",
+      schemaVersion: 4,
+      id: "document-v4",
       sourceSegmentID: "2026-08-20T13-40-00Z",
       startedAt: "2026-08-20T13:40:00.000Z",
       endedAt: "2026-08-20T13:50:00.000Z",
-      title: "完成语义摘要 v3",
-      description: "摘要记录了任务进展、结果和未完成事项。",
-      task: "升级语义摘要",
-      progression: ["扩展 JSON Schema", "验证证据引用"],
-      outcome: "v3 Markdown 可以往返读取。",
-      openLoops: ["运行真实数据评测"],
-      claims: [{ text: "v3 Markdown 可以往返读取。", evidenceEventIDs: ["event-1"] }],
-      activityState: "validated",
+      title: "语义摘要采用自然叙事",
+      description: "摘要以独立标题和描述记录活动，不再拆成任务状态。",
+      continuationHint: "运行真实数据评测",
+      claims: [{ text: "摘要采用自然叙事。", evidenceEventIDs: ["event-1"] }],
       applications: [{ bundleIdentifier: "com.example.editor", name: "Editor" }],
       evidenceEventIDs: ["event-1"],
       generator: { type: "llm", version: 2, model: "gpt-5.6-luna" },
       createdAt: "2026-08-20T13:50:01.000Z",
-      body: "## Recording summary\n\nv3 summary.",
+      body: "## Recording summary\n\nNatural summary.",
     };
 
     expect(decodeTimelineMarkdown(encodeTimelineMarkdown(document))).toEqual(document);
@@ -319,7 +315,7 @@ describe("TypeScript history core", () => {
       type: "raw-fallback",
       failureReason: "api_key_missing",
     });
-    expect(document?.activityState).toBeUndefined();
+    expect(document?.continuationHint).toBeUndefined();
     expect(await readFile(document!.filePath!, "utf8")).toContain(
       'failure_reason: "api_key_missing"',
     );
@@ -338,17 +334,13 @@ describe("TypeScript history core", () => {
                     text: JSON.stringify({
                       title: "继续迁移 Computer History",
                       description: "完成了 TypeScript 迁移链路的实现工作。",
-                      task: "迁移 Computer History 的 TypeScript 数据链路",
-                      progression: ["完成 TypeScript 迁移实现"],
-                      outcome: "迁移实现已完成。",
-                      open_loops: [],
+                      continuation_hint: "",
                       claims: [
                         {
                           text: "完成了 TypeScript 迁移链路的实现工作。",
                           evidence_event_ids: [input.id],
                         },
                       ],
-                      activity_state: "implementation_completed",
                       evidence_event_ids: [input.id],
                     }),
                   },
@@ -365,12 +357,11 @@ describe("TypeScript history core", () => {
     await expect(repository.loadDocuments()).resolves.toMatchObject([
       {
         generator: { type: "llm" },
-        activityState: "implementation_completed",
       },
     ]);
   });
 
-  it("accepts the model activity state without a keyword-based semantic override", async () => {
+  it("accepts a narrative-first summary without forced task metadata", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
@@ -394,19 +385,15 @@ describe("TypeScript history core", () => {
                   {
                     type: "output_text",
                     text: JSON.stringify({
-                      title: "准备迁移 Computer History",
-                      description: "活动仍处于规划阶段，尚未观察到实现或验证完成。",
-                      task: "规划 Computer History 迁移",
-                      progression: ["检查当前迁移状态"],
-                      outcome: "",
-                      open_loops: ["继续实现并验证迁移"],
+                      title: "查看 Computer History 迁移状态",
+                      description: "查看了当前迁移状态，活动仍处于规划阶段。",
+                      continuation_hint: "",
                       claims: [
                         {
                           text: "活动仍处于规划阶段。",
                           evidence_event_ids: [input.id],
                         },
                       ],
-                      activity_state: "planning",
                       evidence_event_ids: [input.id],
                     }),
                   },
@@ -431,7 +418,11 @@ describe("TypeScript history core", () => {
     const document = await repository.generateIfNeeded(closed!);
 
     expect(document?.generator.type).toBe("llm");
-    expect(document?.activityState).toBe("planning");
+    expect(document?.continuationHint).toBeUndefined();
+    expect(document).not.toHaveProperty("task");
+    expect(document).not.toHaveProperty("progression");
+    expect(document).not.toHaveProperty("outcome");
+    expect(document).not.toHaveProperty("openLoops");
   });
 
   it("bounds model input by total bytes while preserving temporal endpoints", () => {
@@ -496,17 +487,13 @@ describe("TypeScript history core", () => {
         return llmResponse({
           title: "恢复 Computer History 的结构化活动摘要",
           description: "模型输出中断后缩小输入范围，并成功生成了结构化的活动时间线摘要。",
-          task: "恢复结构化活动摘要",
-          progression: ["缩小模型输入", "重新生成摘要"],
-          outcome: "成功生成结构化摘要。",
-          open_loops: [],
+          continuation_hint: "",
           claims: [
             {
               text: "缩小输入后成功生成摘要。",
               evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
             },
           ],
-          activity_state: "validated",
           evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
         });
       }),
@@ -546,7 +533,7 @@ describe("TypeScript history core", () => {
     expect(sample.some((item) => item.id === events[731]?.id)).toBe(true);
   });
 
-  it("keeps the full window title and omits inferred state from raw activity", () => {
+  it("keeps the full window title and omits inferred continuation from raw activity", () => {
     const input = event(
       {
         window: {
@@ -575,7 +562,7 @@ describe("TypeScript history core", () => {
     };
     const raw = rawActivityRecord(segment, [input]);
     expect(raw.title).toBe(input.window?.title);
-    expect(raw.activityState).toBeUndefined();
+    expect(raw.continuationHint).toBeUndefined();
     expect(raw.generator.type).toBe("raw");
   });
 });

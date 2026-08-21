@@ -1,4 +1,4 @@
-import type { HistoryApplication, TimelineActivityState, TimelineDocumentRecord } from "./types.js";
+import type { HistoryApplication, TimelineDocumentRecord } from "./types.js";
 
 function quoted(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
@@ -33,16 +33,9 @@ export function encodeTimelineMarkdown(document: TimelineDocumentRecord): string
     `title: ${quoted(document.title)}`,
     `description: ${quoted(document.description)}`,
   ];
-  if (document.activityState) lines.push(`activity_state: ${quoted(document.activityState)}`);
-  if (document.task) lines.push(`task: ${quoted(document.task)}`);
-  if (document.outcome) lines.push(`outcome: ${quoted(document.outcome)}`);
-  const appendStringList = (name: string, values: string[]): void => {
-    lines.push(`${name}:`);
-    if (!values.length) lines.push("  []");
-    else lines.push(...values.map((value) => `  - ${quoted(value)}`));
-  };
-  appendStringList("progression", document.progression);
-  appendStringList("open_loops", document.openLoops);
+  if (document.continuationHint) {
+    lines.push(`continuation_hint: ${quoted(document.continuationHint)}`);
+  }
   lines.push("applications:");
   if (!document.applications.length) {
     lines.push("  []");
@@ -104,7 +97,7 @@ export function decodeTimelineMarkdown(
     return value;
   };
   const schemaVersion = Number(required("schema_version"));
-  if (schemaVersion !== 2 && schemaVersion !== 3) throw new Error("Unsupported timeline schema");
+  if (schemaVersion !== 4) throw new Error("Unsupported timeline schema");
 
   const parseIndented = (section: string): string[] => {
     const start = frontmatter.indexOf(`${section}:`);
@@ -136,11 +129,6 @@ export function decodeTimelineMarkdown(
     .map((line) => line.trim())
     .filter((line) => line.startsWith("-"))
     .map((line) => unquoted(line.slice(1)));
-  const parseStringList = (name: string): string[] =>
-    parseIndented(name)
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith("-"))
-      .map((line) => unquoted(line.slice(1)));
   const claims: TimelineDocumentRecord["claims"] = [];
   let pendingClaim: { text?: string; evidenceEventIDs?: string[] } = {};
   for (const line of parseIndented("claims")) {
@@ -172,7 +160,6 @@ export function decodeTimelineMarkdown(
   const generatorVersion = Number(generatorValue("version"));
   if (!generatorType || !Number.isInteger(generatorVersion)) throw new Error("Invalid generator");
 
-  const activityState = scalars.get("activity_state") as TimelineActivityState | undefined;
   return {
     schemaVersion,
     id: required("id"),
@@ -181,12 +168,8 @@ export function decodeTimelineMarkdown(
     endedAt: required("ended_at"),
     title: required("title"),
     description: required("description"),
-    task: scalars.get("task"),
-    progression: parseStringList("progression"),
-    outcome: scalars.get("outcome"),
-    openLoops: parseStringList("open_loops"),
+    continuationHint: scalars.get("continuation_hint"),
     claims,
-    activityState,
     applications,
     evidenceEventIDs,
     generator: {
