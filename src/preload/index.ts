@@ -21,6 +21,8 @@ const api: ComputerHistoryAPI = {
   blockActiveDomain: () => invoke("history:block-active-domain"),
   configureLLM: (input: LLMConfigurationInput) =>
     ipcRenderer.invoke("history:configure-llm", input),
+  setMemorySynthesisEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("history:set-memory-synthesis-enabled", enabled),
   removeLLMAPIKey: () => invoke("history:remove-llm-key"),
   openDocument: (id: string) => ipcRenderer.invoke("history:open-document", id),
   deleteDocument: (id: string) => ipcRenderer.invoke("history:delete-document", id),

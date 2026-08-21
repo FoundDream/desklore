@@ -122,6 +122,7 @@ export interface ComputerHistoryAPI {
   allowActiveDomain(): Promise<DesktopSnapshot>;
   blockActiveDomain(): Promise<DesktopSnapshot>;
   configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot>;
+  setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot>;
   removeLLMAPIKey(): Promise<DesktopSnapshot>;
   openDocument(id: string): Promise<DesktopSnapshot>;
   deleteDocument(id: string): Promise<DesktopSnapshot>;

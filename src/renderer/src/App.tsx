@@ -956,7 +956,11 @@ function SettingsView({
             <input
               type="checkbox"
               checked={memorySynthesisEnabled}
-              onChange={(event) => setMemorySynthesisEnabled(event.target.checked)}
+              onChange={(event) =>
+                void run(() =>
+                  window.computerHistory.setMemorySynthesisEnabled(event.target.checked),
+                )
+              }
             />
             <span />
           </label>

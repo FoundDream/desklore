@@ -239,6 +239,11 @@ function registerIPC(): void {
     assertRenderer(event);
     return history.removeLLMAPIKey();
   });
+  ipcMain.handle("history:set-memory-synthesis-enabled", async (event, enabled: unknown) => {
+    assertRenderer(event);
+    if (typeof enabled !== "boolean") throw new Error("Invalid memory synthesis setting");
+    return history.setMemorySynthesisEnabled(enabled);
+  });
   ipcMain.handle("history:reveal-storage", async (event) => {
     assertRenderer(event);
     return history.revealStorage();
@@ -249,6 +254,7 @@ function registerIPC(): void {
     if (
       !input ||
       typeof input.enabled !== "boolean" ||
+      typeof input.memorySynthesisEnabled !== "boolean" ||
       typeof input.model !== "string" ||
       input.model.length > 200 ||
       typeof input.endpoint !== "string" ||
