@@ -16,9 +16,11 @@ The storage model stays deliberately small:
   summary, optional continuation hint, and evidence-linked claims. The old task,
   progression, outcome, open-loop, and activity-state fields are not retained.
 - Six-hour and daily Markdown rollups form a deterministic local memory layer.
-  An independent opt-in can synthesize them with the configured model; source
-  fingerprints prevent repeat calls. Retrieval searches all three granularities
-  and returns source document/segment IDs.
+  A six-hour rollup is materialized only after its time range has ended; daily
+  memory is rebuilt from those completed ranges. An independent opt-in can
+  synthesize them with the configured model; source fingerprints prevent repeat
+  calls. Retrieval searches all three granularities and returns source
+  document/segment IDs.
 - Optional Responses API summaries use strict JSON Schema, bounded retries, exact
   evidence validation, and a deterministic raw fallback.
 - There is no database. The sandboxed renderer receives summary DTOs and cannot

@@ -491,7 +491,10 @@ export class MemoryRepository {
     }
   }
 
-  async refresh(documents: TimelineDocumentRecord[]): Promise<MemoryRollupRecord[]> {
+  async refresh(
+    documents: TimelineDocumentRecord[],
+    now = new Date(),
+  ): Promise<MemoryRollupRecord[]> {
     await ensureStorage(this.layout);
     const existing = await this.load();
     const existingByID = new Map(existing.map((record) => [record.id, record]));
@@ -504,6 +507,7 @@ export class MemoryRepository {
     const sixHourRecords: MemoryRollupRecord[] = [];
     for (const [start, items] of sixHourGroups) {
       const date = new Date(start);
+      if (date.getTime() + sixHours > now.getTime()) continue;
       const id = `6h-${date.toISOString()}`;
       const record = rollupFromDocuments("6h", date, items, existingByID.get(id));
       sixHourRecords.push(await this.summarized(record, items, runtime));

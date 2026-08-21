@@ -51,6 +51,30 @@ describe("History memory", () => {
     await expect(repository.load()).resolves.toEqual([]);
   });
 
+  it("waits for a six-hour boundary before materializing memory", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-memory-"));
+    temporaryDirectories.push(root);
+    const repository = new MemoryRepository(makeStorageLayout(root));
+    const source = document({
+      startedAt: new Date(2026, 7, 20, 6, 10).toISOString(),
+      endedAt: new Date(2026, 7, 20, 6, 20).toISOString(),
+    });
+
+    const beforeBoundary = await repository.refresh(
+      [source],
+      new Date(2026, 7, 20, 11, 59, 59, 999),
+    );
+
+    expect(beforeBoundary).toEqual([]);
+    expect(repository.search("分层记忆", [source], beforeBoundary).matches).toMatchObject([
+      { kind: "10min" },
+    ]);
+
+    const atBoundary = await repository.refresh([source], new Date(2026, 7, 20, 12));
+
+    expect(atBoundary.map((record) => record.kind).sort()).toEqual(["6h", "day"]);
+  });
+
   it("retrieves across 10-minute and rollup layers with local evidence references", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-memory-"));
     temporaryDirectories.push(root);
