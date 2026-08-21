@@ -124,6 +124,14 @@ function trayIcon() {
   return image;
 }
 
+function setDevelopmentDockIcon(): void {
+  const dock = app.dock;
+  if (process.platform !== "darwin" || app.isPackaged || !dock) return;
+
+  const icon = nativeImage.createFromPath(path.join(app.getAppPath(), "build/icon.png"));
+  if (!icon.isEmpty()) dock.setIcon(icon);
+}
+
 function rebuildTray(snapshot: DesktopSnapshot): void {
   if (!tray) return;
   const running = snapshot.agent?.recorderState === "running";
@@ -288,6 +296,7 @@ if (!hasSingleInstanceLock) {
   void app
     .whenReady()
     .then(async () => {
+      setDevelopmentDockIcon();
       registerIPC();
       await createWindow();
       tray = new Tray(trayIcon());
