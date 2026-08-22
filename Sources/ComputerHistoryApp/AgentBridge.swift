@@ -196,9 +196,12 @@ final class AgentBridge {
         case "requestScreenCapturePermission":
             _ = visualCaptureProvider.requestScreenCapturePermission()
         case "captureVisualEvidence":
-            guard let request = command.visualRequest,
-                  let expiresAt = ISO8601DateFormatter().date(from: request.expiresAt) else {
+            guard let request = command.visualRequest else {
                 sendError("Invalid visual capture request", requestID: command.id)
+                return
+            }
+            guard let expiresAt = WireDateParser.parseISO8601(request.expiresAt) else {
+                sendError("Invalid visual capture expiry", requestID: command.id)
                 return
             }
             let intent = VisualCaptureIntent(
