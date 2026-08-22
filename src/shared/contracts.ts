@@ -98,7 +98,6 @@ export interface VisualHealth {
   captureBlockedCount: number;
   captureFailedCount: number;
   captureCooldownCount: number;
-  captureBudgetBlockedCount: number;
   captureBackoffCount: number;
   visualGapCount: number;
   visualUnchangedCount: number;

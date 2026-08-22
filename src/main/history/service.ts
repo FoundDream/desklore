@@ -122,7 +122,6 @@ export class HistoryService extends EventEmitter {
     captureBlockedCount: 0,
     captureFailedCount: 0,
     captureCooldownCount: 0,
-    captureBudgetBlockedCount: 0,
     captureBackoffCount: 0,
     visualGapCount: 0,
     visualUnchangedCount: 0,
@@ -682,7 +681,6 @@ export class HistoryService extends EventEmitter {
     const gate = this.visualCaptureScheduler.reserve(event, nowMilliseconds);
     if (!gate.allowed) {
       if (gate.reason === "window_cooldown") this.visualHealth.captureCooldownCount += 1;
-      if (gate.reason === "global_budget") this.visualHealth.captureBudgetBlockedCount += 1;
       if (gate.reason === "provider_backoff") this.visualHealth.captureBackoffCount += 1;
       this.visualHealth.lastCaptureDecisionReason = gate.reason;
       return {

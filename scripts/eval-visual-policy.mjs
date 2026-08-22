@@ -413,7 +413,7 @@ export function replayVisualPolicy(records, options = {}) {
         visionCallsUpperBound: baselineCaptureRequests,
       },
       candidate: {
-        policy: "needs_visual_then_cooldown_and_global_budget",
+        policy: "needs_visual_then_window_cooldown",
         screenshotRequests: candidateCaptureRequests,
         screenshotsPerActiveMinute: rate(candidateCaptureRequests, activeMinutes),
         visionCallsUpperBound: candidateCaptureRequests,
@@ -525,8 +525,8 @@ function markdown(report) {
     `Generated at ${report.generatedAt}. This is a same-input policy replay: it does not take screenshots or call a model.\n\n` +
     `Input: ${report.input.root}. Completed evidence-bearing segments: ${report.dataQuality.segmentsRead}; ` +
     `open segments skipped: ${report.dataQuality.openSegmentsSkipped}.\n\n` +
-    `Candidate policy: needs_visual only, ${report.policy.windowCooldownMilliseconds} ms per-window cooldown, ` +
-    `${report.policy.globalCaptureLimit} captures per ${report.policy.globalWindowMilliseconds} ms globally. ` +
+    `Candidate policy: needs_visual only with a ${report.policy.windowCooldownMilliseconds} ms per-window cooldown. ` +
+    `There is no global hard capture quota. ` +
     `Provider backoff is excluded because replay has no provider outcomes.\n\n` +
     `## A/B result\n\n` +
     `| Metric | Baseline | Candidate |\n| --- | ---: | ---: |\n` +
@@ -578,16 +578,6 @@ export async function run(argv = process.argv.slice(2)) {
       args.get("window-cooldown-ms"),
       visualCaptureLimits.windowCooldownMilliseconds,
       "window-cooldown-ms",
-    ),
-    globalWindowMilliseconds: positiveInteger(
-      args.get("global-window-ms"),
-      visualCaptureLimits.globalWindowMilliseconds,
-      "global-window-ms",
-    ),
-    globalCaptureLimit: positiveInteger(
-      args.get("global-capture-limit"),
-      visualCaptureLimits.globalCaptureLimit,
-      "global-capture-limit",
     ),
   };
   const excludedBundles = new Set(defaultExcludedBundles);

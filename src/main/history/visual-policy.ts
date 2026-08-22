@@ -1,7 +1,5 @@
 export const visualCaptureLimits = {
   windowCooldownMilliseconds: 12_000,
-  globalWindowMilliseconds: 60_000,
-  globalCaptureLimit: 4,
   cacheTTLMilliseconds: 30 * 60_000,
   providerBackoffMilliseconds: [30_000, 2 * 60_000, 10 * 60_000] as const,
 };
@@ -12,11 +10,7 @@ export interface VisualCapturePolicyIdentity {
   hasStableWindowIdentity: boolean;
 }
 
-export type VisualCaptureGateReason =
-  | "capture_allowed"
-  | "window_cooldown"
-  | "global_budget"
-  | "provider_backoff";
+export type VisualCaptureGateReason = "capture_allowed" | "window_cooldown" | "provider_backoff";
 
 export interface VisualCaptureGateDecision {
   allowed: boolean;
@@ -27,8 +21,6 @@ export interface VisualCaptureGateDecision {
 
 export interface VisualCapturePolicyLimits {
   windowCooldownMilliseconds: number;
-  globalWindowMilliseconds: number;
-  globalCaptureLimit: number;
   cacheTTLMilliseconds: number;
   providerBackoffMilliseconds: readonly number[];
 }
@@ -38,7 +30,6 @@ export class VisualCapturePolicyScheduler {
   private readonly lastAttemptByWindow = new Map<string, number>();
   private readonly lastAttemptByApplication = new Map<string, number>();
   private readonly lastUnresolvedAttemptByApplication = new Map<string, number>();
-  private readonly globalAttempts: number[] = [];
   private providerFailureCount = 0;
   private providerBlockedUntil = 0;
 
@@ -84,22 +75,11 @@ export class VisualCapturePolicyScheduler {
       };
     }
 
-    if (this.globalAttempts.length >= this.limits.globalCaptureLimit) {
-      return {
-        allowed: false,
-        reason: "global_budget",
-        windowKey: identity.windowKey,
-        retryAfterMilliseconds:
-          this.limits.globalWindowMilliseconds - (nowMilliseconds - this.globalAttempts[0]!),
-      };
-    }
-
     this.lastAttemptByWindow.set(identity.windowKey, nowMilliseconds);
     this.lastAttemptByApplication.set(identity.applicationKey, nowMilliseconds);
     if (!identity.hasStableWindowIdentity) {
       this.lastUnresolvedAttemptByApplication.set(identity.applicationKey, nowMilliseconds);
     }
-    this.globalAttempts.push(nowMilliseconds);
     return { allowed: true, reason: "capture_allowed", windowKey: identity.windowKey };
   }
 
@@ -120,16 +100,7 @@ export class VisualCapturePolicyScheduler {
   }
 
   private prune(nowMilliseconds: number): void {
-    while (
-      this.globalAttempts.length > 0 &&
-      nowMilliseconds - this.globalAttempts[0]! >= this.limits.globalWindowMilliseconds
-    ) {
-      this.globalAttempts.shift();
-    }
-    const staleWindowAge = Math.max(
-      this.limits.globalWindowMilliseconds,
-      this.limits.cacheTTLMilliseconds,
-    );
+    const staleWindowAge = this.limits.cacheTTLMilliseconds;
     for (const [key, attemptedAt] of this.lastAttemptByWindow) {
       if (nowMilliseconds - attemptedAt >= staleWindowAge) this.lastAttemptByWindow.delete(key);
     }

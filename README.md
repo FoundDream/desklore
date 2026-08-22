@@ -109,9 +109,9 @@ matches. Capture requests expire eight seconds after the source event; stale or
 ambiguous targets are recorded as visual gaps instead of capturing another window.
 
 Screenshot fallback is rate-limited after the existing 0.8–2 second event-burst
-coalescing: a window can request at most one capture every 12 seconds and all
-windows share a four-captures-per-minute budget. Provider failures back off from
-30 seconds to two minutes and then ten minutes. Only a final `needs_visual`
+coalescing: a window can request at most one capture every 12 seconds, without a
+global hard capture quota. Provider failures back off from 30 seconds to two
+minutes and then ten minutes. Only a final `needs_visual`
 decision may request pixels; `uncertain` decisions are recorded as visual gaps.
 For Luna understanding, an exact signature of the transient privacy-processed
 window image reuses the last structured result when the pixels have not changed.
@@ -216,7 +216,7 @@ npm run eval:visual -- \
 
 The baseline requests a screenshot for every non-`enough` AX decision. The
 candidate requests one only for `needs_visual`, then applies the runtime's shared
-per-window cooldown and rolling global budget. The ignored
+per-window cooldown without a global hard quota. The ignored
 `.eval-data/visual-policy/` directory contains `report.json`, `report.md`, and a
 Screenpipe-style `decisions.jsonl` row for every judged event. Rows contain gate
 outcomes and evidence-presence flags, but no window titles, URLs, OCR text,
@@ -228,9 +228,8 @@ changes in captured local-OCR fingerprints should receive a compatible candidate
 capture trigger within 15 seconds. This is not a score for non-text visual change
 or image-understanding quality, and its completeness depends on how densely the
 source trace actually captured frames. Use `--since`, `--until`,
-`--coverage-ms`, `--window-cooldown-ms`, `--global-window-ms`, or
-`--global-capture-limit` for controlled comparisons. Open segments are excluded
-unless `--include-open` is passed.
+`--coverage-ms`, or `--window-cooldown-ms` for controlled comparisons. Open
+segments are excluded unless `--include-open` is passed.
 
 ## Verify
 

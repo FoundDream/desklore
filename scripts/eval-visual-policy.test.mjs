@@ -60,13 +60,13 @@ test("replays the old non-enough baseline against needs-visual cooldown policy",
   });
 });
 
-test("uses the shared rolling global capture limit", () => {
+test("does not impose a shared hard budget across distinct windows", () => {
   const result = replayVisualPolicy(
-    [0, 1, 2, 3, 4].map((offsetSeconds) => record({ offsetSeconds, window: offsetSeconds + 1 })),
+    Array.from({ length: 8 }, (_, index) => record({ offsetSeconds: 0, window: index + 1 })),
   );
 
-  assert.equal(result.summary.candidate.screenshotRequests, 4);
-  assert.equal(result.summary.candidate.gateReasons.global_budget, 1);
+  assert.equal(result.summary.candidate.screenshotRequests, 8);
+  assert.deepEqual(result.summary.candidate.gateReasons, { capture_allowed: 8 });
 });
 
 test("reports OCR checkpoint trigger coverage without exposing OCR text", () => {

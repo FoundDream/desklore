@@ -48,18 +48,14 @@ describe("visual capture scheduler", () => {
     );
   });
 
-  it("shares a four-capture rolling budget across windows", () => {
+  it("does not impose a shared hard budget across distinct windows", () => {
     const scheduler = new VisualCaptureScheduler();
-    for (let index = 0; index < visualCaptureLimits.globalCaptureLimit; index += 1) {
-      expect(scheduler.reserve(event(index), index * 1_000).allowed).toBe(true);
+    for (let index = 0; index < 8; index += 1) {
+      expect(scheduler.reserve(event(index), 0)).toMatchObject({
+        allowed: true,
+        reason: "capture_allowed",
+      });
     }
-    expect(scheduler.reserve(event(99), 5_000)).toMatchObject({
-      allowed: false,
-      reason: "global_budget",
-    });
-    expect(
-      scheduler.reserve(event(99), visualCaptureLimits.globalWindowMilliseconds),
-    ).toMatchObject({ allowed: true, reason: "capture_allowed" });
   });
 
   it("uses application cooldown when a stable window ID is missing", () => {
