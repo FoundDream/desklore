@@ -47,6 +47,12 @@ import {
   type VisualCapturePayload,
   type VisualCaptureProvider,
 } from "./visual.js";
+import {
+  VisualCaptureScheduler,
+  VisualUnderstandingCache,
+  visualPayloadSignature,
+  visualWindowKey,
+} from "./visual-scheduler.js";
 
 const unsupportedContinuationPattern =
   /(?:未|尚未|没有)(?:观察到|看到|发现|确认)|\b(?:not observed|not seen|no evidence)\b/i;
@@ -90,6 +96,8 @@ export class HistoryService extends EventEmitter {
   private captureWork: Promise<unknown> = Promise.resolve();
   private timelineWork: Promise<unknown> = Promise.resolve();
   private visualWork: Promise<unknown> = Promise.resolve();
+  private readonly visualCaptureScheduler = new VisualCaptureScheduler();
+  private readonly visualUnderstandingCache = new VisualUnderstandingCache();
   private flushTimer?: NodeJS.Timeout;
   private maintenanceTimer?: NodeJS.Timeout;
   private receivedNativeEvent = false;
@@ -113,7 +121,15 @@ export class HistoryService extends EventEmitter {
     captureSucceededCount: 0,
     captureBlockedCount: 0,
     captureFailedCount: 0,
+    captureCooldownCount: 0,
+    captureBudgetBlockedCount: 0,
+    captureBackoffCount: 0,
+    visualGapCount: 0,
+    visualUnchangedCount: 0,
+    visualReusedCount: 0,
+    visionCalledCount: 0,
     lastDecisionReason: undefined as string | undefined,
+    lastCaptureDecisionReason: undefined as string | undefined,
   };
 
   constructor(
@@ -281,6 +297,7 @@ export class HistoryService extends EventEmitter {
     if (apiKey) await this.settingsStore.saveAPIKey(apiKey);
     await this.settingsStore.saveLLMSettings(next);
     this.llmSettings = next;
+    this.visualUnderstandingCache.clear();
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
     this.lastError = undefined;
     void this.enqueueTimeline(async () => {
@@ -307,6 +324,9 @@ export class HistoryService extends EventEmitter {
     if (!valid) throw new Error("Invalid visual configuration");
     await this.settingsStore.saveVisualSettings(input);
     this.visualSettings = { ...input };
+    if (input.captureMode === "off" || input.understandingMode !== "luna") {
+      this.visualUnderstandingCache.clear();
+    }
     this.lastError = undefined;
     this.emitSnapshot();
     return this.current();
@@ -324,6 +344,7 @@ export class HistoryService extends EventEmitter {
 
   async removeLLMAPIKey(): Promise<DesktopSnapshot> {
     await this.settingsStore.removeAPIKey();
+    this.visualUnderstandingCache.clear();
     this.apiKeyConfigured = Boolean(process.env.OPENAI_API_KEY);
     this.emitSnapshot();
     return this.current();
@@ -526,12 +547,8 @@ export class HistoryService extends EventEmitter {
       return;
     }
     const ruleDecision = evaluateAXByRules(event);
-    const immediateCapture =
-      settings.captureMode === "fallback" && ruleDecision.decision === "needs_visual"
-        ? this.captureVisualEvidence(event, settings.understandingMode)
-        : undefined;
     void this.enqueueVisual(async () =>
-      this.enrichVisualEvidence(event, settings, ruleDecision, immediateCapture),
+      this.enrichVisualEvidence(event, settings, ruleDecision),
     ).catch((error) => this.captureError(error));
   }
 
@@ -539,7 +556,6 @@ export class HistoryService extends EventEmitter {
     event: HistoryEvent,
     settings: VisualSettings,
     ruleDecision: ReturnType<typeof evaluateAXByRules>,
-    immediateCapture?: Promise<{ requestID: string; payload: VisualCapturePayload }>,
   ): Promise<void> {
     const runtime =
       settings.axJudge === "luna" || settings.understandingMode === "luna"
@@ -569,21 +585,44 @@ export class HistoryService extends EventEmitter {
       axSufficiency,
     };
 
-    if (settings.captureMode === "fallback" && axSufficiency.decision !== "enough") {
-      const capture = await (immediateCapture ??
-        this.captureVisualEvidence(event, settings.understandingMode));
+    if (settings.captureMode === "fallback" && axSufficiency.decision === "needs_visual") {
+      const capture = await this.captureVisualEvidence(event, settings.understandingMode);
       const visual = visualEvidenceFromCapture(capture.requestID, capture.payload);
       if (capture.payload.status === "captured") {
         this.visualHealth.captureSucceededCount += 1;
         if (settings.understandingMode === "off") visual.ocrText = undefined;
         if (settings.understandingMode === "luna" && runtime && capture.payload.imageBase64) {
-          try {
-            const result = await understandVisualWithLuna(event, capture.payload, runtime);
-            visual.understanding = result.understanding;
-            visual.confidence = result.confidence;
+          const signature = visualPayloadSignature(capture.payload);
+          const windowKey = visualWindowKey(event, capture.payload.windowRuntimeIdentifier);
+          const cached = signature
+            ? this.visualUnderstandingCache.get(windowKey, signature)
+            : undefined;
+          if (cached) {
+            visual.understanding = cached.understanding;
+            visual.confidence = cached.confidence;
             visual.privacy = "redacted_remote";
-          } catch (error) {
-            visual.reason = `visual_model_${error instanceof Error ? error.message : "failed"}`;
+            visual.reason = "visual_reused";
+            this.visualHealth.visualUnchangedCount += 1;
+            this.visualHealth.visualReusedCount += 1;
+            this.visualHealth.lastCaptureDecisionReason = "visual_reused";
+          } else {
+            try {
+              this.visualHealth.visionCalledCount += 1;
+              const result = await understandVisualWithLuna(event, capture.payload, runtime);
+              visual.understanding = result.understanding;
+              visual.confidence = result.confidence;
+              visual.privacy = "redacted_remote";
+              this.visualHealth.lastCaptureDecisionReason = "vision_called";
+              if (signature) {
+                this.visualUnderstandingCache.set(windowKey, signature, {
+                  ...result,
+                  createdAtMilliseconds: Date.now(),
+                });
+              }
+            } catch (error) {
+              visual.reason = `visual_model_${error instanceof Error ? error.message : "failed"}`;
+              this.visualHealth.lastCaptureDecisionReason = visual.reason;
+            }
           }
         }
       } else if (capture.payload.status === "blocked") {
@@ -592,8 +631,16 @@ export class HistoryService extends EventEmitter {
         this.visualHealth.captureFailedCount += 1;
       }
       enrichment.visual = visual;
-    } else if (immediateCapture) {
-      await immediateCapture.catch(() => undefined);
+    } else if (settings.captureMode === "fallback" && axSufficiency.decision === "uncertain") {
+      this.visualHealth.visualGapCount += 1;
+      this.visualHealth.lastCaptureDecisionReason = "ax_judge_uncertain";
+      enrichment.visual = {
+        requestID: randomUUID().toLowerCase(),
+        status: "unavailable",
+        provider: this.visualCaptureProvider?.id ?? "none",
+        reason: "ax_judge_uncertain",
+        privacy: "not_captured",
+      };
     }
 
     await this.segments.appendEvidence(enrichment);
@@ -603,8 +650,8 @@ export class HistoryService extends EventEmitter {
   private async captureVisualEvidence(
     event: HistoryEvent,
     understandingMode: VisualSettings["understandingMode"] = this.visualSettings.understandingMode,
+    nowMilliseconds = Date.now(),
   ): Promise<{ requestID: string; payload: VisualCapturePayload }> {
-    this.visualHealth.captureRequestedCount += 1;
     const requestID = randomUUID().toLowerCase();
     const domain = domainFromURL(event.window?.url);
     if (
@@ -621,6 +668,8 @@ export class HistoryService extends EventEmitter {
       };
     }
     if (!this.visualCaptureProvider) {
+      this.visualCaptureScheduler.recordProviderFailure(nowMilliseconds);
+      this.visualHealth.lastCaptureDecisionReason = "provider_unavailable";
       return {
         requestID,
         payload: {
@@ -630,10 +679,41 @@ export class HistoryService extends EventEmitter {
         },
       };
     }
+    const gate = this.visualCaptureScheduler.reserve(event, nowMilliseconds);
+    if (!gate.allowed) {
+      if (gate.reason === "window_cooldown") this.visualHealth.captureCooldownCount += 1;
+      if (gate.reason === "global_budget") this.visualHealth.captureBudgetBlockedCount += 1;
+      if (gate.reason === "provider_backoff") this.visualHealth.captureBackoffCount += 1;
+      this.visualHealth.lastCaptureDecisionReason = gate.reason;
+      return {
+        requestID,
+        payload: {
+          status: "blocked",
+          reason: gate.reason,
+          provider: this.visualCaptureProvider.id,
+        },
+      };
+    }
+    const providerStatus = this.visualCaptureProvider.status();
+    if (providerStatus !== "ready") {
+      this.visualCaptureScheduler.recordProviderFailure(nowMilliseconds);
+      const reason = `provider_${providerStatus}`;
+      this.visualHealth.lastCaptureDecisionReason = reason;
+      return {
+        requestID,
+        payload: {
+          status: "unavailable",
+          reason,
+          provider: this.visualCaptureProvider.id,
+        },
+      };
+    }
+    this.visualHealth.captureRequestedCount += 1;
+    this.visualHealth.lastCaptureDecisionReason = "capture_requested";
     const eventTime = Date.parse(event.timestamp);
     const eventExpiresAt = Number.isFinite(eventTime)
-      ? Math.min(Date.now() + 8_000, eventTime + 8_000)
-      : Date.now() + 8_000;
+      ? Math.min(nowMilliseconds + 8_000, eventTime + 8_000)
+      : nowMilliseconds + 8_000;
     try {
       const payload = await this.visualCaptureProvider.capture({
         requestID,
@@ -644,16 +724,28 @@ export class HistoryService extends EventEmitter {
         expiresAt: new Date(eventExpiresAt).toISOString(),
         includeImage: understandingMode === "luna",
       });
+      if (payload.status === "captured") {
+        this.visualCaptureScheduler.recordProviderSuccess();
+        this.visualHealth.lastCaptureDecisionReason = "captured";
+      } else if (payload.status === "failed" || payload.status === "unavailable") {
+        this.visualCaptureScheduler.recordProviderFailure(nowMilliseconds);
+        this.visualHealth.lastCaptureDecisionReason = payload.reason ?? payload.status;
+      } else {
+        this.visualHealth.lastCaptureDecisionReason = payload.reason ?? payload.status;
+      }
       return {
         requestID,
         payload,
       };
     } catch (error) {
+      this.visualCaptureScheduler.recordProviderFailure(nowMilliseconds);
+      const reason = `provider_${error instanceof Error ? error.message : "request_failed"}`;
+      this.visualHealth.lastCaptureDecisionReason = reason;
       return {
         requestID,
         payload: {
           status: "failed",
-          reason: `provider_${error instanceof Error ? error.message : "request_failed"}`,
+          reason,
           provider: this.visualCaptureProvider.id,
         },
       };

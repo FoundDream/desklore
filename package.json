@@ -12,8 +12,9 @@
     "dev:ui": "electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
     "build": "npm run native:build && electron-vite-plus build",
     "check": "vp check",
-    "test": "vp test run && node --test scripts/eval-history-data.test.mjs",
+    "test": "vp test run && node --test scripts/*.test.mjs",
     "eval:history": "node scripts/eval-history-data.mjs",
+    "eval:visual": "node scripts/eval-visual-policy.mjs",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
     "package:mac": "npm run build && electron-builder --mac"

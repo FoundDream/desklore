@@ -108,6 +108,15 @@ runtime window ID, with a title/unique-window fallback that refuses ambiguous
 matches. Capture requests expire eight seconds after the source event; stale or
 ambiguous targets are recorded as visual gaps instead of capturing another window.
 
+Screenshot fallback is rate-limited after the existing 0.8–2 second event-burst
+coalescing: a window can request at most one capture every 12 seconds and all
+windows share a four-captures-per-minute budget. Provider failures back off from
+30 seconds to two minutes and then ten minutes. Only a final `needs_visual`
+decision may request pixels; `uncertain` decisions are recorded as visual gaps.
+For Luna understanding, an exact signature of the transient privacy-processed
+window image reuses the last structured result when the pixels have not changed.
+The cache stores no image bytes and expires after 30 minutes.
+
 Raw pixels are never written to segment files or exposed to the renderer. Local-only
 capture and OCR remain inside the signed native Agent. Luna image understanding is
 an independent opt-in: the Agent applies OCR-based secret-pattern masking before
@@ -195,6 +204,34 @@ those boundaries. Keep the candidate and reference running together for
 meaningful paired results; use `--since` after deploying a collector change so
 older implementations do not dominate the score.
 
+## Visual fallback policy benchmark
+
+Replay persisted AX decisions through the old and current screenshot policies
+without taking a new screenshot or calling Luna:
+
+```sh
+npm run eval:visual -- \
+  --input "$HOME/Library/Application Support/ComputerHistoryDesktop"
+```
+
+The baseline requests a screenshot for every non-`enough` AX decision. The
+candidate requests one only for `needs_visual`, then applies the runtime's shared
+per-window cooldown and rolling global budget. The ignored
+`.eval-data/visual-policy/` directory contains `report.json`, `report.md`, and a
+Screenpipe-style `decisions.jsonl` row for every judged event. Rows contain gate
+outcomes and evidence-presence flags, but no window titles, URLs, OCR text,
+understanding text, or pixels.
+
+The report compares screenshot requests per active minute, upper-bound Luna
+calls, gate reasons, and observed reuse. It also reports a limited fidelity proxy:
+changes in captured local-OCR fingerprints should receive a compatible candidate
+capture trigger within 15 seconds. This is not a score for non-text visual change
+or image-understanding quality, and its completeness depends on how densely the
+source trace actually captured frames. Use `--since`, `--until`,
+`--coverage-ms`, `--window-cooldown-ms`, `--global-window-ms`, or
+`--global-capture-limit` for controlled comparisons. Open segments are excluded
+unless `--include-open` is passed.
+
 ## Verify
 
 ```sh
@@ -203,6 +240,7 @@ npm test
 npm run build
 npm run doctor
 npm run eval:history -- --reference /path/to/Skysight
+npm run eval:visual
 swift test
 swift build
 ```

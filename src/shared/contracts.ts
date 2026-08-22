@@ -97,7 +97,15 @@ export interface VisualHealth {
   captureSucceededCount: number;
   captureBlockedCount: number;
   captureFailedCount: number;
+  captureCooldownCount: number;
+  captureBudgetBlockedCount: number;
+  captureBackoffCount: number;
+  visualGapCount: number;
+  visualUnchangedCount: number;
+  visualReusedCount: number;
+  visionCalledCount: number;
   lastDecisionReason?: string;
+  lastCaptureDecisionReason?: string;
 }
 
 export interface AgentSnapshot {
