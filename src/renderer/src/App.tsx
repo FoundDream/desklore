@@ -871,17 +871,30 @@ function SettingsView({
     agent?.llm.endpoint ?? "https://api.openai.com/v1/responses",
   );
   const [apiKey, setAPIKey] = useState("");
+  const [axJudge, setAXJudge] = useState<"rules" | "luna">(agent?.visual.axJudge ?? "rules");
+  const [captureMode, setCaptureMode] = useState<"off" | "fallback">(
+    agent?.visual.captureMode ?? "off",
+  );
+  const [understandingMode, setUnderstandingMode] = useState<"off" | "ocr" | "luna">(
+    agent?.visual.understandingMode ?? "off",
+  );
   useEffect(() => {
     if (!agent) return;
     setEnabled(agent.llm.enabled);
     setMemorySynthesisEnabled(agent.llm.memorySynthesisEnabled);
     setModel(agent.llm.model);
     setEndpoint(agent.llm.endpoint);
+    setAXJudge(agent.visual.axJudge);
+    setCaptureMode(agent.visual.captureMode);
+    setUnderstandingMode(agent.visual.understandingMode);
   }, [
     agent?.llm.enabled,
     agent?.llm.memorySynthesisEnabled,
     agent?.llm.model,
     agent?.llm.endpoint,
+    agent?.visual.axJudge,
+    agent?.visual.captureMode,
+    agent?.visual.understandingMode,
   ]);
   return (
     <>
@@ -969,6 +982,89 @@ function SettingsView({
           <strong>数据边界</strong>
           <span>
             原始事件、时间线和长期记忆保存在本机。开启语义摘要会发送经过过滤的事件样本；“模型归纳长期记忆”另行发送本地十分钟摘要。两个开关均关闭时，检索与确定性聚合完全离线。
+          </span>
+        </div>
+        <div className="settings-divider" />
+        <div className="settings-section observation">
+          <div className="settings-copy">
+            <h2>视觉证据</h2>
+            <span>作为 AX 不足时的可选补充能力，默认关闭。</span>
+          </div>
+        </div>
+        <div className="form-grid">
+          <label>
+            <span>AX 充分性判断</span>
+            <select
+              value={axJudge}
+              onChange={(event) => setAXJudge(event.target.value as "rules" | "luna")}
+            >
+              <option value="rules">本地规则</option>
+              <option value="luna">Luna 判断灰区</option>
+            </select>
+          </label>
+          <label>
+            <span>窗口截图</span>
+            <select
+              value={captureMode}
+              onChange={(event) => setCaptureMode(event.target.value as "off" | "fallback")}
+            >
+              <option value="off">关闭</option>
+              <option value="fallback">AX 不足时启用</option>
+            </select>
+          </label>
+          <label>
+            <span>视觉理解</span>
+            <select
+              value={understandingMode}
+              onChange={(event) =>
+                setUnderstandingMode(event.target.value as "off" | "ocr" | "luna")
+              }
+            >
+              <option value="off">仅验证截图能力</option>
+              <option value="ocr">本地 OCR</option>
+              <option value="luna">本地脱敏后发送 Luna</option>
+            </select>
+          </label>
+        </div>
+        <div className="settings-actions">
+          <button
+            className="primary"
+            onClick={() =>
+              void run(() =>
+                window.computerHistory.configureVisual({
+                  axJudge,
+                  captureMode,
+                  understandingMode,
+                }),
+              )
+            }
+          >
+            保存视觉设置
+          </button>
+          {captureMode === "fallback" && agent?.visual.providerStatus === "permission_required" && (
+            <button
+              onClick={() =>
+                void run(() => window.computerHistory.requestScreenCapturePermission())
+              }
+            >
+              授予录屏权限
+            </button>
+          )}
+        </div>
+        <div className="privacy-boundary">
+          <strong>
+            Provider：
+            {agent?.visual.providerStatus === "ready"
+              ? "已就绪"
+              : agent?.visual.providerStatus === "permission_required"
+                ? "等待录屏权限"
+                : agent?.visual.providerStatus === "unavailable"
+                  ? "未安装"
+                  : "未启用"}
+          </strong>
+          <span>
+            原始像素不写入事件或渲染层。Luna 灰区判断会发送过滤后的 AX 证据；Luna
+            视觉理解会发送经过本地 OCR 与敏感模式规则处理的窗口图像。应用与域名排除策略仍优先执行。
           </span>
         </div>
         <div className="settings-divider" />

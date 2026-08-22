@@ -59,11 +59,25 @@ describe("TypeScript history core", () => {
           title: "Editor",
           url: "https://alice:secret@example.com/path?q=token#fragment",
           isPrivateBrowsing: false,
+          runtimeIdentifier: 42,
+        },
+        evidence: {
+          visual: {
+            requestID: "request-1",
+            status: "captured",
+            provider: "test",
+            ocrText: "api_key=sk-abcdefghijklmnopqrstuvwxyz",
+            understanding: "password=secret-value",
+            privacy: "local_ocr",
+          },
         },
       }),
     );
     expect(safe.interaction?.text).toBe("[REDACTED]");
     expect(safe.window?.url).toBe("https://example.com/path");
+    expect(safe.window?.runtimeIdentifier).toBe(42);
+    expect(safe.evidence?.visual?.ocrText).toBe("[REDACTED]");
+    expect(safe.evidence?.visual?.understanding).toBe("[REDACTED]");
     expect(
       applyObservationPolicy(
         defaultObservationPolicy,
@@ -326,6 +340,60 @@ describe("TypeScript history core", () => {
     expect(line).toContain('"is_private_browsing":false');
     expect(line).toContain('"capture_reason":"mouse"');
     await expect(store.readEvents(closed!)).resolves.toEqual([input]);
+  });
+
+  it("keeps optional visual enrichment separate and joins it by event ID", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-evidence-"));
+    temporaryDirectories.push(root);
+    const store = new SegmentStore(makeStorageLayout(root));
+    const input = event(
+      {
+        window: {
+          title: "Canvas",
+          isPrivateBrowsing: false,
+          runtimeIdentifier: 42,
+        },
+      },
+      7,
+    );
+    await store.append(input);
+    await store.appendEvidence({
+      schemaVersion: 1,
+      eventID: input.id,
+      eventTimestamp: input.timestamp,
+      createdAt: input.timestamp,
+      axSufficiency: {
+        decision: "needs_visual",
+        source: "luna",
+        confidence: 0.93,
+        reasons: ["canvas_content_missing"],
+        missingEvidence: ["visible_content"],
+        judgedAt: input.timestamp,
+      },
+      visual: {
+        requestID: "visual-request",
+        status: "captured",
+        provider: "test-provider",
+        ocrText: "Visible canvas label",
+        privacy: "local_ocr",
+      },
+    });
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    await expect(store.readEvents(closed!)).resolves.toEqual([
+      {
+        ...input,
+        evidence: {
+          axSufficiency: expect.objectContaining({
+            decision: "needs_visual",
+            source: "luna",
+          }),
+          visual: expect.objectContaining({
+            status: "captured",
+            ocrText: "Visible canvas label",
+          }),
+        },
+      },
+    ]);
   });
 
   it("round-trips schema v4 Markdown including persisted LLM failure reason", () => {

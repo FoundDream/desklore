@@ -4,7 +4,7 @@ import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { defaultObservationPolicy } from "./policy.js";
-import type { ObservationPolicy, TimelineLLMSettings } from "./types.js";
+import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "./types.js";
 import type { StorageLayout } from "./storage.js";
 
 const defaultLLMSettings: TimelineLLMSettings = {
@@ -12,6 +12,11 @@ const defaultLLMSettings: TimelineLLMSettings = {
   memorySynthesisEnabled: false,
   model: "gpt-5.6-luna",
   endpoint: "https://api.openai.com/v1/responses",
+};
+export const defaultVisualSettings: VisualSettings = {
+  axJudge: "rules",
+  captureMode: "off",
+  understandingMode: "off",
 };
 const execFileAsync = promisify(execFile);
 const legacyDefaultsDomain = "com.ziwen.computer-history.desktop.agent";
@@ -43,11 +48,13 @@ export class HistorySettingsStore {
   private readonly policyPath: string;
   private readonly llmPath: string;
   private readonly apiKeyPath: string;
+  private readonly visualPath: string;
 
   constructor(layout: StorageLayout) {
     this.policyPath = path.join(layout.state, "observation-policy.json");
     this.llmPath = path.join(layout.state, "llm-settings.json");
     this.apiKeyPath = path.join(layout.state, "llm-api-key.bin");
+    this.visualPath = path.join(layout.state, "visual-settings.json");
   }
 
   async loadPolicy(): Promise<ObservationPolicy> {
@@ -88,6 +95,23 @@ export class HistorySettingsStore {
 
   async saveLLMSettings(settings: TimelineLLMSettings): Promise<void> {
     await atomicWrite(this.llmPath, `${JSON.stringify(settings, null, 2)}\n`);
+  }
+
+  async loadVisualSettings(): Promise<VisualSettings> {
+    const stored = (await readJSON(this.visualPath)) as Partial<VisualSettings> | undefined;
+    if (!stored) return { ...defaultVisualSettings };
+    return {
+      axJudge: stored.axJudge === "luna" ? "luna" : "rules",
+      captureMode: stored.captureMode === "fallback" ? "fallback" : "off",
+      understandingMode:
+        stored.understandingMode === "ocr" || stored.understandingMode === "luna"
+          ? stored.understandingMode
+          : "off",
+    };
+  }
+
+  async saveVisualSettings(settings: VisualSettings): Promise<void> {
+    await atomicWrite(this.visualPath, `${JSON.stringify(settings, null, 2)}\n`);
   }
 
   async hasAPIKey(): Promise<boolean> {

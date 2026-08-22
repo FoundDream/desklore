@@ -38,15 +38,18 @@ public struct HistoryEvent: Codable, Equatable, Identifiable, Sendable {
         public let title: String?
         public let url: String?
         public let isPrivateBrowsing: Bool
+        public let runtimeIdentifier: UInt32?
 
         public init(
             title: String? = nil,
             url: String? = nil,
-            isPrivateBrowsing: Bool = false
+            isPrivateBrowsing: Bool = false,
+            runtimeIdentifier: UInt32? = nil
         ) {
             self.title = title
             self.url = url
             self.isPrivateBrowsing = isPrivateBrowsing
+            self.runtimeIdentifier = runtimeIdentifier
         }
     }
 

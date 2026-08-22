@@ -27,6 +27,30 @@ afterEach(async () => {
 });
 
 describe("History settings", () => {
+  it("keeps visual capabilities independently disabled by default and persists opt-in", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const settingsStore = new HistorySettingsStore(layout);
+
+    await expect(settingsStore.loadVisualSettings()).resolves.toEqual({
+      axJudge: "rules",
+      captureMode: "off",
+      understandingMode: "off",
+    });
+    await settingsStore.saveVisualSettings({
+      axJudge: "luna",
+      captureMode: "fallback",
+      understandingMode: "ocr",
+    });
+    await expect(settingsStore.loadVisualSettings()).resolves.toEqual({
+      axJudge: "luna",
+      captureMode: "fallback",
+      understandingMode: "ocr",
+    });
+  });
+
   it("persists the long-term-memory synthesis toggle independently", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-settings-"));
     temporaryDirectories.push(root);

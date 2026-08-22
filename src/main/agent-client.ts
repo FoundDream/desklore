@@ -164,10 +164,13 @@ export class AgentClient extends EventEmitter {
     }
     const id = randomUUID();
     return new Promise<AgentMessage>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Native agent timed out while handling ${command}`));
-      }, 8_000);
+      const timeout = setTimeout(
+        () => {
+          this.pending.delete(id);
+          reject(new Error(`Native agent timed out while handling ${command}`));
+        },
+        command === "captureVisualEvidence" ? 20_000 : 8_000,
+      );
       this.pending.set(id, { resolve, reject, timeout });
       this.process?.stdin.write(`${JSON.stringify({ id, command, ...payload })}\n`);
     });

@@ -12,15 +12,19 @@ import {
 import path from "node:path";
 import {
   eventForDisk,
+  evidenceEnrichmentForDisk,
   metadataForDisk,
+  normalizeEventEvidenceEnrichment,
   normalizeHistoryEvent,
   normalizeMetadata,
   type ClosedSegment,
   type HistoryEvent,
+  type EventEvidenceEnrichment,
   type SegmentMetadata,
 } from "./types.js";
 
 export const segmentDurationMilliseconds = 10 * 60 * 1_000;
+const eventEvidenceFile = "evidence.jsonl";
 
 export interface StorageLayout {
   root: string;
@@ -132,6 +136,19 @@ export class SegmentStore {
     return closed;
   }
 
+  async appendEvidence(enrichment: EventEvidenceEnrichment): Promise<void> {
+    await ensureStorage(this.layout);
+    const id = segmentIdentifier(new Date(enrichment.eventTimestamp));
+    const directoryPath = path.join(this.layout.segments, id);
+    await mkdir(directoryPath, { recursive: true, mode: 0o700 });
+    const filePath = path.join(directoryPath, eventEvidenceFile);
+    await appendFile(filePath, `${JSON.stringify(evidenceEnrichmentForDisk(enrichment))}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await chmod(filePath, 0o600);
+  }
+
   async recordSuppressed(timestamp: string): Promise<ClosedSegment | undefined> {
     return this.recordMetric(timestamp, "policyBlocked");
   }
@@ -237,12 +254,46 @@ export class SegmentStore {
   async readEvents(segment: ClosedSegment): Promise<HistoryEvent[]> {
     try {
       const contents = await readFile(segment.eventsPath, "utf8");
-      return contents
+      const events = contents
         .split("\n")
         .filter(Boolean)
         .map((line) => normalizeHistoryEvent(JSON.parse(line)));
+      const evidenceByEventID = await this.readEvidence(segment.directoryPath);
+      return events.map((event) => {
+        const evidence = evidenceByEventID.get(event.id.toLowerCase());
+        return evidence
+          ? {
+              ...event,
+              evidence: {
+                axSufficiency: evidence.axSufficiency ?? event.evidence?.axSufficiency,
+                visual: evidence.visual ?? event.evidence?.visual,
+              },
+            }
+          : event;
+      });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  private async readEvidence(
+    directoryPath: string,
+  ): Promise<Map<string, HistoryEvent["evidence"]>> {
+    try {
+      const contents = await readFile(path.join(directoryPath, eventEvidenceFile), "utf8");
+      const result = new Map<string, HistoryEvent["evidence"]>();
+      for (const line of contents.split("\n").filter(Boolean)) {
+        const enrichment = normalizeEventEvidenceEnrichment(JSON.parse(line));
+        const previous = result.get(enrichment.eventID) ?? {};
+        result.set(enrichment.eventID, {
+          axSufficiency: enrichment.axSufficiency ?? previous.axSufficiency,
+          visual: enrichment.visual ?? previous.visual,
+        });
+      }
+      return result;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
       throw error;
     }
   }

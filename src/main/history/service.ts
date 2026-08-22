@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { shell } from "electron";
 import type {
   AgentSnapshot,
@@ -15,8 +16,9 @@ import {
   allowsDomain,
   applyObservationPolicy,
   defaultObservationPolicy,
+  domainFromURL,
 } from "./policy.js";
-import { HistorySettingsStore, validateLLMSettings } from "./settings.js";
+import { defaultVisualSettings, HistorySettingsStore, validateLLMSettings } from "./settings.js";
 import {
   ensureStorage,
   hardenStoragePermissions,
@@ -33,7 +35,18 @@ import type {
   ObservationPolicy,
   TimelineDocumentRecord,
   TimelineLLMSettings,
+  VisualSettings,
+  EventEvidenceEnrichment,
 } from "./types.js";
+import {
+  evaluateAXByRules,
+  judgeAXWithLuna,
+  shouldAssessVisualEvidence,
+  understandVisualWithLuna,
+  visualEvidenceFromCapture,
+  type VisualCapturePayload,
+  type VisualCaptureProvider,
+} from "./visual.js";
 
 const unsupportedContinuationPattern =
   /(?:未|尚未|没有)(?:观察到|看到|发现|确认)|\b(?:not observed|not seen|no evidence)\b/i;
@@ -69,12 +82,14 @@ export class HistoryService extends EventEmitter {
     endpoint: "https://api.openai.com/v1/responses",
   };
   private apiKeyConfigured = false;
+  private visualSettings: VisualSettings = { ...defaultVisualSettings };
   private documents: TimelineDocumentRecord[] = [];
   private memories: MemoryRollupRecord[] = [];
   private lastError?: string;
   private initialized = false;
   private captureWork: Promise<unknown> = Promise.resolve();
   private timelineWork: Promise<unknown> = Promise.resolve();
+  private visualWork: Promise<unknown> = Promise.resolve();
   private flushTimer?: NodeJS.Timeout;
   private maintenanceTimer?: NodeJS.Timeout;
   private receivedNativeEvent = false;
@@ -90,10 +105,21 @@ export class HistoryService extends EventEmitter {
     deduplicatedEventCount: 0,
     burstCoalescedEventCount: 0,
   };
+  private readonly visualHealth = {
+    judgedEventCount: 0,
+    needsVisualCount: 0,
+    uncertainCount: 0,
+    captureRequestedCount: 0,
+    captureSucceededCount: 0,
+    captureBlockedCount: 0,
+    captureFailedCount: 0,
+    lastDecisionReason: undefined as string | undefined,
+  };
 
   constructor(
     private readonly collector: AgentClient,
     storageRoot: string,
+    private readonly visualCaptureProvider?: VisualCaptureProvider,
   ) {
     super();
     this.layout = makeStorageLayout(storageRoot);
@@ -137,6 +163,14 @@ export class HistoryService extends EventEmitter {
           memories: this.memories.map((record) => this.publicMemory(record)),
           health: { ...native.agent.health, ...this.semanticHealth },
           llm: { ...this.llmSettings, apiKeyConfigured: this.apiKeyConfigured },
+          visual: {
+            ...this.visualSettings,
+            ...this.visualHealth,
+            providerStatus:
+              this.visualSettings.captureMode === "off"
+                ? "disabled"
+                : (this.visualCaptureProvider?.status() ?? "unavailable"),
+          },
           lastError: this.lastError ?? native.agent.lastError,
         }
       : undefined;
@@ -173,6 +207,7 @@ export class HistoryService extends EventEmitter {
     await this.enqueueCapture(async () => {
       for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
     });
+    await this.visualWork;
     this.stopTimers();
     await this.collector.stop();
     return this.current();
@@ -187,6 +222,7 @@ export class HistoryService extends EventEmitter {
     await this.enqueueCapture(async () => {
       for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
     });
+    await this.visualWork;
     await this.collector.request("pause");
     return this.current();
   }
@@ -263,6 +299,29 @@ export class HistoryService extends EventEmitter {
     return this.current();
   }
 
+  async configureVisual(input: VisualSettings): Promise<DesktopSnapshot> {
+    const valid =
+      ["rules", "luna"].includes(input.axJudge) &&
+      ["off", "fallback"].includes(input.captureMode) &&
+      ["off", "ocr", "luna"].includes(input.understandingMode);
+    if (!valid) throw new Error("Invalid visual configuration");
+    await this.settingsStore.saveVisualSettings(input);
+    this.visualSettings = { ...input };
+    this.lastError = undefined;
+    this.emitSnapshot();
+    return this.current();
+  }
+
+  async requestScreenCapturePermission(): Promise<DesktopSnapshot> {
+    if (!this.visualCaptureProvider) {
+      this.lastError = "视觉截图 Provider 未安装。";
+      this.emitSnapshot();
+      return this.current();
+    }
+    await this.visualCaptureProvider.requestPermission();
+    return this.current();
+  }
+
   async removeLLMAPIKey(): Promise<DesktopSnapshot> {
     await this.settingsStore.removeAPIKey();
     this.apiKeyConfigured = Boolean(process.env.OPENAI_API_KEY);
@@ -304,9 +363,10 @@ export class HistoryService extends EventEmitter {
     if (this.initialized) return;
     await ensureStorage(this.layout);
     await hardenStoragePermissions(this.layout);
-    [this.policy, this.llmSettings] = await Promise.all([
+    [this.policy, this.llmSettings, this.visualSettings] = await Promise.all([
       this.settingsStore.loadPolicy(),
       this.settingsStore.loadLLMSettings(),
+      this.settingsStore.loadVisualSettings(),
     ]);
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
     this.documents = await this.timeline.loadDocuments();
@@ -357,13 +417,16 @@ export class HistoryService extends EventEmitter {
   private async persist(event: HistoryEvent): Promise<void> {
     const closed = await this.segments.append(event);
     this.semanticHealth.persistedEventCount += 1;
+    this.scheduleVisualEnrichment(event);
     if (closed) this.scheduleTimeline(closed);
   }
 
   private scheduleTimeline(
     segment: NonNullable<Awaited<ReturnType<SegmentStore["closeExpired"]>>>,
   ): void {
+    const pendingVisualWork = this.visualWork;
     void this.enqueueTimeline(async () => {
+      await pendingVisualWork;
       await this.timeline.generateIfNeeded(segment);
       await this.refreshDocuments();
     }).catch((error) => this.captureError(error));
@@ -451,6 +514,152 @@ export class HistoryService extends EventEmitter {
       : { settings: this.llmSettings, failureReason: "api_key_missing" };
   }
 
+  private async configuredLLMRuntime(): Promise<LLMRuntime | undefined> {
+    const apiKey = await this.settingsStore.loadAPIKey();
+    return apiKey ? { settings: this.llmSettings, apiKey } : undefined;
+  }
+
+  private scheduleVisualEnrichment(event: HistoryEvent): void {
+    if (!shouldAssessVisualEvidence(event)) return;
+    const settings = { ...this.visualSettings };
+    if (settings.axJudge === "rules" && settings.captureMode === "off") {
+      return;
+    }
+    const ruleDecision = evaluateAXByRules(event);
+    const immediateCapture =
+      settings.captureMode === "fallback" && ruleDecision.decision === "needs_visual"
+        ? this.captureVisualEvidence(event, settings.understandingMode)
+        : undefined;
+    void this.enqueueVisual(async () =>
+      this.enrichVisualEvidence(event, settings, ruleDecision, immediateCapture),
+    ).catch((error) => this.captureError(error));
+  }
+
+  private async enrichVisualEvidence(
+    event: HistoryEvent,
+    settings: VisualSettings,
+    ruleDecision: ReturnType<typeof evaluateAXByRules>,
+    immediateCapture?: Promise<{ requestID: string; payload: VisualCapturePayload }>,
+  ): Promise<void> {
+    const runtime =
+      settings.axJudge === "luna" || settings.understandingMode === "luna"
+        ? await this.configuredLLMRuntime()
+        : undefined;
+    const axSufficiency =
+      settings.axJudge === "luna" && runtime
+        ? await judgeAXWithLuna(event, runtime)
+        : settings.axJudge === "luna"
+          ? {
+              ...ruleDecision,
+              source: "luna_fallback" as const,
+              reasons: [...ruleDecision.reasons, "luna_unavailable"],
+            }
+          : ruleDecision;
+
+    this.visualHealth.judgedEventCount += 1;
+    if (axSufficiency.decision === "needs_visual") this.visualHealth.needsVisualCount += 1;
+    if (axSufficiency.decision === "uncertain") this.visualHealth.uncertainCount += 1;
+    this.visualHealth.lastDecisionReason = axSufficiency.reasons.join(",").slice(0, 240);
+
+    const enrichment: EventEvidenceEnrichment = {
+      schemaVersion: 1,
+      eventID: event.id,
+      eventTimestamp: event.timestamp,
+      createdAt: new Date().toISOString(),
+      axSufficiency,
+    };
+
+    if (settings.captureMode === "fallback" && axSufficiency.decision !== "enough") {
+      const capture = await (immediateCapture ??
+        this.captureVisualEvidence(event, settings.understandingMode));
+      const visual = visualEvidenceFromCapture(capture.requestID, capture.payload);
+      if (capture.payload.status === "captured") {
+        this.visualHealth.captureSucceededCount += 1;
+        if (settings.understandingMode === "off") visual.ocrText = undefined;
+        if (settings.understandingMode === "luna" && runtime && capture.payload.imageBase64) {
+          try {
+            const result = await understandVisualWithLuna(event, capture.payload, runtime);
+            visual.understanding = result.understanding;
+            visual.confidence = result.confidence;
+            visual.privacy = "redacted_remote";
+          } catch (error) {
+            visual.reason = `visual_model_${error instanceof Error ? error.message : "failed"}`;
+          }
+        }
+      } else if (capture.payload.status === "blocked") {
+        this.visualHealth.captureBlockedCount += 1;
+      } else {
+        this.visualHealth.captureFailedCount += 1;
+      }
+      enrichment.visual = visual;
+    } else if (immediateCapture) {
+      await immediateCapture.catch(() => undefined);
+    }
+
+    await this.segments.appendEvidence(enrichment);
+    this.emitSnapshot();
+  }
+
+  private async captureVisualEvidence(
+    event: HistoryEvent,
+    understandingMode: VisualSettings["understandingMode"] = this.visualSettings.understandingMode,
+  ): Promise<{ requestID: string; payload: VisualCapturePayload }> {
+    this.visualHealth.captureRequestedCount += 1;
+    const requestID = randomUUID().toLowerCase();
+    const domain = domainFromURL(event.window?.url);
+    if (
+      !allowsApplication(this.policy, event.application.bundleIdentifier) ||
+      (domain !== undefined && !allowsDomain(this.policy, domain))
+    ) {
+      return {
+        requestID,
+        payload: {
+          status: "blocked",
+          reason: "policy_excluded",
+          provider: this.visualCaptureProvider?.id ?? "none",
+        },
+      };
+    }
+    if (!this.visualCaptureProvider) {
+      return {
+        requestID,
+        payload: {
+          status: "unavailable",
+          reason: "provider_unavailable",
+          provider: "none",
+        },
+      };
+    }
+    const eventTime = Date.parse(event.timestamp);
+    const eventExpiresAt = Number.isFinite(eventTime)
+      ? Math.min(Date.now() + 8_000, eventTime + 8_000)
+      : Date.now() + 8_000;
+    try {
+      const payload = await this.visualCaptureProvider.capture({
+        requestID,
+        eventID: event.id,
+        bundleIdentifier: event.application.bundleIdentifier,
+        windowRuntimeIdentifier: event.window?.runtimeIdentifier,
+        windowTitle: event.window?.title,
+        expiresAt: new Date(eventExpiresAt).toISOString(),
+        includeImage: understandingMode === "luna",
+      });
+      return {
+        requestID,
+        payload,
+      };
+    } catch (error) {
+      return {
+        requestID,
+        payload: {
+          status: "failed",
+          reason: `provider_${error instanceof Error ? error.message : "request_failed"}`,
+          provider: this.visualCaptureProvider.id,
+        },
+      };
+    }
+  }
+
   private startTimers(): void {
     if (!this.flushTimer) {
       this.flushTimer = setInterval(() => {
@@ -484,6 +693,12 @@ export class HistoryService extends EventEmitter {
   private enqueueTimeline<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.timelineWork.then(operation, operation);
     this.timelineWork = next.catch(() => undefined);
+    return next;
+  }
+
+  private enqueueVisual<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.visualWork.then(operation, operation);
+    this.visualWork = next.catch(() => undefined);
     return next;
   }
 

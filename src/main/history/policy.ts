@@ -86,6 +86,7 @@ export function sanitizeEvent(
           title: cleanText(event.window.title, 1_024),
           url: sanitizeURL(event.window.url),
           isPrivateBrowsing: event.window.isPrivateBrowsing,
+          runtimeIdentifier: event.window.runtimeIdentifier,
         }
       : undefined,
     target: event.target
@@ -117,6 +118,18 @@ export function sanitizeEvent(
       ? {
           ...event.accessibility,
           text: cleanText(event.accessibility.text, accessibilityTextLimit) ?? "",
+        }
+      : undefined,
+    evidence: event.evidence
+      ? {
+          axSufficiency: event.evidence.axSufficiency,
+          visual: event.evidence.visual
+            ? {
+                ...event.evidence.visual,
+                ocrText: cleanText(event.evidence.visual.ocrText, accessibilityTextLimit),
+                understanding: cleanText(event.evidence.visual.understanding, textLimit),
+              }
+            : undefined,
         }
       : undefined,
   };

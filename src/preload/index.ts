@@ -3,6 +3,7 @@ import type {
   ComputerHistoryAPI,
   DesktopSnapshot,
   LLMConfigurationInput,
+  VisualConfigurationInput,
 } from "../shared/contracts.js";
 
 const invoke = (channel: string): Promise<DesktopSnapshot> => ipcRenderer.invoke(channel);
@@ -23,6 +24,9 @@ const api: ComputerHistoryAPI = {
     ipcRenderer.invoke("history:configure-llm", input),
   setMemorySynthesisEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("history:set-memory-synthesis-enabled", enabled),
+  configureVisual: (input: VisualConfigurationInput) =>
+    ipcRenderer.invoke("history:configure-visual", input),
+  requestScreenCapturePermission: () => invoke("history:request-screen-capture-permission"),
   removeLLMAPIKey: () => invoke("history:remove-llm-key"),
   openDocument: (id: string) => ipcRenderer.invoke("history:open-document", id),
   deleteDocument: (id: string) => ipcRenderer.invoke("history:delete-document", id),

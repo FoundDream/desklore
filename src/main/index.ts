@@ -9,8 +9,13 @@ import {
 } from "electron";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { DesktopSnapshot, LLMConfigurationInput } from "../shared/contracts.js";
+import type {
+  DesktopSnapshot,
+  LLMConfigurationInput,
+  VisualConfigurationInput,
+} from "../shared/contracts.js";
 import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
+import { NativeAgentVisualCaptureProvider } from "./history/native-visual-provider.js";
 import { HistoryService } from "./history/service.js";
 
 let mainWindow: BrowserWindow | undefined;
@@ -25,6 +30,7 @@ const collector = new AgentClient(
 const history = new HistoryService(
   collector,
   path.join(app.getPath("appData"), "ComputerHistoryDesktop"),
+  new NativeAgentVisualCaptureProvider(collector),
 );
 const applicationIconCache = new Map<string, Promise<string | undefined>>();
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -251,6 +257,22 @@ function registerIPC(): void {
     assertRenderer(event);
     if (typeof enabled !== "boolean") throw new Error("Invalid memory synthesis setting");
     return history.setMemorySynthesisEnabled(enabled);
+  });
+  ipcMain.handle("history:configure-visual", async (event, input: VisualConfigurationInput) => {
+    assertRenderer(event);
+    if (
+      !input ||
+      !["rules", "luna"].includes(input.axJudge) ||
+      !["off", "fallback"].includes(input.captureMode) ||
+      !["off", "ocr", "luna"].includes(input.understandingMode)
+    ) {
+      throw new Error("Invalid visual configuration");
+    }
+    return history.configureVisual(input);
+  });
+  ipcMain.handle("history:request-screen-capture-permission", async (event) => {
+    assertRenderer(event);
+    return history.requestScreenCapturePermission();
   });
   ipcMain.handle("history:reveal-storage", async (event) => {
     assertRenderer(event);

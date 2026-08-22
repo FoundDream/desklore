@@ -71,6 +71,7 @@ export interface CaptureHealth {
   axSlowCaptureCount: number;
   axTruncatedCaptureCount: number;
   axCaptureBacklog: number;
+  screenCaptureGranted: boolean;
 }
 
 export interface LLMSettings {
@@ -79,6 +80,24 @@ export interface LLMSettings {
   model: string;
   endpoint: string;
   apiKeyConfigured: boolean;
+}
+
+export interface VisualSettings {
+  axJudge: "rules" | "luna";
+  captureMode: "off" | "fallback";
+  understandingMode: "off" | "ocr" | "luna";
+}
+
+export interface VisualHealth {
+  providerStatus: "disabled" | "permission_required" | "ready" | "unhealthy" | "unavailable";
+  judgedEventCount: number;
+  needsVisualCount: number;
+  uncertainCount: number;
+  captureRequestedCount: number;
+  captureSucceededCount: number;
+  captureBlockedCount: number;
+  captureFailedCount: number;
+  lastDecisionReason?: string;
 }
 
 export interface AgentSnapshot {
@@ -92,6 +111,7 @@ export interface AgentSnapshot {
   memories: MemoryRollup[];
   health: CaptureHealth;
   llm: LLMSettings;
+  visual: VisualSettings & VisualHealth;
   lastError?: string;
 }
 
@@ -109,6 +129,8 @@ export interface LLMConfigurationInput {
   apiKey: string;
 }
 
+export type VisualConfigurationInput = VisualSettings;
+
 export interface ComputerHistoryAPI {
   getSnapshot(): Promise<DesktopSnapshot>;
   startAgent(): Promise<DesktopSnapshot>;
@@ -123,6 +145,8 @@ export interface ComputerHistoryAPI {
   blockActiveDomain(): Promise<DesktopSnapshot>;
   configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot>;
   setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot>;
+  configureVisual(input: VisualConfigurationInput): Promise<DesktopSnapshot>;
+  requestScreenCapturePermission(): Promise<DesktopSnapshot>;
   removeLLMAPIKey(): Promise<DesktopSnapshot>;
   openDocument(id: string): Promise<DesktopSnapshot>;
   deleteDocument(id: string): Promise<DesktopSnapshot>;

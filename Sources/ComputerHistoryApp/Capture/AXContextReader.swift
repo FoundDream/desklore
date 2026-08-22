@@ -152,6 +152,13 @@ final class AXContextReader {
         let windowTitle = windowElement.flatMap {
             string(attribute: kAXTitleAttribute as CFString, from: $0)
         }
+        let windowRuntimeIdentifier = includeRichSnapshot ? windowElement.flatMap {
+            windowIdentifier(
+                for: $0,
+                processIdentifier: application.processIdentifier,
+                title: windowTitle
+            )
+        } : nil
         let url = windowElement.flatMap(urlString(from:))
         let target = capture?.semanticTarget ?? targetElement.map(targetContext(from:))
         let selectedText = capture == nil
@@ -191,7 +198,8 @@ final class AXContextReader {
                 isPrivateBrowsing: isPrivateBrowsing(
                     bundleIdentifier: application.bundleIdentifier,
                     windowTitle: windowTitle
-                )
+                ),
+                runtimeIdentifier: windowRuntimeIdentifier
             ),
             target: target,
             interaction: interaction,
@@ -695,6 +703,97 @@ final class AXContextReader {
             return nil
         }
         return result
+    }
+
+    private func windowIdentifier(
+        for window: AXUIElement,
+        processIdentifier: pid_t,
+        title: String?
+    ) -> UInt32? {
+        let bounds = windowBounds(window)
+        guard let values = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[CFString: Any]] else {
+            return nil
+        }
+        let candidates = values.compactMap { value -> (UInt32, Double)? in
+            guard (value[kCGWindowOwnerPID] as? NSNumber)?.int32Value == processIdentifier,
+                  let number = (value[kCGWindowNumber] as? NSNumber)?.uint32Value else {
+                return nil
+            }
+            var score = 0.0
+            if (value[kCGWindowLayer] as? NSNumber)?.intValue == 0 { score += 2 }
+            if let title,
+               !title.isEmpty,
+               (value[kCGWindowName] as? String) == title {
+                score += 4
+            }
+            if let bounds,
+               let rawBounds = value[kCGWindowBounds] {
+                let reference = rawBounds as CFTypeRef
+                guard CFGetTypeID(reference) == CFDictionaryGetTypeID(),
+                      let candidateBounds = CGRect(
+                          dictionaryRepresentation: unsafeDowncast(
+                              reference,
+                              to: CFDictionary.self
+                          )
+                      ) else {
+                    return (number, score)
+                }
+                let intersection = bounds.intersection(candidateBounds)
+                if !intersection.isNull {
+                    let unionArea = bounds.union(candidateBounds).width
+                        * bounds.union(candidateBounds).height
+                    if unionArea > 0 {
+                        score += 6.0 * Double(
+                            intersection.width * intersection.height / unionArea
+                        )
+                    }
+                }
+            }
+            return (number, score)
+        }
+        let sorted = candidates.sorted { $0.1 > $1.1 }
+        guard let best = sorted.first else { return nil }
+        if best.1 >= 4 {
+            if let runnerUp = sorted.dropFirst().first,
+               abs(best.1 - runnerUp.1) < 0.5 {
+                return nil
+            }
+            return best.0
+        }
+        return sorted.count == 1 && best.1 >= 2 ? best.0 : nil
+    }
+
+    private func windowBounds(_ window: AXUIElement) -> CGRect? {
+        guard let positionValue = value(
+            attribute: kAXPositionAttribute as CFString,
+            from: window
+        ),
+        let sizeValue = value(
+            attribute: kAXSizeAttribute as CFString,
+            from: window
+        ),
+        CFGetTypeID(positionValue) == AXValueGetTypeID(),
+        CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
+            return nil
+        }
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(
+            unsafeDowncast(positionValue, to: AXValue.self),
+            .cgPoint,
+            &position
+        ),
+        AXValueGetValue(
+            unsafeDowncast(sizeValue, to: AXValue.self),
+            .cgSize,
+            &size
+        ) else {
+            return nil
+        }
+        return CGRect(origin: position, size: size)
     }
 
     private func string(

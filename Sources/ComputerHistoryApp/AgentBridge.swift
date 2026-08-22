@@ -7,6 +7,17 @@ private struct AgentCommand: Decodable {
     let id: String
     let command: String
     let bundleIdentifiers: [String]?
+    let visualRequest: AgentVisualCaptureRequest?
+}
+
+private struct AgentVisualCaptureRequest: Decodable {
+    let requestID: String
+    let eventID: String
+    let bundleIdentifier: String
+    let windowRuntimeIdentifier: UInt32?
+    let windowTitle: String?
+    let expiresAt: String
+    let includeImage: Bool
 }
 
 private struct AgentApplicationDTO: Encodable {
@@ -32,6 +43,7 @@ private struct AgentHealthDTO: Encodable {
     let axSlowCaptureCount: Int
     let axTruncatedCaptureCount: Int
     let axCaptureBacklog: Int
+    let screenCaptureGranted: Bool
 }
 
 private struct AgentSnapshotDTO: Encodable {
@@ -61,6 +73,12 @@ private struct AgentIconResponse: Encodable {
     let type = "response"
     let requestID: String
     let payload: AgentIconPayload
+}
+
+private struct AgentVisualCaptureResponse: Encodable {
+    let type = "response"
+    let requestID: String
+    let payload: VisualCaptureResult
 }
 
 private struct AgentErrorMessage: Encodable {
@@ -123,6 +141,7 @@ final class AgentBridge {
     private var cancellables: Set<AnyCancellable> = []
     private var applicationIconPaths: [String: String] = [:]
     private var unresolvedApplicationIconIdentifiers: Set<String> = []
+    private let visualCaptureProvider = VisualCaptureProvider()
     private lazy var inputReader = AgentInputReader(
         onLine: { [weak self] data in
             Task { @MainActor [weak self] in self?.handle(data) }
@@ -174,6 +193,34 @@ final class AgentBridge {
             engine.refreshCapturePermissions()
         case "requestPermissions":
             engine.requestAccessibilityPermission()
+        case "requestScreenCapturePermission":
+            _ = visualCaptureProvider.requestScreenCapturePermission()
+        case "captureVisualEvidence":
+            guard let request = command.visualRequest,
+                  let expiresAt = ISO8601DateFormatter().date(from: request.expiresAt) else {
+                sendError("Invalid visual capture request", requestID: command.id)
+                return
+            }
+            let intent = VisualCaptureIntent(
+                requestID: request.requestID,
+                eventID: request.eventID,
+                bundleIdentifier: request.bundleIdentifier,
+                windowRuntimeIdentifier: request.windowRuntimeIdentifier,
+                windowTitle: request.windowTitle,
+                expiresAt: expiresAt,
+                includeImage: request.includeImage
+            )
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let result = await visualCaptureProvider.capture(intent)
+                write(
+                    AgentVisualCaptureResponse(
+                        requestID: command.id,
+                        payload: result
+                    )
+                )
+            }
+            return
         case "resolveApplicationIcons":
             let identifiers = command.bundleIdentifiers ?? []
             let paths = Dictionary(uniqueKeysWithValues: identifiers.compactMap { identifier in
@@ -233,7 +280,8 @@ final class AgentBridge {
                     engine.lastAXCaptureDurationMilliseconds,
                 axSlowCaptureCount: engine.axSlowCaptureCount,
                 axTruncatedCaptureCount: engine.axTruncatedCaptureCount,
-                axCaptureBacklog: engine.axCaptureBacklog
+                axCaptureBacklog: engine.axCaptureBacklog,
+                screenCaptureGranted: visualCaptureProvider.isScreenCaptureGranted
             ),
             lastError: engine.lastError
         )

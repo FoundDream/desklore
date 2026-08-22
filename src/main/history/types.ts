@@ -35,6 +35,7 @@ export interface HistoryEvent {
     title?: string;
     url?: string;
     isPrivateBrowsing: boolean;
+    runtimeIdentifier?: number;
   };
   target?: {
     role?: string;
@@ -59,6 +60,48 @@ export interface HistoryEvent {
     mode: "fullTree" | "diffFromPrevious";
     text: string;
   };
+  evidence?: EventEvidence;
+}
+
+export type AXSufficiencyDecision = "enough" | "needs_visual" | "uncertain";
+export type AXSufficiencySource = "rules" | "luna" | "luna_fallback";
+
+export interface AXSufficiencyEvidence {
+  decision: AXSufficiencyDecision;
+  source: AXSufficiencySource;
+  confidence: number;
+  reasons: string[];
+  missingEvidence: string[];
+  judgedAt: string;
+}
+
+export type VisualEvidenceStatus = "captured" | "unavailable" | "blocked" | "failed";
+
+export interface VisualEvidence {
+  requestID: string;
+  status: VisualEvidenceStatus;
+  provider: string;
+  reason?: string;
+  capturedAt?: string;
+  windowRuntimeIdentifier?: number;
+  width?: number;
+  height?: number;
+  ocrText?: string;
+  understanding?: string;
+  confidence?: number;
+  privacy: "not_captured" | "local_ocr" | "redacted_remote";
+}
+
+export interface EventEvidence {
+  axSufficiency?: AXSufficiencyEvidence;
+  visual?: VisualEvidence;
+}
+
+export interface EventEvidenceEnrichment extends EventEvidence {
+  schemaVersion: 1;
+  eventID: string;
+  eventTimestamp: string;
+  createdAt: string;
 }
 
 export interface SegmentMetadata {
@@ -168,6 +211,12 @@ export interface TimelineLLMSettings {
   endpoint: string;
 }
 
+export interface VisualSettings {
+  axJudge: "rules" | "luna";
+  captureMode: "off" | "fallback";
+  understandingMode: "off" | "ocr" | "luna";
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 function record(value: unknown): UnknownRecord | undefined {
@@ -209,6 +258,7 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
   const target = record(source?.target);
   const interaction = record(source?.interaction);
   const accessibility = record(source?.accessibility);
+  const evidence = record(source?.evidence);
   const modifiers = interaction?.modifiers;
 
   return {
@@ -223,6 +273,7 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
           title: string(window.title),
           url: string(window.url),
           isPrivateBrowsing: (window.isPrivateBrowsing ?? window.is_private_browsing) === true,
+          runtimeIdentifier: number(window.runtimeIdentifier ?? window.runtime_identifier),
         }
       : undefined,
     target: target
@@ -256,7 +307,108 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
           text: string(accessibility.text) ?? "",
         }
       : undefined,
+    evidence: normalizeEventEvidence(evidence),
   };
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+export function normalizeEventEvidence(value: unknown): EventEvidence | undefined {
+  const source = record(value);
+  if (!source) return undefined;
+  const ax = record(source.axSufficiency ?? source.ax_sufficiency);
+  const visual = record(source.visual);
+  const axDecision = string(ax?.decision) as AXSufficiencyDecision | undefined;
+  const visualStatus = string(visual?.status) as VisualEvidenceStatus | undefined;
+  const normalized: EventEvidence = {};
+  if (ax && ["enough", "needs_visual", "uncertain"].includes(axDecision ?? "")) {
+    normalized.axSufficiency = {
+      decision: axDecision!,
+      source: (string(ax.source) as AXSufficiencySource | undefined) ?? "rules",
+      confidence: number(ax.confidence) ?? 0,
+      reasons: stringArrayValue(ax.reasons),
+      missingEvidence: stringArrayValue(ax.missingEvidence ?? ax.missing_evidence),
+      judgedAt: string(ax.judgedAt ?? ax.judged_at) ?? "",
+    };
+  }
+  if (visual && ["captured", "unavailable", "blocked", "failed"].includes(visualStatus ?? "")) {
+    normalized.visual = {
+      requestID: string(visual.requestID ?? visual.request_id) ?? "",
+      status: visualStatus!,
+      provider: string(visual.provider) ?? "unknown",
+      reason: string(visual.reason),
+      capturedAt: string(visual.capturedAt ?? visual.captured_at),
+      windowRuntimeIdentifier: number(
+        visual.windowRuntimeIdentifier ?? visual.window_runtime_identifier,
+      ),
+      width: number(visual.width),
+      height: number(visual.height),
+      ocrText: string(visual.ocrText ?? visual.ocr_text),
+      understanding: string(visual.understanding),
+      confidence: number(visual.confidence),
+      privacy:
+        visual.privacy === "local_ocr" || visual.privacy === "redacted_remote"
+          ? visual.privacy
+          : "not_captured",
+    };
+  }
+  return normalized.axSufficiency || normalized.visual ? normalized : undefined;
+}
+
+export function normalizeEventEvidenceEnrichment(value: unknown): EventEvidenceEnrichment {
+  const source = record(value);
+  const eventID = string(source?.eventID ?? source?.event_id);
+  const eventTimestamp = string(source?.eventTimestamp ?? source?.event_timestamp);
+  const createdAt = string(source?.createdAt ?? source?.created_at);
+  if (!eventID || !eventTimestamp || !createdAt) {
+    throw new Error("Invalid event evidence enrichment");
+  }
+  return {
+    schemaVersion: 1,
+    eventID: eventID.toLowerCase(),
+    eventTimestamp,
+    createdAt,
+    ...normalizeEventEvidence(source),
+  };
+}
+
+export function evidenceEnrichmentForDisk(enrichment: EventEvidenceEnrichment): UnknownRecord {
+  return compact({
+    schema_version: 1,
+    event_id: enrichment.eventID,
+    event_timestamp: enrichment.eventTimestamp,
+    created_at: enrichment.createdAt,
+    ax_sufficiency: enrichment.axSufficiency
+      ? compact({
+          decision: enrichment.axSufficiency.decision,
+          source: enrichment.axSufficiency.source,
+          confidence: enrichment.axSufficiency.confidence,
+          reasons: enrichment.axSufficiency.reasons,
+          missing_evidence: enrichment.axSufficiency.missingEvidence,
+          judged_at: enrichment.axSufficiency.judgedAt,
+        })
+      : undefined,
+    visual: enrichment.visual
+      ? compact({
+          request_id: enrichment.visual.requestID,
+          status: enrichment.visual.status,
+          provider: enrichment.visual.provider,
+          reason: enrichment.visual.reason,
+          captured_at: enrichment.visual.capturedAt,
+          window_runtime_identifier: enrichment.visual.windowRuntimeIdentifier,
+          width: enrichment.visual.width,
+          height: enrichment.visual.height,
+          ocr_text: enrichment.visual.ocrText,
+          understanding: enrichment.visual.understanding,
+          confidence: enrichment.visual.confidence,
+          privacy: enrichment.visual.privacy,
+        })
+      : undefined,
+  });
 }
 
 export function eventForDisk(event: HistoryEvent): UnknownRecord {
@@ -275,6 +427,7 @@ export function eventForDisk(event: HistoryEvent): UnknownRecord {
           title: event.window.title,
           url: event.window.url,
           is_private_browsing: event.window.isPrivateBrowsing,
+          runtime_identifier: event.window.runtimeIdentifier,
         })
       : undefined,
     target: event.target ? compact(event.target) : undefined,
@@ -291,6 +444,7 @@ export function eventForDisk(event: HistoryEvent): UnknownRecord {
         })
       : undefined,
     accessibility: event.accessibility,
+    evidence: event.evidence,
   });
 }
 

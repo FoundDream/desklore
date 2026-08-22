@@ -6,7 +6,8 @@ separately signed, headless Swift Agent owns the native Accessibility boundary.
 
 The storage model stays deliberately small:
 
-- Raw evidence is appended to ten-minute JSONL segments.
+- Raw semantic evidence is appended to ten-minute JSONL segments. Optional visual
+  decisions are appended separately and joined by event ID when the segment is read.
 - Periodic polling never emits events. Window, focus, AX value/selection, mouse,
   and keyboard callbacks carry a semantic `capture_reason`; duplicate callbacks
   and short bursts are normalized before persistence.
@@ -48,8 +49,9 @@ The Electron app and native Agent use independent bundle identifiers. Set
 `COMPUTER_HISTORY_CODESIGN_IDENTITY` for a Developer ID or Apple Development
 identity; the default identifier-only ad-hoc signature is for local development.
 
-On first launch, grant Accessibility access when macOS prompts. Recording starts
-for all apps and domains; use **设置 → 当前观察范围** to exclude the current app
+On first launch, grant Accessibility access when macOS prompts. Screen Recording
+permission is requested only if the optional window-screenshot fallback is enabled.
+Recording starts for all apps and domains; use **设置 → 当前观察范围** to exclude the current app
 or domain. The **采集健康** page reports native listener health, capture latency,
 queue depth, and raw/persisted/blocked/deduplicated/coalesced event counts.
 
@@ -62,11 +64,13 @@ Electron main
         ├── validated IPC and lifecycle
         ├── observation policy and encrypted API-key storage
         ├── coalescing, JSONL segments and Markdown timeline
+        ├── AX sufficiency judge and optional visual-provider orchestration
         ├── LLM summary generation and evidence validation
         └── six-hour/day memory rollups and retrieval
         ↕ newline-delimited JSON over stdio
 Signed Swift Agent
-        └── AppKit / AX / NSEvent capture and native redaction
+        ├── AppKit / AX / NSEvent capture and native redaction
+        └── optional ScreenCaptureKit window provider and local Vision OCR
 ```
 
 The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, a
@@ -84,6 +88,31 @@ add/remove/update/move diffs. AX reads are serialized off the main thread.
 Return is classified from modifiers and the captured AX target. Shift/Option +
 Return remains a shortcut; command/control Return, single-line inputs, labelled
 chat inputs, and known chat text areas become `keyboard.submit`.
+
+## Optional visual evidence
+
+Open **设置 → 视觉证据** to enable any part of this chain. It is default-off:
+
+```text
+policy-filtered event
+  → clear AX rules
+  → Luna only for uncertain AX evidence (optional)
+  → screenshot provider only when AX remains insufficient (optional)
+  → local OCR or Luna image understanding (optional)
+  → event-linked evidence.jsonl
+```
+
+The orchestrator depends on a small visual-provider contract rather than
+ScreenCaptureKit directly. The bundled provider captures the exact macOS window by
+runtime window ID, with a title/unique-window fallback that refuses ambiguous
+matches. Capture requests expire eight seconds after the source event; stale or
+ambiguous targets are recorded as visual gaps instead of capturing another window.
+
+Raw pixels are never written to segment files or exposed to the renderer. Local-only
+capture and OCR remain inside the signed native Agent. Luna image understanding is
+an independent opt-in: the Agent applies OCR-based secret-pattern masking before
+returning a transient image to Electron main, which sends it with the configured
+Responses API credentials and persists only the bounded result.
 
 Raw segments are retained for 48 hours. Interrupted segments are recovered on
 startup and during maintenance. Ten-minute summaries retain source event IDs;
@@ -124,6 +153,9 @@ fingerprints reuse the existing rollup without another API call.
 - Raw events, timeline documents, rollups, and search stay local. Semantic
   summaries send policy-filtered, redacted, byte-bounded event samples; the
   independent long-term-memory toggle sends existing ten-minute summaries.
+- Visual capture is default-off and runs only after application/domain policy.
+  Capture permission is never prompted by an event. A user action enables it;
+  denied, stale, ambiguous, and provider-missing cases remain explicit gaps.
 - App-owned directories are mode `0700` and files are mode `0600`. Existing files
   are tightened on startup without following symbolic links.
 
@@ -132,6 +164,7 @@ Data is written to:
 ```text
 ~/Library/Application Support/ComputerHistoryDesktop/
   segments/<utc-segment-id>/events.jsonl
+  segments/<utc-segment-id>/evidence.jsonl  # optional, no pixels
   segments/<utc-segment-id>/metadata.json
   timeline/<utc-segment-id>-<id>-10min-<slug>.md
   memory/6h/<bucket>-6h-memory.md
