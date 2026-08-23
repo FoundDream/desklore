@@ -1457,8 +1457,7 @@ button.text-danger:hover {
 }
 
 .setting-group-body {
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  display: grid;
 }
 
 .setting-row {
@@ -1470,10 +1469,8 @@ button.text-danger:hover {
   padding: 13px 0;
 }
 
-.setting-row + .setting-row,
-.setting-row + .settings-form-block,
-.setting-group-intro + .setting-row {
-  border-top: 1px solid var(--border);
+.setting-row + .setting-row {
+  margin-top: 4px;
 }
 
 .setting-row-copy {
@@ -1756,7 +1753,6 @@ button.text-danger:hover {
 .settings-disclosure {
   margin-top: 20px;
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
 }
 
 .settings-disclosure p {
