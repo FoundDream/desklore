@@ -6,12 +6,17 @@
   <p><a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
+<p align="center">
+  <img src="docs/assets/desklore-timeline.png" alt="DeskLore timeline showing synthetic launch activity">
+</p>
+<p align="center"><sub>Real DeskLore interface with a fully synthetic activity history.</sub></p>
+
 DeskLore turns ordinary Mac activity into a searchable timeline and layered personal memory. It
 uses macOS Accessibility semantics instead of continuously recording the screen. An optional
 visual fallback exists for gaps in Accessibility evidence, but it is disabled by default.
 
-> **Status:** `0.1.0` is an early source release for macOS 14+ on Apple Silicon. There is no
-> official signed binary yet.
+> **Status:** [`0.1.0`](https://github.com/FoundDream/desklore/releases/tag/v0.1.0) is an early
+> source release for macOS 14+ on Apple Silicon. There is no official signed binary yet.
 
 ## Why DeskLore
 

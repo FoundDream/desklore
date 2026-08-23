@@ -6,10 +6,16 @@
   <p><a href="README.md">English</a></p>
 </div>
 
+<p align="center">
+  <img src="docs/assets/desklore-timeline.png" alt="使用合成活动数据的 DeskLore 时间线">
+</p>
+<p align="center"><sub>真实 DeskLore 界面，时间线内容全部为合成数据。</sub></p>
+
 DeskLore 把日常 Mac 活动整理成可搜索的时间线和分层记忆。它优先使用 macOS
 Accessibility 语义，而不是持续录制屏幕。项目提供可选视觉补充，但默认关闭。
 
-> **当前状态：** `0.1.0` 是面向 macOS 14+、Apple Silicon 的早期源码版本，暂不提供官方签名安装包。
+> **当前状态：** [`0.1.0`](https://github.com/FoundDream/desklore/releases/tag/v0.1.0) 是面向
+> macOS 14+、Apple Silicon 的早期源码版本，暂不提供官方签名安装包。
 
 ## 为什么是 DeskLore
 
