@@ -367,6 +367,14 @@ export class HistoryService extends EventEmitter {
     return this.current();
   }
 
+  async setLLMEnabled(enabled: boolean): Promise<DesktopSnapshot> {
+    const next = { ...this.llmSettings, enabled };
+    await this.settingsStore.saveLLMSettings(next);
+    this.llmSettings = next;
+    this.lastError = undefined;
+    return this.current();
+  }
+
   async setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot> {
     const next = { ...this.llmSettings, memorySynthesisEnabled: enabled };
     await this.settingsStore.saveLLMSettings(next);

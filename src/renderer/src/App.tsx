@@ -1008,7 +1008,9 @@ function SettingsView({
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(event) => setEnabled(event.target.checked)}
+              onChange={(event) =>
+                void run(() => window.computerHistory.setLLMEnabled(event.target.checked))
+              }
             />
             <span />
           </label>

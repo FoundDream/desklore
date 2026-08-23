@@ -181,4 +181,33 @@ describe("History settings", () => {
     expect(reloaded.model).toBe("custom-model");
     expect(reloaded.endpoint).toBe("https://example.com/v1/responses");
   });
+
+  it("persists the model-summary toggle independently", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const settingsStore = new HistorySettingsStore(layout);
+    await settingsStore.saveLLMSettings({
+      enabled: false,
+      memorySynthesisEnabled: true,
+      model: "custom-model",
+      endpoint: "https://example.com/v1/responses",
+    });
+    vi.stubEnv("OPENAI_API_KEY", "configured-for-test");
+
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "disconnected" as const }),
+    }) as unknown as AgentClient;
+    const service = new HistoryService(collector, root);
+    await (service as unknown as { initialize(): Promise<void> }).initialize();
+
+    await service.setLLMEnabled(true);
+
+    const reloaded = await settingsStore.loadLLMSettings();
+    expect(reloaded.enabled).toBe(true);
+    expect(reloaded.memorySynthesisEnabled).toBe(true);
+    expect(reloaded.model).toBe("custom-model");
+    expect(reloaded.endpoint).toBe("https://example.com/v1/responses");
+  });
 });

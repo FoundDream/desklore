@@ -156,6 +156,7 @@ export interface ComputerHistoryAPI {
   allowActiveDomain(): Promise<DesktopSnapshot>;
   blockActiveDomain(): Promise<DesktopSnapshot>;
   configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot>;
+  setLLMEnabled(enabled: boolean): Promise<DesktopSnapshot>;
   setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot>;
   configureVisual(input: VisualConfigurationInput): Promise<DesktopSnapshot>;
   requestScreenCapturePermission(): Promise<DesktopSnapshot>;

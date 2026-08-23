@@ -23,6 +23,7 @@ const api: ComputerHistoryAPI = {
   blockActiveDomain: () => invoke("history:block-active-domain"),
   configureLLM: (input: LLMConfigurationInput) =>
     ipcRenderer.invoke("history:configure-llm", input),
+  setLLMEnabled: (enabled: boolean) => ipcRenderer.invoke("history:set-llm-enabled", enabled),
   setMemorySynthesisEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("history:set-memory-synthesis-enabled", enabled),
   configureVisual: (input: VisualConfigurationInput) =>

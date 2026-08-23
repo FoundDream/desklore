@@ -259,6 +259,11 @@ function registerIPC(): void {
     assertRenderer(event);
     return history.removeLLMAPIKey();
   });
+  ipcMain.handle("history:set-llm-enabled", async (event, enabled: unknown) => {
+    assertRenderer(event);
+    if (typeof enabled !== "boolean") throw new Error("Invalid model summary setting");
+    return history.setLLMEnabled(enabled);
+  });
   ipcMain.handle("history:set-memory-synthesis-enabled", async (event, enabled: unknown) => {
     assertRenderer(event);
     if (typeof enabled !== "boolean") throw new Error("Invalid memory synthesis setting");
