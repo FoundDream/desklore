@@ -247,6 +247,53 @@ source trace actually captured frames. Use `--since`, `--until`,
 `--coverage-ms`, `--settle-ms`, or `--window-cooldown-ms` for controlled comparisons. Open
 segments are excluded unless `--include-open` is passed.
 
+## Visual downstream-value benchmark
+
+The policy replay above answers whether screenshot fallback is selective and
+timely. It does not answer whether visual evidence improves the timeline that a
+user reads. Build a local, text-free case manifest for that second question with:
+
+```sh
+npm run eval:visual-value -- \
+  --input "$HOME/Library/Application Support/ComputerHistoryDesktop"
+```
+
+The manifest-only default makes no model request and reads no raw pixels. It
+selects completed segments whose production-style sampled events contain
+persisted OCR or visual-understanding evidence, then records only segment IDs,
+cohorts, and counts. Cases are stratified across:
+
+- `positive`: at least one captured visual event has empty AX text.
+- `negative_control`: every captured visual event has at least 1,000 AX
+  characters, so visual evidence should rarely help.
+- `mixed`: visual events have some AX text, but not enough for the negative
+  control.
+
+Run the optional paired model evaluation explicitly:
+
+```sh
+OPENAI_API_KEY=... npm run eval:visual-value -- --run-models
+```
+
+For every case, both arms use identical sampled event IDs and the production
+timeline prompt. The AX-only arm removes only visual evidence; the AX + Visual
+arm retains sanitized persisted OCR and visual understanding. Summary generation
+order is alternated, candidate labels are randomized, and a blind judge scores
+factual coverage, visual-fact coverage, citation support, and unsupported claims.
+Prior timeline summaries are empty in both arms so the comparison isolates the
+current segment's evidence.
+The default summary and judge model is `gpt-5.6-luna`; use `--model` and
+`--judge-model` to override them.
+
+Model mode sends sanitized text evidence to the configured Responses endpoint,
+but never raw screenshots. Local case details contain generated summaries and
+judge scores rather than source event payloads, and are written with owner-only
+permissions. Generated summaries can still repeat sanitized source content, so
+these artifacts remain private. This is a conditional-on-successful-capture,
+single-generation, model-judged proxy; use a fresh controlled or human-reviewed
+set before making a causal product claim. Use `--cohort`, `--max-cases`,
+`--since`, or `--until` to control the sample.
+
 ## Verify
 
 ```sh
@@ -256,6 +303,7 @@ npm run build
 npm run doctor
 npm run eval:history -- --reference /path/to/Skysight
 npm run eval:visual
+npm run eval:visual-value
 swift test
 swift build
 ```

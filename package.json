@@ -15,6 +15,7 @@
     "test": "vp test run && node --test scripts/*.test.mjs",
     "eval:history": "node scripts/eval-history-data.mjs",
     "eval:visual": "node scripts/eval-visual-policy.mjs",
+    "eval:visual-value": "node scripts/eval-visual-value.mjs",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
     "package:mac": "npm run build && electron-builder --mac"
