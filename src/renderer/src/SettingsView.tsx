@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { DesktopSnapshot } from "../../shared/contracts.js";
 import appIcon from "./assets/app-icon.png";
 import { useI18n } from "./i18n.js";
 
 type SettingsTab = "general" | "ai" | "visual" | "privacy" | "data";
-type SettingsDialogName = "clear-history" | "remove-key";
+type SettingsDialogName = "clear-history" | "discard-changes" | "remove-key";
 type RunAction = (action: () => Promise<DesktopSnapshot>) => Promise<boolean>;
+
+const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
 
 interface SettingsViewProps {
   desktop: DesktopSnapshot;
@@ -70,6 +72,15 @@ function StatusPill({
   tone?: "neutral" | "success" | "warning";
 }) {
   return <span className={`setting-status setting-status-${tone}`}>{children}</span>;
+}
+
+function SettingsDisclosure({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="settings-disclosure">
+      <summary>{title}</summary>
+      <p>{children}</p>
+    </details>
+  );
 }
 
 function SettingsDialog({
@@ -140,17 +151,12 @@ export function SettingsView({
   const [dialog, setDialog] = useState<SettingsDialogName>();
   const [feedback, setFeedback] = useState<string>();
   const [model, setModel] = useState(agent?.llm.model ?? "gpt-5.6-luna");
-  const [endpoint, setEndpoint] = useState(
-    agent?.llm.endpoint ?? "https://api.openai.com/v1/responses",
-  );
+  const [endpoint, setEndpoint] = useState(agent?.llm.endpoint ?? defaultResponsesEndpoint);
   const [apiKey, setAPIKey] = useState("");
-  const [axJudge, setAXJudge] = useState<"rules" | "luna">(agent?.visual.axJudge ?? "rules");
-  const [captureMode, setCaptureMode] = useState<"off" | "fallback">(
-    agent?.visual.captureMode ?? "off",
+  const [advancedOpen, setAdvancedOpen] = useState(
+    Boolean(agent?.llm.endpoint && agent.llm.endpoint !== defaultResponsesEndpoint),
   );
-  const [understandingMode, setUnderstandingMode] = useState<"off" | "ocr" | "luna">(
-    agent?.visual.understandingMode ?? "off",
-  );
+  const pendingExit = useRef<() => void>(onBack);
 
   useEffect(() => {
     if (!agent) return;
@@ -159,21 +165,10 @@ export function SettingsView({
   }, [agent?.llm.endpoint, agent?.llm.model]);
 
   useEffect(() => {
-    if (!agent) return;
-    setAXJudge(agent.visual.axJudge);
-    setCaptureMode(agent.visual.captureMode);
-    setUnderstandingMode(agent.visual.understandingMode);
-  }, [agent?.visual.axJudge, agent?.visual.captureMode, agent?.visual.understandingMode]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      if (dialog) setDialog(undefined);
-      else onBack();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dialog, onBack]);
+    if (agent?.llm.endpoint && agent.llm.endpoint !== defaultResponsesEndpoint) {
+      setAdvancedOpen(true);
+    }
+  }, [agent?.llm.endpoint]);
 
   const tabs: Array<{ id: SettingsTab; label: string }> = [
     { id: "general", label: t("settings.tabGeneral") },
@@ -192,13 +187,30 @@ export function SettingsView({
   const modelDirty =
     Boolean(agent) &&
     (model !== agent?.llm.model || endpoint !== agent?.llm.endpoint || Boolean(apiKey.trim()));
-  const visualDirty =
-    Boolean(agent) &&
-    (axJudge !== agent?.visual.axJudge ||
-      captureMode !== agent?.visual.captureMode ||
-      understandingMode !== agent?.visual.understandingMode);
+  const requestExit = useCallback(
+    (action: () => void = onBack): void => {
+      if (!modelDirty) {
+        action();
+        return;
+      }
+      pendingExit.current = action;
+      setDialog("discard-changes");
+    },
+    [modelDirty, onBack],
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      if (dialog) setDialog(undefined);
+      else requestExit();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [dialog, requestExit]);
+
   const recording = agent?.recorderState === "running";
-  const visualEnabled = captureMode === "fallback";
+  const visualEnabled = agent?.visual.captureMode === "fallback";
   const providerStatus = agent?.visual.providerStatus;
   const providerLabel =
     providerStatus === "ready"
@@ -240,19 +252,26 @@ export function SettingsView({
     }
   };
 
-  const saveVisual = async (): Promise<void> => {
-    setFeedback(undefined);
-    const saved = await run(() =>
-      window.computerHistory.configureVisual({ axJudge, captureMode, understandingMode }),
+  const configureVisual = (next: {
+    axJudge?: "rules" | "luna";
+    captureMode?: "off" | "fallback";
+    understandingMode?: "off" | "ocr" | "luna";
+  }): void => {
+    if (!agent) return;
+    void run(() =>
+      window.computerHistory.configureVisual({
+        axJudge: next.axJudge ?? agent.visual.axJudge,
+        captureMode: next.captureMode ?? agent.visual.captureMode,
+        understandingMode: next.understandingMode ?? agent.visual.understandingMode,
+      }),
     );
-    if (saved) setFeedback(t("settings.saved"));
   };
 
   return (
     <div className={`settings-shell ${busy ? "busy" : ""}`}>
       <aside className="settings-navigation">
         <div className="settings-window-drag" />
-        <button className="settings-back" onClick={onBack}>
+        <button className="settings-back" onClick={() => requestExit()}>
           <BackIcon />
           <span>{t("settings.backToDeskLore")}</span>
         </button>
@@ -354,12 +373,23 @@ export function SettingsView({
                 </SettingRow>
                 <SettingRow
                   title={t("settings.accessibilityAccess")}
-                  description={t("health.globalInteractions")}
+                  description={t("settings.accessibilityDetail")}
                 >
                   <StatusPill tone={agent?.health.accessibilityGranted ? "success" : "warning"}>
                     {agent?.health.accessibilityGranted ? t("common.ready") : t("common.notReady")}
                   </StatusPill>
-                  <button onClick={onOpenHealth}>{t("settings.openCaptureHealth")}</button>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      agent?.health.accessibilityGranted
+                        ? requestExit(onOpenHealth)
+                        : void run(() => window.computerHistory.requestPermissions())
+                    }
+                  >
+                    {agent?.health.accessibilityGranted
+                      ? t("settings.openCaptureHealth")
+                      : t("settings.grantAccessibility")}
+                  </button>
                 </SettingRow>
               </SettingsSection>
             </>
@@ -378,22 +408,6 @@ export function SettingsView({
                     </StatusPill>
                   </header>
                   <div className="settings-form-grid">
-                    <label>
-                      <span>{t("settings.model")}</span>
-                      <input
-                        value={model}
-                        disabled={busy}
-                        onChange={(event) => setModel(event.target.value)}
-                      />
-                    </label>
-                    <label className="wide">
-                      <span>{t("settings.endpoint")}</span>
-                      <input
-                        value={endpoint}
-                        disabled={busy}
-                        onChange={(event) => setEndpoint(event.target.value)}
-                      />
-                    </label>
                     <label className="wide">
                       <span>
                         {t("settings.apiKey")}
@@ -409,7 +423,31 @@ export function SettingsView({
                         onChange={(event) => setAPIKey(event.target.value)}
                       />
                     </label>
+                    <label className="wide">
+                      <span>{t("settings.model")}</span>
+                      <input
+                        value={model}
+                        disabled={busy}
+                        onChange={(event) => setModel(event.target.value)}
+                      />
+                    </label>
                   </div>
+                  <details
+                    className="settings-advanced"
+                    open={advancedOpen}
+                    onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+                  >
+                    <summary>{t("settings.advanced")}</summary>
+                    <p>{t("settings.advancedDetail")}</p>
+                    <label>
+                      <span>{t("settings.endpoint")}</span>
+                      <input
+                        value={endpoint}
+                        disabled={busy}
+                        onChange={(event) => setEndpoint(event.target.value)}
+                      />
+                    </label>
+                  </details>
                   <footer className="settings-form-actions">
                     <div className="settings-save-state" role="status">
                       {feedback ?? (modelDirty ? t("settings.unsavedChanges") : "")}
@@ -435,6 +473,12 @@ export function SettingsView({
               </SettingsSection>
 
               <SettingsSection title={t("settings.featureControls")}>
+                {!agent?.llm.apiKeyConfigured && (
+                  <div className="settings-inline-warning" role="status">
+                    <strong>{t("settings.keyRequired")}</strong>
+                    <span>{t("settings.keyRequiredDetail")}</span>
+                  </div>
+                )}
                 <SettingRow
                   title={t("settings.semanticSummaries")}
                   description={t("settings.semanticSummariesDetail")}
@@ -444,7 +488,9 @@ export function SettingsView({
                       type="checkbox"
                       aria-label={t("settings.semanticSummaries")}
                       checked={agent?.llm.enabled ?? false}
-                      disabled={busy || !agent}
+                      disabled={
+                        busy || !agent || (!agent.llm.apiKeyConfigured && !agent.llm.enabled)
+                      }
                       onChange={(event) =>
                         void run(() => window.computerHistory.setLLMEnabled(event.target.checked))
                       }
@@ -461,7 +507,11 @@ export function SettingsView({
                       type="checkbox"
                       aria-label={t("settings.memorySynthesis")}
                       checked={agent?.llm.memorySynthesisEnabled ?? false}
-                      disabled={busy || !agent}
+                      disabled={
+                        busy ||
+                        !agent ||
+                        (!agent.llm.apiKeyConfigured && !agent.llm.memorySynthesisEnabled)
+                      }
                       onChange={(event) =>
                         void run(() =>
                           window.computerHistory.setMemorySynthesisEnabled(event.target.checked),
@@ -472,10 +522,9 @@ export function SettingsView({
                   </label>
                 </SettingRow>
               </SettingsSection>
-              <div className="settings-boundary-note">
-                <strong>{t("settings.dataBoundary")}</strong>
-                <span>{t("settings.dataBoundaryDetail")}</span>
-              </div>
+              <SettingsDisclosure title={t("settings.dataBoundary")}>
+                {t("settings.dataBoundaryDetail")}
+              </SettingsDisclosure>
             </>
           )}
 
@@ -491,9 +540,11 @@ export function SettingsView({
                       type="checkbox"
                       aria-label={t("settings.visualFallback")}
                       checked={visualEnabled}
-                      disabled={busy}
+                      disabled={busy || !agent}
                       onChange={(event) =>
-                        setCaptureMode(event.target.checked ? "fallback" : "off")
+                        configureVisual({
+                          captureMode: event.target.checked ? "fallback" : "off",
+                        })
                       }
                     />
                     <span />
@@ -504,9 +555,11 @@ export function SettingsView({
                     <label>
                       <span>{t("settings.axJudge")}</span>
                       <select
-                        value={axJudge}
+                        value={agent?.visual.axJudge ?? "rules"}
                         disabled={busy || !visualEnabled}
-                        onChange={(event) => setAXJudge(event.target.value as "rules" | "luna")}
+                        onChange={(event) =>
+                          configureVisual({ axJudge: event.target.value as "rules" | "luna" })
+                        }
                       >
                         <option value="rules">{t("settings.localRules")}</option>
                         <option value="luna">{t("settings.lunaGrayAreas")}</option>
@@ -515,10 +568,12 @@ export function SettingsView({
                     <label>
                       <span>{t("settings.visualUnderstanding")}</span>
                       <select
-                        value={understandingMode}
+                        value={agent?.visual.understandingMode ?? "off"}
                         disabled={busy || !visualEnabled}
                         onChange={(event) =>
-                          setUnderstandingMode(event.target.value as "off" | "ocr" | "luna")
+                          configureVisual({
+                            understandingMode: event.target.value as "off" | "ocr" | "luna",
+                          })
                         }
                       >
                         <option value="off">{t("settings.verifyCaptureOnly")}</option>
@@ -527,27 +582,25 @@ export function SettingsView({
                       </select>
                     </label>
                   </div>
-                  <footer className="settings-form-actions">
-                    <div className="settings-save-state" role="status">
-                      {feedback ?? (visualDirty ? t("settings.unsavedChanges") : "")}
-                    </div>
-                    <button
-                      className="primary"
-                      disabled={busy || !visualDirty}
-                      onClick={() => void saveVisual()}
-                    >
-                      {t("settings.saveVisual")}
-                    </button>
-                  </footer>
                 </div>
               </SettingsSection>
 
               <SettingsSection title={t("settings.screenRecording")}>
                 <SettingRow
                   title={t("settings.screenRecording")}
-                  description={t("settings.visualEvidenceDetail")}
+                  description={
+                    providerStatus === "ready"
+                      ? t("settings.screenRecordingReadyDetail")
+                      : visualEnabled
+                        ? t("settings.screenRecordingRequiredDetail")
+                        : t("settings.screenRecordingInactiveDetail")
+                  }
                 >
-                  <StatusPill tone={providerStatus === "ready" ? "success" : "warning"}>
+                  <StatusPill
+                    tone={
+                      providerStatus === "ready" ? "success" : visualEnabled ? "warning" : "neutral"
+                    }
+                  >
                     {providerLabel}
                   </StatusPill>
                   {visualEnabled && providerStatus !== "ready" && (
@@ -562,10 +615,9 @@ export function SettingsView({
                   )}
                 </SettingRow>
               </SettingsSection>
-              <div className="settings-boundary-note">
-                <strong>{t("settings.visualFlow")}</strong>
-                <span>{t("settings.visualBoundaryDetail")}</span>
-              </div>
+              <SettingsDisclosure title={t("settings.visualFlow")}>
+                {t("settings.visualBoundaryDetail")}
+              </SettingsDisclosure>
             </>
           )}
 
@@ -597,8 +649,8 @@ export function SettingsView({
                         }
                       >
                         {agent.activeApplicationAllowed
-                          ? t("settings.stopObserving")
-                          : t("settings.allowObserving")}
+                          ? t("settings.excludeApplication")
+                          : t("settings.includeApplication")}
                       </button>
                     </>
                   )}
@@ -625,17 +677,16 @@ export function SettingsView({
                         }
                       >
                         {agent.activeDomainAllowed
-                          ? t("settings.stopObserving")
-                          : t("settings.allowObserving")}
+                          ? t("settings.excludeDomain")
+                          : t("settings.includeDomain")}
                       </button>
                     </>
                   )}
                 </SettingRow>
               </SettingsSection>
-              <div className="settings-boundary-note">
-                <strong>{t("settings.exclusionPriority")}</strong>
-                <span>{t("settings.exclusionPriorityDetail")}</span>
-              </div>
+              <SettingsDisclosure title={t("settings.exclusionPriority")}>
+                {t("settings.exclusionPriorityDetail")}
+              </SettingsDisclosure>
             </>
           )}
 
@@ -660,7 +711,7 @@ export function SettingsView({
                     memories: agent?.memories.length ?? 0,
                   })}
                 >
-                  <StatusPill>{t("settings.dataBoundary")}</StatusPill>
+                  <StatusPill tone="success">{t("settings.localOnly")}</StatusPill>
                 </SettingRow>
               </SettingsSection>
 
@@ -714,6 +765,20 @@ export function SettingsView({
         </div>
       </main>
 
+      {dialog === "discard-changes" && (
+        <SettingsDialog
+          title={t("settings.discardChangesTitle")}
+          detail={t("settings.discardChangesDetail")}
+          confirmLabel={t("settings.discardChanges")}
+          busy={busy}
+          onCancel={() => setDialog(undefined)}
+          onConfirm={() => {
+            const action = pendingExit.current;
+            setDialog(undefined);
+            action();
+          }}
+        />
+      )}
       {dialog === "remove-key" && (
         <SettingsDialog
           title={t("settings.removeKeyTitle")}

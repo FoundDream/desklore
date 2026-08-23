@@ -1525,7 +1525,8 @@ button.text-danger:hover {
 
 .setting-select,
 .settings-form-grid input,
-.settings-form-grid select {
+.settings-form-grid select,
+.settings-advanced input {
   height: 34px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -1538,7 +1539,10 @@ button.text-danger:hover {
 
 .setting-select:focus-visible,
 .settings-form-grid input:focus-visible,
-.settings-form-grid select:focus-visible {
+.settings-form-grid select:focus-visible,
+.settings-advanced input:focus-visible,
+.settings-advanced summary:focus-visible,
+.settings-disclosure summary:focus-visible {
   border-color: #a1a1aa;
   box-shadow: 0 0 0 3px var(--ring);
 }
@@ -1616,13 +1620,15 @@ button.text-danger:hover {
 }
 
 .settings-form-grid input,
-.settings-form-grid select {
+.settings-form-grid select,
+.settings-advanced input {
   width: 100%;
   font-family: "SF Mono", "Roboto Mono", monospace;
 }
 
 .settings-form-grid input:disabled,
-.settings-form-grid select:disabled {
+.settings-form-grid select:disabled,
+.settings-advanced input:disabled {
   color: var(--muted-soft);
   background: #fafafa;
 }
@@ -1658,6 +1664,88 @@ button.text-danger:hover {
   padding-top: 18px;
 }
 
+.settings-advanced {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-advanced summary,
+.settings-disclosure summary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  outline: none;
+  color: #52525b;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-advanced summary::-webkit-details-marker,
+.settings-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced summary::after,
+.settings-disclosure summary::after {
+  content: "+";
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.settings-advanced[open] summary::after,
+.settings-disclosure[open] summary::after {
+  content: "−";
+}
+
+.settings-advanced > p {
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.settings-advanced label {
+  display: grid;
+  gap: 7px;
+  padding-bottom: 3px;
+}
+
+.settings-advanced label > span {
+  color: #3f3f46;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.settings-advanced input {
+  width: 100%;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+}
+
+.settings-inline-warning {
+  display: grid;
+  gap: 3px;
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid #fde68a;
+  border-radius: 7px;
+  color: #854d0e;
+  background: #fffbeb;
+}
+
+.settings-inline-warning strong {
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.settings-inline-warning span {
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .setting-group-intro {
   padding: 13px 0;
   color: var(--muted);
@@ -1665,22 +1753,18 @@ button.text-danger:hover {
   line-height: 1.55;
 }
 
-.settings-boundary-note {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 24px;
-  padding: 14px 16px;
-  border-radius: 7px;
-  color: var(--muted);
-  background: #f8f8f9;
-  font-size: 10px;
-  line-height: 1.6;
+.settings-disclosure {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
-.settings-boundary-note strong {
-  color: #3f3f46;
-  font-weight: 620;
+.settings-disclosure p {
+  margin: -1px 0 0;
+  padding: 0 0 13px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
 }
 
 .settings-recovery {
