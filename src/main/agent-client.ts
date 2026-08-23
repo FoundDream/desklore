@@ -67,7 +67,7 @@ export class AgentClient extends EventEmitter {
     if (this.process && this.process.exitCode === null) return this.current();
     const executable = await this.findExecutable();
     if (!executable) {
-      this.updateState("missing", "Computer History Agent was not built");
+      this.updateState("missing", "DeskLore Collector was not built");
       return this.current();
     }
 
@@ -76,7 +76,7 @@ export class AgentClient extends EventEmitter {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        COMPUTER_HISTORY_HOST_BUNDLE_ID: this.hostBundleIdentifier,
+        DESKLORE_HOST_BUNDLE_ID: this.hostBundleIdentifier,
       },
     });
     this.process = child;
@@ -99,7 +99,7 @@ export class AgentClient extends EventEmitter {
       const expected = code === 0 || signal === "SIGTERM";
       if (!expected) {
         console.error(
-          `[computer-history] Native agent exited unexpectedly: ${code ?? signal}`,
+          `[desklore] Native collector exited unexpectedly: ${code ?? signal}`,
           this.connectionError ?? "No native error output",
         );
       }
@@ -216,7 +216,7 @@ export class AgentClient extends EventEmitter {
         this.emit("event", normalizeHistoryEvent(message.event) satisfies HistoryEvent);
       } catch (error) {
         this.connectionError = error instanceof Error ? error.message : "Invalid native event";
-        console.error("[computer-history] Rejected an invalid native event:", error);
+        console.error("[desklore] Rejected an invalid native event:", error);
         this.emit("snapshot", this.current());
       }
     }
@@ -254,14 +254,9 @@ export function agentExecutableCandidates(
   resourcesPath: string,
   projectRoot: string,
 ): string[] {
-  const relative = path.join(
-    "Computer History Agent.app",
-    "Contents",
-    "MacOS",
-    "ComputerHistoryAgent",
-  );
+  const relative = path.join("DeskLore Collector.app", "Contents", "MacOS", "DeskLoreCollector");
   return [
-    process.env.COMPUTER_HISTORY_AGENT_PATH,
+    process.env.DESKLORE_COLLECTOR_PATH,
     path.join(resourcesPath, "native", relative),
     path.join(projectRoot, "dist", relative),
     path.join(appPath, "dist", relative),

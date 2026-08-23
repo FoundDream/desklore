@@ -174,9 +174,9 @@ export function applyObservationPolicy(
 ): HistoryEvent | undefined {
   if (!allowsApplication(policy, event.application.bundleIdentifier)) return undefined;
   if (
-    event.application.bundleIdentifier === "com.ziwen.computer-history.desktop" ||
+    event.application.bundleIdentifier === "com.desklore.desktop" ||
     (event.application.bundleIdentifier === "com.github.Electron" &&
-      event.window?.title === "Computer History")
+      event.window?.title === "DeskLore")
   ) {
     return undefined;
   }

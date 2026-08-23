@@ -22,14 +22,17 @@ let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
 
+app.setName("DeskLore");
+app.setPath("userData", path.join(app.getPath("appData"), "DeskLore"));
+
 const projectRoot = process.cwd();
 const collector = new AgentClient(
   agentExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
-  app.isPackaged ? "com.ziwen.computer-history.desktop" : "com.github.Electron",
+  app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
 );
 const history = new HistoryService(
   collector,
-  path.join(app.getPath("appData"), "ComputerHistoryDesktop"),
+  path.join(app.getPath("userData"), "history"),
   new NativeAgentVisualCaptureProvider(collector),
 );
 const applicationIconCache = new Map<string, Promise<string | undefined>>();
@@ -141,23 +144,22 @@ function setDevelopmentDockIcon(): void {
 function rebuildTray(snapshot: DesktopSnapshot): void {
   if (!tray) return;
   const running = snapshot.agent?.recorderState === "running";
-  tray.setToolTip(running ? "Computer History · 正在记录" : "Computer History");
+  tray.setToolTip(running ? "DeskLore · 正在记录" : "DeskLore");
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "打开时间线", click: showWindow },
       { type: "separator" },
-      snapshot.connectionState !== "connected"
-        ? { label: "启动采集器", click: () => void history.start() }
-        : running
-          ? { label: "暂停记录", click: () => void history.pause() }
-          : { label: "继续记录", click: () => void history.resume() },
+      !snapshot.recordingConsentGranted
+        ? { label: "允许并启动记录", click: () => void history.grantRecordingConsent() }
+        : snapshot.connectionState !== "connected"
+          ? { label: "启动采集器", click: () => void history.start() }
+          : running
+            ? { label: "暂停记录", click: () => void history.pause() }
+            : { label: "继续记录", click: () => void history.resume() },
       { type: "separator" },
       {
-        label: "退出 Computer History",
-        click: () => {
-          quitting = true;
-          app.quit();
-        },
+        label: "退出 DeskLore",
+        click: () => app.quit(),
       },
     ]),
   );
@@ -200,6 +202,10 @@ function registerIPC(): void {
   ipcMain.handle("history:get-snapshot", (event) => {
     assertRenderer(event);
     return history.current();
+  });
+  ipcMain.handle("history:grant-recording-consent", async (event) => {
+    assertRenderer(event);
+    return history.grantRecordingConsent();
   });
   ipcMain.handle("history:get-application-icon", (event, value: unknown) => {
     assertRenderer(event);
@@ -304,14 +310,16 @@ function registerIPC(): void {
     assertRenderer(event);
     return history.deleteDocument(documentID(id));
   });
+  ipcMain.handle("history:clear", async (event) => {
+    assertRenderer(event);
+    return history.clearHistory();
+  });
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
-  console.error(
-    "[computer-history] Another desktop instance already owns the single-instance lock.",
-  );
+  console.error("[desklore] Another desktop instance already owns the single-instance lock.");
   app.quit();
 } else {
   app.on("second-instance", showWindow);
@@ -333,15 +341,29 @@ if (!hasSingleInstanceLock) {
       await history.start();
     })
     .catch((error: unknown) => {
-      console.error("[computer-history] Failed to start the desktop app:", error);
+      console.error("[desklore] Failed to start the desktop app:", error);
       app.exit(1);
     });
 }
 
 app.on("activate", showWindow);
-app.on("before-quit", () => {
+let shutdownStarted = false;
+app.on("before-quit", (event) => {
   quitting = true;
-  history.terminate();
+  if (shutdownStarted) return;
+  event.preventDefault();
+  shutdownStarted = true;
+  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error("History shutdown timed out")), 8_000);
+  });
+  void Promise.race([history.shutdown(), deadline])
+    .catch((error: unknown) => console.error("[desklore] Graceful shutdown failed:", error))
+    .finally(() => {
+      if (timeout) clearTimeout(timeout);
+      history.terminate();
+      app.quit();
+    });
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "ComputerHistory",
+    name: "DeskLore",
     platforms: [
         .macOS(.v14),
     ],
@@ -13,8 +13,8 @@ let package = Package(
             targets: ["ComputerHistoryCore"]
         ),
         .executable(
-            name: "ComputerHistoryAgent",
-            targets: ["ComputerHistoryAgent"]
+            name: "DeskLoreCollector",
+            targets: ["DeskLoreCollector"]
         ),
     ],
     targets: [
@@ -22,7 +22,7 @@ let package = Package(
             name: "ComputerHistoryCore"
         ),
         .executableTarget(
-            name: "ComputerHistoryAgent",
+            name: "DeskLoreCollector",
             dependencies: ["ComputerHistoryCore"],
             path: "Sources/ComputerHistoryApp"
         ),

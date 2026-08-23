@@ -3,7 +3,7 @@ import Foundation
 
 @main
 @MainActor
-struct ComputerHistoryAgent {
+struct DeskLoreCollector {
     static func main() {
         let application = NSApplication.shared
         let delegate = AgentAppDelegate()

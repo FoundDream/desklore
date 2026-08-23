@@ -127,6 +127,7 @@ export interface AgentSnapshot {
 
 export interface DesktopSnapshot {
   connectionState: AgentConnectionState;
+  recordingConsentGranted: boolean;
   agent?: AgentSnapshot;
   connectionError?: string;
 }
@@ -143,6 +144,7 @@ export type VisualConfigurationInput = VisualSettings;
 
 export interface ComputerHistoryAPI {
   getSnapshot(): Promise<DesktopSnapshot>;
+  grantRecordingConsent(): Promise<DesktopSnapshot>;
   startAgent(): Promise<DesktopSnapshot>;
   stopAgent(): Promise<DesktopSnapshot>;
   pause(): Promise<DesktopSnapshot>;
@@ -160,6 +162,7 @@ export interface ComputerHistoryAPI {
   removeLLMAPIKey(): Promise<DesktopSnapshot>;
   openDocument(id: string): Promise<DesktopSnapshot>;
   deleteDocument(id: string): Promise<DesktopSnapshot>;
+  clearHistory(): Promise<DesktopSnapshot>;
   revealStorage(): Promise<DesktopSnapshot>;
   getApplicationIcon(iconPath: string): Promise<string | undefined>;
   searchMemory(query: string): Promise<HistorySearchResponse>;

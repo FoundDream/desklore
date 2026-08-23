@@ -2,13 +2,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
 
-const originalAgentPath = process.env.COMPUTER_HISTORY_AGENT_PATH;
+const originalCollectorPath = process.env.DESKLORE_COLLECTOR_PATH;
 
 afterEach(() => {
-  if (originalAgentPath === undefined) {
-    delete process.env.COMPUTER_HISTORY_AGENT_PATH;
+  if (originalCollectorPath === undefined) {
+    delete process.env.DESKLORE_COLLECTOR_PATH;
   } else {
-    process.env.COMPUTER_HISTORY_AGENT_PATH = originalAgentPath;
+    process.env.DESKLORE_COLLECTOR_PATH = originalCollectorPath;
   }
 });
 
@@ -18,21 +18,18 @@ describe("AgentClient", () => {
 
     await expect(client.start()).resolves.toMatchObject({
       connectionState: "missing",
-      connectionError: "Computer History Agent was not built",
+      connectionError: "DeskLore Collector was not built",
     });
   });
 
   it("resolves development and packaged agent locations", () => {
-    process.env.COMPUTER_HISTORY_AGENT_PATH = "/custom/ComputerHistoryAgent";
+    process.env.DESKLORE_COLLECTOR_PATH = "/custom/DeskLoreCollector";
 
     expect(agentExecutableCandidates("/app", "/resources", "/project")).toEqual([
-      "/custom/ComputerHistoryAgent",
-      path.join(
-        "/resources/native",
-        "Computer History Agent.app/Contents/MacOS/ComputerHistoryAgent",
-      ),
-      path.join("/project/dist", "Computer History Agent.app/Contents/MacOS/ComputerHistoryAgent"),
-      path.join("/app/dist", "Computer History Agent.app/Contents/MacOS/ComputerHistoryAgent"),
+      "/custom/DeskLoreCollector",
+      path.join("/resources/native", "DeskLore Collector.app/Contents/MacOS/DeskLoreCollector"),
+      path.join("/project/dist", "DeskLore Collector.app/Contents/MacOS/DeskLoreCollector"),
+      path.join("/app/dist", "DeskLore Collector.app/Contents/MacOS/DeskLoreCollector"),
     ]);
   });
 });

@@ -179,6 +179,11 @@ export class EventCoalescer {
     return normalized;
   }
 
+  reset(): void {
+    this.lastAcceptedByStream.clear();
+    this.lastAcceptedTextByStream.clear();
+  }
+
   private streamKey(event: HistoryEvent): string {
     const components = [event.kind, event.application.bundleIdentifier];
     if (event.kind === "keyboard.text_input") {
@@ -271,6 +276,10 @@ export class EventBurstCoalescer {
     );
     this.pendingByStream.clear();
     return ready;
+  }
+
+  reset(): void {
+    this.pendingByStream.clear();
   }
 
   private streamKey(event: HistoryEvent): string {

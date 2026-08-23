@@ -5,17 +5,19 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>ComputerHistoryAgent</string>
+    <string>DeskLoreCollector</string>
     <key>CFBundleIdentifier</key>
-    <string>com.ziwen.computer-history.desktop.agent</string>
+    <string>com.desklore.collector</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
     <key>CFBundleName</key>
-    <string>Computer History Agent</string>
+    <string>DeskLore Collector</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>

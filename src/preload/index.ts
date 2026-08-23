@@ -10,6 +10,7 @@ const invoke = (channel: string): Promise<DesktopSnapshot> => ipcRenderer.invoke
 
 const api: ComputerHistoryAPI = {
   getSnapshot: () => invoke("history:get-snapshot"),
+  grantRecordingConsent: () => invoke("history:grant-recording-consent"),
   startAgent: () => invoke("history:start-agent"),
   stopAgent: () => invoke("history:stop-agent"),
   pause: () => invoke("history:pause"),
@@ -30,6 +31,7 @@ const api: ComputerHistoryAPI = {
   removeLLMAPIKey: () => invoke("history:remove-llm-key"),
   openDocument: (id: string) => ipcRenderer.invoke("history:open-document", id),
   deleteDocument: (id: string) => ipcRenderer.invoke("history:delete-document", id),
+  clearHistory: () => invoke("history:clear"),
   revealStorage: () => invoke("history:reveal-storage"),
   getApplicationIcon: (iconPath: string) =>
     ipcRenderer.invoke("history:get-application-icon", iconPath),

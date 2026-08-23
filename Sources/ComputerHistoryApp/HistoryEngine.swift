@@ -47,7 +47,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var pendingCaptureResults: [Int: AXCaptureResult] = [:]
     private var lastNativeWindowCaptureByStream: [String: Date] = [:]
     private let hostBundleIdentifier = ProcessInfo.processInfo.environment[
-        "COMPUTER_HISTORY_HOST_BUNDLE_ID"
+        "DESKLORE_HOST_BUNDLE_ID"
     ]
     private let blockedSystemBundleIdentifiers: Set<String> = [
         "com.apple.loginwindow",

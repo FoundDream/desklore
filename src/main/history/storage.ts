@@ -86,6 +86,17 @@ export async function hardenStoragePermissions(layout: StorageLayout): Promise<v
   }
 }
 
+export async function clearHistoryData(layout: StorageLayout): Promise<void> {
+  for (const directory of [layout.segments, layout.timeline, layout.memory]) {
+    const normalized = path.normalize(directory);
+    if (path.dirname(normalized) !== path.normalize(layout.root)) {
+      throw new Error("History directory is outside the storage root");
+    }
+    await rm(normalized, { recursive: true, force: true });
+  }
+  await ensureStorage(layout);
+}
+
 export function segmentStart(date: Date): Date {
   return new Date(
     Math.floor(date.getTime() / segmentDurationMilliseconds) * segmentDurationMilliseconds,
@@ -112,6 +123,10 @@ export class SegmentStore {
   private current?: SegmentMetadata;
 
   constructor(readonly layout: StorageLayout) {}
+
+  reset(): void {
+    this.current = undefined;
+  }
 
   async append(event: HistoryEvent): Promise<ClosedSegment | undefined> {
     await ensureStorage(this.layout);
@@ -251,6 +266,67 @@ export class SegmentStore {
     return removed;
   }
 
+  async deleteSegment(id: string): Promise<boolean> {
+    if (!id || path.basename(id) !== id) throw new Error("Invalid segment identifier");
+    const directoryPath = path.join(this.layout.segments, id);
+    if (path.dirname(directoryPath) !== path.normalize(this.layout.segments)) {
+      throw new Error("Segment is outside the storage directory");
+    }
+    try {
+      const stats = await lstat(directoryPath);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error("Segment path is not an application-owned directory");
+      }
+      await rm(directoryPath, { recursive: true });
+      if (this.current?.id === id) this.current = undefined;
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
+  async pruneVisualEvidence(cutoff: Date): Promise<number> {
+    await ensureStorage(this.layout);
+    const entries = await readdir(this.layout.segments, { withFileTypes: true });
+    let removed = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const directoryPath = path.join(this.layout.segments, entry.name);
+      const filePath = path.join(directoryPath, eventEvidenceFile);
+      let lines: string[];
+      try {
+        lines = (await readFile(filePath, "utf8")).split("\n").filter(Boolean);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      let changed = false;
+      const retained: string[] = [];
+      for (const line of lines) {
+        const enrichment = normalizeEventEvidenceEnrichment(JSON.parse(line));
+        const visualDate = Date.parse(
+          enrichment.visual?.capturedAt ?? enrichment.createdAt ?? enrichment.eventTimestamp,
+        );
+        if (enrichment.visual && Number.isFinite(visualDate) && visualDate < cutoff.getTime()) {
+          changed = true;
+          removed += 1;
+          if (enrichment.axSufficiency) {
+            retained.push(
+              JSON.stringify(evidenceEnrichmentForDisk({ ...enrichment, visual: undefined })),
+            );
+          }
+          continue;
+        }
+        retained.push(JSON.stringify(evidenceEnrichmentForDisk(enrichment)));
+      }
+      if (!changed) continue;
+      if (retained.length) await atomicWrite(filePath, `${retained.join("\n")}\n`);
+      else await rm(filePath, { force: true });
+    }
+    return removed;
+  }
+
   async readEvents(segment: ClosedSegment): Promise<HistoryEvent[]> {
     try {
       const contents = await readFile(segment.eventsPath, "utf8");
@@ -305,6 +381,7 @@ export class SegmentStore {
     const existing = await this.readMetadata(directoryPath).catch(() => undefined);
     return (
       existing ?? {
+        schemaVersion: 1,
         id,
         startedAt: segmentStart(new Date(timestamp)).toISOString(),
         eventCount: 0,

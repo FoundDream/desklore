@@ -22,7 +22,7 @@ function document(overrides: Partial<TimelineDocumentRecord> = {}): TimelineDocu
     sourceSegmentID: "2026-08-20T06-10-00Z",
     startedAt: "2026-08-20T06:10:00.000Z",
     endedAt: "2026-08-20T06:20:00.000Z",
-    title: "实现 Computer History 的分层记忆",
+    title: "实现 DeskLore 的分层记忆",
     description: "完成了六小时和每日记忆聚合，并保留来源时间线引用。",
     continuationHint: "补充真实数据评测",
     claims: [{ text: "分层记忆已可检索。", evidenceEventIDs: ["event-1"] }],
@@ -103,7 +103,7 @@ describe("History memory", () => {
                   {
                     type: "output_text",
                     text: JSON.stringify({
-                      title: "Computer History 分层记忆实现",
+                      title: "DeskLore 分层记忆实现",
                       description: "实现并验证了本地分层记忆。",
                       narrative: "工作从十分钟摘要扩展到六小时和每日归纳，并保留确定性的来源引用。",
                       continuation_hint: "补充真实数据评测",
@@ -143,7 +143,7 @@ describe("History memory", () => {
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     await ensureStorage(layout);
-    const filePath = path.join(layout.state, "legacy.json");
+    const filePath = path.join(layout.state, "settings.json");
     await writeFile(filePath, "{}", { mode: 0o666 });
 
     await hardenStoragePermissions(layout);

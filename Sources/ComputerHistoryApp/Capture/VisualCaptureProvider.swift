@@ -41,8 +41,8 @@ final class VisualCaptureProvider: @unchecked Sendable {
         "com.apple.loginwindow",
         "com.apple.SecurityAgent",
         "com.apple.ScreenSaver.Engine",
-        "com.ziwen.computer-history.desktop",
-        "com.ziwen.computer-history.desktop.agent",
+        "com.desklore.desktop",
+        "com.desklore.collector",
     ]
 
     var isScreenCaptureGranted: Bool {

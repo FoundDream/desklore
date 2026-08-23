@@ -1,16 +1,25 @@
 {
-  "name": "computer-history-desktop",
-  "version": "0.2.0",
+  "name": "desklore",
+  "version": "0.1.0",
   "private": true,
-  "description": "Local-first activity timeline with an Electron UI and native macOS collector",
-  "author": "FoundDream",
+  "description": "Open-source computer history for macOS, built local-first",
+  "homepage": "https://github.com/FoundDream/desklore#readme",
+  "bugs": {
+    "url": "https://github.com/FoundDream/desklore/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Ziwen Song",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FoundDream/desklore.git"
+  },
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
     "native:build": "./scripts/build-agent.sh",
-    "dev": "npm run native:build && electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
+    "dev": "pnpm native:build && electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
     "dev:ui": "electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
-    "build": "npm run native:build && electron-vite-plus build",
+    "build": "pnpm native:build && electron-vite-plus build",
     "check": "vp check",
     "test": "vp test run && node --test scripts/*.test.mjs",
     "eval:history": "node scripts/eval-history-data.mjs",
@@ -18,7 +27,7 @@
     "eval:visual-value": "node scripts/eval-visual-value.mjs",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
-    "package:mac": "npm run build && electron-builder --mac"
+    "package:mac": "pnpm build && electron-builder --mac"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -39,10 +48,15 @@
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"
   },
-  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.22.0+sha512.1ff870c4c6133dfd88fb2afc46dd13d47f09c9794b438c6fdb47ca98caf3bc16381ee0be93a091b8e3824cf01f889f46d7d9e20910fb0be1ab0fb5baa80dd621",
   "build": {
-    "appId": "com.ziwen.computer-history.desktop",
-    "productName": "Computer History",
+    "appId": "com.desklore.desktop",
+    "productName": "DeskLore",
+    "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "output": "release"
     },
@@ -52,20 +66,21 @@
     ],
     "extraResources": [
       {
-        "from": "dist/Computer History Agent.app",
-        "to": "native/Computer History Agent.app"
+        "from": "dist/DeskLore Collector.app",
+        "to": "native/DeskLore Collector.app"
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
+      "minimumSystemVersion": "14.0",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "dmg": {
-      "artifactName": "Computer-History-${version}-${arch}.${ext}"
+      "artifactName": "DeskLore-${version}-${arch}.${ext}"
     }
   }
 }

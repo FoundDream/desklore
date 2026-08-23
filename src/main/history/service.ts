@@ -20,6 +20,7 @@ import {
 } from "./policy.js";
 import { defaultVisualSettings, HistorySettingsStore, validateLLMSettings } from "./settings.js";
 import {
+  clearHistoryData,
   ensureStorage,
   hardenStoragePermissions,
   makeStorageLayout,
@@ -114,6 +115,7 @@ export class HistoryService extends EventEmitter {
   };
   private apiKeyConfigured = false;
   private visualSettings: VisualSettings = { ...defaultVisualSettings };
+  private recordingConsentGranted = false;
   private documents: TimelineDocumentRecord[] = [];
   private memories: MemoryRollupRecord[] = [];
   private lastError?: string;
@@ -184,7 +186,7 @@ export class HistoryService extends EventEmitter {
     collector.on("event", (event: HistoryEvent) => {
       if (!this.receivedNativeEvent) {
         this.receivedNativeEvent = true;
-        console.info("[computer-history] Native event stream connected.");
+        console.info("[desklore] Native event stream connected.");
       }
       void this.enqueueCapture(async () => this.processEvent(event)).catch((error) =>
         this.captureError(error),
@@ -223,6 +225,7 @@ export class HistoryService extends EventEmitter {
       : undefined;
     return {
       connectionState: native.connectionState,
+      recordingConsentGranted: this.recordingConsentGranted,
       agent: snapshot,
       connectionError: native.connectionError,
     };
@@ -230,6 +233,7 @@ export class HistoryService extends EventEmitter {
 
   async start(): Promise<DesktopSnapshot> {
     await this.initialize();
+    if (!this.recordingConsentGranted) return this.current();
     const recovered = await this.segments.recoverExpiredSegments();
     const completed = await this.segments.pendingClosedSegments();
     await this.collector.start();
@@ -250,14 +254,37 @@ export class HistoryService extends EventEmitter {
     return this.current();
   }
 
+  async grantRecordingConsent(): Promise<DesktopSnapshot> {
+    await this.initialize();
+    if (!this.recordingConsentGranted) {
+      await this.settingsStore.grantRecordingConsent();
+      this.recordingConsentGranted = true;
+      this.emitSnapshot();
+    }
+    return this.start();
+  }
+
   async stop(): Promise<DesktopSnapshot> {
+    this.stopTimers();
+    if (
+      this.collector.current().connectionState === "connected" &&
+      this.collector.current().agent?.recorderState === "running"
+    ) {
+      await this.collector.request("pause").catch(() => undefined);
+    }
     await this.enqueueCapture(async () => {
       for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
     });
+    await this.captureWork;
     await this.visualWork;
-    this.stopTimers();
     await this.collector.stop();
+    await this.maintenance();
+    await this.timelineWork;
     return this.current();
+  }
+
+  async shutdown(): Promise<void> {
+    await this.stop();
   }
 
   terminate(): void {
@@ -396,9 +423,41 @@ export class HistoryService extends EventEmitter {
     await this.enqueueTimeline(async () => {
       const document = this.documents.find((item) => item.id === id);
       if (!document) throw new Error("Timeline document not found");
+      await this.segments.deleteSegment(document.sourceSegmentID);
       await this.timeline.delete(document);
       await this.refreshDocuments();
     });
+    return this.current();
+  }
+
+  async clearHistory(): Promise<DesktopSnapshot> {
+    await this.initialize();
+    this.stopTimers();
+    if (
+      this.collector.current().connectionState === "connected" &&
+      this.collector.current().agent?.recorderState === "running"
+    ) {
+      await this.collector.request("pause").catch(() => undefined);
+    }
+    await this.enqueueCapture(async () => {
+      for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
+    });
+    await this.captureWork;
+    this.cancelAllPendingVisualIntents();
+    await this.visualWork;
+    await this.timelineWork;
+    await clearHistoryData(this.layout);
+    this.segments.reset();
+    this.coalescer.reset();
+    this.burstCoalescer.reset();
+    this.documents = [];
+    this.memories = [];
+    this.applicationIconPaths.clear();
+    this.visualUnderstandingCache.clear();
+    this.currentCaptureSegmentID = undefined;
+    this.lastError = undefined;
+    if (this.collector.current().connectionState === "connected") this.startTimers();
+    this.emitSnapshot();
     return this.current();
   }
 
@@ -417,11 +476,13 @@ export class HistoryService extends EventEmitter {
     if (this.initialized) return;
     await ensureStorage(this.layout);
     await hardenStoragePermissions(this.layout);
-    [this.policy, this.llmSettings, this.visualSettings] = await Promise.all([
-      this.settingsStore.loadPolicy(),
-      this.settingsStore.loadLLMSettings(),
-      this.settingsStore.loadVisualSettings(),
-    ]);
+    [this.policy, this.llmSettings, this.visualSettings, this.recordingConsentGranted] =
+      await Promise.all([
+        this.settingsStore.loadPolicy(),
+        this.settingsStore.loadLLMSettings(),
+        this.settingsStore.loadVisualSettings(),
+        this.settingsStore.hasRecordingConsent(),
+      ]);
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
     this.documents = await this.timeline.loadDocuments();
     this.memories = await this.memory.refresh(this.documents);
@@ -493,6 +554,7 @@ export class HistoryService extends EventEmitter {
     const recovered = await this.segments.recoverExpiredSegments();
     for (const segment of recovered) this.scheduleTimeline(segment);
     const completed = await this.segments.pendingClosedSegments();
+    await this.segments.pruneVisualEvidence(new Date(Date.now() - 24 * 60 * 60 * 1_000));
     await this.segments.pruneSegments(new Date(Date.now() - 48 * 60 * 60 * 1_000));
     void this.enqueueTimeline(async () => {
       await this.timeline.retryFallbackDocuments(completed);
@@ -1008,7 +1070,7 @@ export class HistoryService extends EventEmitter {
 
   private captureError(error: unknown): void {
     this.lastError = error instanceof Error ? error.message : String(error);
-    console.error("[computer-history] History pipeline failed:", error);
+    console.error("[desklore] History pipeline failed:", error);
     this.emitSnapshot();
   }
 

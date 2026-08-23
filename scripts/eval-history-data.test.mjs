@@ -11,11 +11,12 @@ function event(timestamp, kind = "mouse.click", bundleIdentifier = "com.example.
   return { timestamp, kind, app: "Example", bundleIdentifier };
 }
 
-test("normalizes candidate and Codex application schemas", () => {
+test("normalizes the current candidate schema and the Codex reference schema", () => {
   const raw = {
+    id: "EVENT-1",
     timestamp: "2026-08-20T12:00:00.000Z",
     kind: "window.changed",
-    application: { bundle_identifier: "com.example.app", name: "Example" },
+    application: { bundleIdentifier: "com.example.app", name: "Example" },
   };
   assert.deepEqual(normalizedEvent(raw, "candidate"), {
     timestamp: "2026-08-20T12:00:00.000Z",
@@ -27,6 +28,19 @@ test("normalizes candidate and Codex application schemas", () => {
     axText: undefined,
     raw,
   });
+  assert.throws(
+    () =>
+      normalizedEvent(
+        {
+          id: "EVENT-1",
+          timestamp: "2026-08-20T12:00:00.000Z",
+          kind: "window.changed",
+          application: { bundle_identifier: "com.example.app", name: "Example" },
+        },
+        "candidate",
+      ),
+    /Invalid history event/,
+  );
   assert.equal(
     normalizedEvent(
       {

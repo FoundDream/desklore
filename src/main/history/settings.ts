@@ -1,8 +1,6 @@
 import { safeStorage } from "electron";
-import { execFile } from "node:child_process";
 import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { defaultObservationPolicy } from "./policy.js";
 import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "./types.js";
 import type { StorageLayout } from "./storage.js";
@@ -18,10 +16,6 @@ export const defaultVisualSettings: VisualSettings = {
   captureMode: "off",
   understandingMode: "off",
 };
-const execFileAsync = promisify(execFile);
-const legacyDefaultsDomain = "com.ziwen.computer-history.desktop.agent";
-const legacyKeychainService = "com.ziwen.computer-history.desktop.agent.llm";
-
 async function atomicWrite(filePath: string, contents: string | Uint8Array): Promise<void> {
   const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   await writeFile(temporary, contents, { mode: 0o600 });
@@ -38,10 +32,10 @@ async function readJSON(filePath: string): Promise<unknown> {
   }
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : undefined;
 }
 
 export class HistorySettingsStore {
@@ -49,69 +43,110 @@ export class HistorySettingsStore {
   private readonly llmPath: string;
   private readonly apiKeyPath: string;
   private readonly visualPath: string;
+  private readonly recordingConsentPath: string;
 
   constructor(layout: StorageLayout) {
     this.policyPath = path.join(layout.state, "observation-policy.json");
     this.llmPath = path.join(layout.state, "llm-settings.json");
     this.apiKeyPath = path.join(layout.state, "llm-api-key.bin");
     this.visualPath = path.join(layout.state, "visual-settings.json");
+    this.recordingConsentPath = path.join(layout.state, "recording-consent.json");
   }
 
   async loadPolicy(): Promise<ObservationPolicy> {
-    const stored = (await readJSON(this.policyPath)) as Partial<ObservationPolicy> | undefined;
-    const source = stored ?? (await this.loadLegacyPolicy());
-    if (!source) return structuredClone(defaultObservationPolicy);
+    const stored = (await readJSON(this.policyPath)) as
+      | (Partial<ObservationPolicy> & { schemaVersion?: unknown })
+      | undefined;
+    if (!stored) return structuredClone(defaultObservationPolicy);
+    const allowedBundleIdentifiers = stringArray(stored.allowedBundleIdentifiers);
+    const blockedBundleIdentifiers = stringArray(stored.blockedBundleIdentifiers);
+    const allowedDomains = stringArray(stored.allowedDomains);
+    const blockedDomains = stringArray(stored.blockedDomains);
+    if (
+      stored.schemaVersion !== 1 ||
+      !["observe", "do_not_observe"].includes(stored.defaultApplicationBehavior ?? "") ||
+      !["observe", "do_not_observe"].includes(stored.defaultURLBehavior ?? "") ||
+      !allowedBundleIdentifiers ||
+      !blockedBundleIdentifiers ||
+      !allowedDomains ||
+      !blockedDomains
+    ) {
+      throw new Error("Unsupported observation policy schema");
+    }
     const policy: ObservationPolicy = {
-      defaultApplicationBehavior:
-        source.defaultApplicationBehavior === "do_not_observe" ? "do_not_observe" : "observe",
-      defaultURLBehavior:
-        source.defaultURLBehavior === "do_not_observe" ? "do_not_observe" : "observe",
-      allowedBundleIdentifiers: stringArray(source.allowedBundleIdentifiers),
-      blockedBundleIdentifiers: stringArray(source.blockedBundleIdentifiers),
-      allowedDomains: stringArray(source.allowedDomains).map((value) => value.toLowerCase()),
-      blockedDomains: stringArray(source.blockedDomains).map((value) => value.toLowerCase()),
+      defaultApplicationBehavior: stored.defaultApplicationBehavior!,
+      defaultURLBehavior: stored.defaultURLBehavior!,
+      allowedBundleIdentifiers,
+      blockedBundleIdentifiers,
+      allowedDomains: allowedDomains.map((value) => value.toLowerCase()),
+      blockedDomains: blockedDomains.map((value) => value.toLowerCase()),
     };
-    if (!stored) await this.savePolicy(policy);
     return policy;
   }
 
   async savePolicy(policy: ObservationPolicy): Promise<void> {
-    await atomicWrite(this.policyPath, `${JSON.stringify(policy, null, 2)}\n`);
+    await atomicWrite(
+      this.policyPath,
+      `${JSON.stringify({ schemaVersion: 1, ...policy }, null, 2)}\n`,
+    );
   }
 
   async loadLLMSettings(): Promise<TimelineLLMSettings> {
-    const stored = (await readJSON(this.llmPath)) as Partial<TimelineLLMSettings> | undefined;
-    const source = stored ?? (await this.loadLegacyLLMSettings());
-    if (!source) return { ...defaultLLMSettings };
-    const settings = {
-      enabled: source.enabled === true,
-      memorySynthesisEnabled: source.memorySynthesisEnabled === true,
-      model: typeof source.model === "string" ? source.model : defaultLLMSettings.model,
-      endpoint: typeof source.endpoint === "string" ? source.endpoint : defaultLLMSettings.endpoint,
+    const stored = (await readJSON(this.llmPath)) as
+      | (Partial<TimelineLLMSettings> & { schemaVersion?: unknown })
+      | undefined;
+    if (!stored) return { ...defaultLLMSettings };
+    if (
+      stored.schemaVersion !== 1 ||
+      typeof stored.enabled !== "boolean" ||
+      typeof stored.memorySynthesisEnabled !== "boolean" ||
+      typeof stored.model !== "string" ||
+      typeof stored.endpoint !== "string"
+    ) {
+      throw new Error("Unsupported model settings schema");
+    }
+    const settings: TimelineLLMSettings = {
+      enabled: stored.enabled,
+      memorySynthesisEnabled: stored.memorySynthesisEnabled,
+      model: stored.model,
+      endpoint: stored.endpoint,
     };
-    if (!stored) await this.saveLLMSettings(settings);
+    if (!validateLLMSettings(settings)) throw new Error("Invalid model settings");
     return settings;
   }
 
   async saveLLMSettings(settings: TimelineLLMSettings): Promise<void> {
-    await atomicWrite(this.llmPath, `${JSON.stringify(settings, null, 2)}\n`);
+    await atomicWrite(
+      this.llmPath,
+      `${JSON.stringify({ schemaVersion: 1, ...settings }, null, 2)}\n`,
+    );
   }
 
   async loadVisualSettings(): Promise<VisualSettings> {
-    const stored = (await readJSON(this.visualPath)) as Partial<VisualSettings> | undefined;
+    const stored = (await readJSON(this.visualPath)) as
+      | (Partial<VisualSettings> & { schemaVersion?: unknown })
+      | undefined;
     if (!stored) return { ...defaultVisualSettings };
+    if (
+      stored.schemaVersion !== 1 ||
+      !["rules", "luna"].includes(stored.axJudge ?? "") ||
+      !["off", "fallback"].includes(stored.captureMode ?? "") ||
+      !["off", "ocr", "luna"].includes(stored.understandingMode ?? "")
+    ) {
+      throw new Error("Unsupported visual settings schema");
+    }
     return {
-      axJudge: stored.axJudge === "luna" ? "luna" : "rules",
-      captureMode: stored.captureMode === "fallback" ? "fallback" : "off",
-      understandingMode:
-        stored.understandingMode === "ocr" || stored.understandingMode === "luna"
-          ? stored.understandingMode
-          : "off",
+      axJudge: stored.axJudge!,
+      captureMode: stored.captureMode!,
+      understandingMode: stored.understandingMode!,
     };
   }
 
   async saveVisualSettings(settings: VisualSettings): Promise<void> {
-    await atomicWrite(this.visualPath, `${JSON.stringify(settings, null, 2)}\n`);
+    await atomicWrite(
+      this.visualPath,
+      `${JSON.stringify({ schemaVersion: 1, ...settings }, null, 2)}\n`,
+    );
   }
 
   async hasAPIKey(): Promise<boolean> {
@@ -126,11 +161,7 @@ export class HistorySettingsStore {
       if (!safeStorage.isEncryptionAvailable()) return undefined;
       return safeStorage.decryptString(encrypted);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        const legacy = await this.loadLegacyAPIKey();
-        if (legacy && safeStorage.isEncryptionAvailable()) await this.saveAPIKey(legacy);
-        return legacy;
-      }
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
     }
   }
@@ -145,71 +176,28 @@ export class HistorySettingsStore {
 
   async removeAPIKey(): Promise<void> {
     await rm(this.apiKeyPath, { force: true });
-    await execFileAsync("/usr/bin/security", [
-      "delete-generic-password",
-      "-s",
-      legacyKeychainService,
-      "-a",
-      "api-key",
-    ]).catch(() => undefined);
   }
 
-  private async legacyDefault(key: string): Promise<string | undefined> {
-    try {
-      const { stdout } = await execFileAsync("/usr/bin/defaults", [
-        "read",
-        legacyDefaultsDomain,
-        key,
-      ]);
-      return stdout.trim() || undefined;
-    } catch {
-      return undefined;
-    }
+  async hasRecordingConsent(): Promise<boolean> {
+    const stored = (await readJSON(this.recordingConsentPath)) as
+      | { schemaVersion?: unknown; granted?: unknown }
+      | undefined;
+    return stored?.schemaVersion === 1 && stored.granted === true;
   }
 
-  private async loadLegacyPolicy(): Promise<Partial<ObservationPolicy> | undefined> {
-    const raw = await this.legacyDefault("observation-policy");
-    if (!raw) return undefined;
-    const hex = raw.match(/0x([0-9a-f\s]+)/i)?.[1] ?? raw.match(/<([0-9a-f\s]+)>/i)?.[1];
-    if (!hex) return undefined;
-    try {
-      return JSON.parse(
-        Buffer.from(hex.replace(/\s/g, ""), "hex").toString("utf8"),
-      ) as Partial<ObservationPolicy>;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async loadLegacyLLMSettings(): Promise<Partial<TimelineLLMSettings> | undefined> {
-    const [enabled, model, endpoint] = await Promise.all([
-      this.legacyDefault("timeline-llm-enabled"),
-      this.legacyDefault("timeline-llm-model"),
-      this.legacyDefault("timeline-llm-endpoint"),
-    ]);
-    if (!enabled && !model && !endpoint) return undefined;
-    return {
-      enabled: enabled === "1" || enabled?.toLowerCase() === "true",
-      memorySynthesisEnabled: false,
-      model,
-      endpoint,
-    };
-  }
-
-  private async loadLegacyAPIKey(): Promise<string | undefined> {
-    try {
-      const { stdout } = await execFileAsync("/usr/bin/security", [
-        "find-generic-password",
-        "-s",
-        legacyKeychainService,
-        "-a",
-        "api-key",
-        "-w",
-      ]);
-      return stdout.trim() || undefined;
-    } catch {
-      return undefined;
-    }
+  async grantRecordingConsent(date = new Date()): Promise<void> {
+    await atomicWrite(
+      this.recordingConsentPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          granted: true,
+          grantedAt: date.toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+    );
   }
 }
 

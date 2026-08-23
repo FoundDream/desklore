@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { normalizeHistoryEvent, normalizeMetadata } from "../src/main/history/types.ts";
 
 const secretPattern =
   /\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{12,}|\b(?:password|passwd|pwd|secret|token|api[_ -]?key)\b\s*[:=]\s*[^\s,;]+/gi;
@@ -10,10 +11,7 @@ const sensitiveSystemBundles = new Set([
   "com.apple.SecurityAgent",
   "com.apple.ScreenSaver.Engine",
 ]);
-const defaultExcludedBundles = new Set([
-  "com.github.Electron",
-  "com.ziwen.computer-history.desktop",
-]);
+const defaultExcludedBundles = new Set(["com.github.Electron", "com.desklore.desktop"]);
 
 function argumentsFrom(argv) {
   const values = new Map();
@@ -38,26 +36,30 @@ function objectFromCounts(map) {
 
 export function normalizedEvent(value, source) {
   const candidate = source === "candidate";
-  const application = candidate ? value.application : value.app;
+  const currentEvent = candidate ? normalizeHistoryEvent(value) : undefined;
+  const application = currentEvent?.application ?? value.app;
+  const captureReason = candidate
+    ? currentEvent?.captureReason
+    : (value.captureReason ?? value.capture_reason);
   return {
-    timestamp: typeof value.timestamp === "string" ? value.timestamp : "",
-    kind: typeof value.kind === "string" ? value.kind : "unknown",
-    app: application?.name ?? value.application?.name ?? value.app?.name ?? "<missing>",
-    bundleIdentifier:
-      application?.bundleIdentifier ??
-      application?.bundle_identifier ??
-      value.application?.bundleIdentifier ??
-      value.application?.bundle_identifier ??
-      value.app?.bundleIdentifier,
-    captureReason:
-      typeof (value.captureReason ?? value.capture_reason) === "string"
-        ? (value.captureReason ?? value.capture_reason)
+    timestamp:
+      typeof (currentEvent?.timestamp ?? value.timestamp) === "string"
+        ? (currentEvent?.timestamp ?? value.timestamp)
+        : "",
+    kind:
+      typeof (currentEvent?.kind ?? value.kind) === "string"
+        ? (currentEvent?.kind ?? value.kind)
+        : "unknown",
+    app: application?.name ?? "<missing>",
+    bundleIdentifier: application?.bundleIdentifier,
+    captureReason: typeof captureReason === "string" ? captureReason : undefined,
+    url:
+      typeof (currentEvent?.window?.url ?? value.window?.url) === "string"
+        ? (currentEvent?.window?.url ?? value.window?.url)
         : undefined,
-    url: typeof value.window?.url === "string" ? value.window.url : undefined,
-    axText:
-      (candidate ? value.accessibility?.text : value.ax?.text) ??
-      value.accessibility?.text ??
-      value.ax?.text,
+    axText: candidate
+      ? currentEvent?.accessibility?.text
+      : (value.ax?.text ?? value.accessibility?.text),
     raw: value,
   };
 }
@@ -78,13 +80,15 @@ async function readDataset(root, source) {
     let contents;
     try {
       [metadata, contents] = await Promise.all([
-        readFile(metadataPath, "utf8").then(JSON.parse),
+        readFile(metadataPath, "utf8")
+          .then(JSON.parse)
+          .then((value) => (source === "candidate" ? normalizeMetadata(value) : value)),
         readFile(eventsPath, "utf8"),
       ]);
     } catch {
       continue;
     }
-    const completed = Boolean(metadata.ended_at ?? metadata.endedAt);
+    const completed = Boolean(source === "candidate" ? metadata.endedAt : metadata.ended_at);
     const segmentEvents = [];
     for (const line of contents.split("\n")) {
       if (!line.trim()) continue;
@@ -98,6 +102,7 @@ async function readDataset(root, source) {
     segments.push({
       id: entry.name,
       completed,
+      startedAt: source === "candidate" ? metadata.startedAt : metadata.started_at,
       metadata,
       events: segmentEvents.length,
       bytes: Buffer.byteLength(contents),
@@ -459,7 +464,7 @@ function privacyMarkdown(candidate, reference) {
 
 function markdown(report) {
   return (
-    `# Computer History paired evaluation\n\nGenerated at ${report.generatedAt}.\n\n` +
+    `# DeskLore paired evaluation\n\nGenerated at ${report.generatedAt}.\n\n` +
     `Matching uses bundle identifier when available and app name as fallback. ` +
     `Excluded bundles: ${report.excludedBundles.join(", ") || "none"}.\n\n` +
     sliceMarkdown(
@@ -482,14 +487,14 @@ function completedSegmentIDs(dataset) {
 
 function segmentStartedAt(dataset, id) {
   const segment = dataset.segments.find((item) => item.id === id);
-  return Date.parse(segment?.metadata?.started_at ?? segment?.metadata?.startedAt ?? "");
+  return Date.parse(segment?.startedAt ?? "");
 }
 
 export async function run(argv = process.argv.slice(2)) {
   const args = argumentsFrom(argv);
   const candidateRoot = path.resolve(
     args.get("candidate") ??
-      path.join(os.homedir(), "Library/Application Support/ComputerHistoryDesktop"),
+      path.join(os.homedir(), "Library/Application Support/DeskLore/history"),
   );
   const referenceRootValue = args.get("reference") ?? process.env.CODEX_COMPUTER_HISTORY_ROOT;
   if (!referenceRootValue) {
@@ -553,16 +558,6 @@ export async function run(argv = process.argv.slice(2)) {
     recentSegmentLimit: recentSegmentCount,
     overall,
     recent,
-    // Compatibility with reports produced before the evaluator added slices.
-    commonCompletedSegments: overall.commonCompletedSegments,
-    candidate: overall.candidate,
-    reference: overall.reference,
-    matches: {
-      timestampKindApp: overall.matches.exact.matches,
-      alignment: overall.matches.exact.alignment,
-      tolerantTimestampKindApp: overall.matches.tolerant.matches,
-      tolerantF1: overall.matches.tolerant.f1,
-    },
   };
 
   const outputDirectory = path.resolve(args.get("output") ?? ".eval-data/history");

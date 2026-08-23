@@ -69,18 +69,30 @@ async function writeSegmentFixture(root, ocrText = "PRIVATE_VISUAL_SOURCE_TEXT")
   await Promise.all([
     writeFile(
       path.join(segmentDirectory, "metadata.json"),
-      JSON.stringify({ started_at: startedAt, ended_at: "2026-08-22T12:10:00.000Z" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        id: segmentID,
+        startedAt,
+        endedAt: "2026-08-22T12:10:00.000Z",
+        eventCount: 1,
+        suppressedEventCount: 0,
+        capturedEventCount: 1,
+        policyBlockedEventCount: 0,
+        deduplicatedEventCount: 0,
+        burstCoalescedEventCount: 0,
+        eventsFile: "events.jsonl",
+      }),
     ),
     writeFile(path.join(segmentDirectory, "events.jsonl"), `${JSON.stringify(source)}\n`),
     writeFile(
       path.join(segmentDirectory, "evidence.jsonl"),
       `${JSON.stringify({
-        schema_version: 1,
-        event_id: source.id,
-        event_timestamp: source.timestamp,
-        created_at: source.timestamp,
+        schemaVersion: 1,
+        eventID: source.id,
+        eventTimestamp: source.timestamp,
+        createdAt: source.timestamp,
         visual: source.evidence.visual,
-        ax_sufficiency: source.evidence.axSufficiency,
+        axSufficiency: source.evidence.axSufficiency,
       })}\n`,
     ),
   ]);

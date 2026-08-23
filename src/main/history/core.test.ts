@@ -12,7 +12,12 @@ import {
   rawActivityRecord,
   TimelineRepository,
 } from "./timeline.js";
-import type { HistoryEvent, TimelineDocumentRecord } from "./types.js";
+import {
+  normalizeHistoryEvent,
+  normalizeMetadata,
+  type HistoryEvent,
+  type TimelineDocumentRecord,
+} from "./types.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -29,7 +34,7 @@ function event(overrides: Partial<HistoryEvent> = {}, index = 0): HistoryEvent {
     timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, index)).toISOString(),
     kind: "window.changed",
     application: { bundleIdentifier: "com.example.editor", name: "Editor" },
-    window: { title: "Computer History implementation", isPrivateBrowsing: false },
+    window: { title: "DeskLore implementation", isPrivateBrowsing: false },
     ...overrides,
   };
 }
@@ -45,6 +50,25 @@ function llmResponse(draft: Record<string, unknown>): Response {
 }
 
 describe("TypeScript history core", () => {
+  it("rejects pre-DeskLore snake_case event and metadata shapes", () => {
+    expect(() =>
+      normalizeHistoryEvent({
+        id: "00000000-0000-4000-8000-000000000001",
+        timestamp: "2026-08-20T13:40:00.000Z",
+        kind: "window.changed",
+        application: { bundle_identifier: "com.example.editor", name: "Editor" },
+        window: { is_private_browsing: false },
+      }),
+    ).toThrow("Invalid history event");
+    expect(() =>
+      normalizeMetadata({
+        id: "2026-08-20T13-40-00Z",
+        started_at: "2026-08-20T13:40:00.000Z",
+        event_count: 0,
+      }),
+    ).toThrow("Invalid segment metadata");
+  });
+
   it("enforces observation policy and sanitizes secrets before persistence", () => {
     const input = event({
       target: { role: "AXTextField", placeholder: "API Key", value: "secret-value" },
@@ -318,7 +342,7 @@ describe("TypeScript history core", () => {
     ).toBeDefined();
   });
 
-  it("writes the legacy-compatible snake_case JSONL and ten-minute metadata", async () => {
+  it("writes the current camelCase JSONL and versioned ten-minute metadata", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
     temporaryDirectories.push(root);
     const store = new SegmentStore(makeStorageLayout(root));
@@ -328,6 +352,7 @@ describe("TypeScript history core", () => {
     const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
     expect(segmentIdentifier(new Date(input.timestamp))).toBe("2026-08-20T13-40-00Z");
     expect(closed?.metadata).toMatchObject({
+      schemaVersion: 1,
       eventCount: 1,
       suppressedEventCount: 0,
       capturedEventCount: 1,
@@ -336,9 +361,9 @@ describe("TypeScript history core", () => {
       burstCoalescedEventCount: 0,
     });
     const line = await readFile(closed!.eventsPath, "utf8");
-    expect(line).toContain('"bundle_identifier":"com.example.editor"');
-    expect(line).toContain('"is_private_browsing":false');
-    expect(line).toContain('"capture_reason":"mouse"');
+    expect(line).toContain('"bundleIdentifier":"com.example.editor"');
+    expect(line).toContain('"isPrivateBrowsing":false');
+    expect(line).toContain('"captureReason":"mouse"');
     await expect(store.readEvents(closed!)).resolves.toEqual([input]);
   });
 
@@ -403,7 +428,7 @@ describe("TypeScript history core", () => {
       sourceSegmentID: "2026-08-20T13-40-00Z",
       startedAt: "2026-08-20T13:40:00.000Z",
       endedAt: "2026-08-20T13:50:00.000Z",
-      title: "Computer History migration",
+      title: "DeskLore migration",
       description: "Migrated timeline generation and persistence from Swift into TypeScript.",
       claims: [],
       applications: [{ bundleIdentifier: "com.example.editor", name: "Editor" }],
@@ -488,7 +513,7 @@ describe("TypeScript history core", () => {
                   {
                     type: "output_text",
                     text: JSON.stringify({
-                      title: "继续迁移 Computer History",
+                      title: "继续迁移 DeskLore",
                       description: "完成了 TypeScript 迁移链路的实现工作。",
                       continuation_hint: "",
                       claims: [
@@ -541,7 +566,7 @@ describe("TypeScript history core", () => {
                   {
                     type: "output_text",
                     text: JSON.stringify({
-                      title: "查看 Computer History 迁移状态",
+                      title: "查看 DeskLore 迁移状态",
                       description: "查看了当前迁移状态，活动仍处于规划阶段。",
                       continuation_hint: "",
                       claims: [
@@ -641,7 +666,7 @@ describe("TypeScript history core", () => {
           );
         }
         return llmResponse({
-          title: "恢复 Computer History 的结构化活动摘要",
+          title: "恢复 DeskLore 的结构化活动摘要",
           description: "模型输出中断后缩小输入范围，并成功生成了结构化的活动时间线摘要。",
           continuation_hint: "",
           claims: [
@@ -694,7 +719,7 @@ describe("TypeScript history core", () => {
       {
         window: {
           title:
-            "refactor(repo): retire migrated server snapshot by FoundDream · Pull Request #409 · LowEntropyAI/AirJelly",
+            "refactor(repo): retire migrated server snapshot · Pull Request #409 · example/project",
           isPrivateBrowsing: false,
         },
       },
@@ -702,6 +727,7 @@ describe("TypeScript history core", () => {
     );
     const segment = {
       metadata: {
+        schemaVersion: 1 as const,
         id: "2026-08-20T13-40-00Z",
         startedAt: "2026-08-20T13:40:00.000Z",
         endedAt: "2026-08-20T13:50:00.000Z",

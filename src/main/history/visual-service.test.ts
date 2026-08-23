@@ -233,7 +233,7 @@ describe("visual evidence service", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(evidence.at(-1)).toMatchObject({
-      assessment_started_at: "2026-08-23T02:30:00.000Z",
+      assessmentStartedAt: "2026-08-23T02:30:00.000Z",
       visual: {
         status: "discarded",
         reason: "candidate_discarded_ax_enough",

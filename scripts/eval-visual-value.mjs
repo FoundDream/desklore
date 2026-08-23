@@ -8,12 +8,10 @@ import { sanitizeEvent } from "../src/main/history/policy.ts";
 import {
   normalizeEventEvidenceEnrichment,
   normalizeHistoryEvent,
+  normalizeMetadata,
 } from "../src/main/history/types.ts";
 
-const defaultInputRoot = path.join(
-  os.homedir(),
-  "Library/Application Support/ComputerHistoryDesktop",
-);
+const defaultInputRoot = path.join(os.homedir(), "Library/Application Support/DeskLore/history");
 const defaultEndpoint = "https://api.openai.com/v1/responses";
 const defaultModel = "gpt-5.6-luna";
 const richAXCharacterThreshold = 1_000;
@@ -202,13 +200,14 @@ async function readCases(root, options) {
     const directory = path.join(segmentsRoot, entry.name);
     let metadata;
     try {
-      metadata = JSON.parse(await readFile(path.join(directory, "metadata.json"), "utf8"));
+      metadata = normalizeMetadata(
+        JSON.parse(await readFile(path.join(directory, "metadata.json"), "utf8")),
+      );
     } catch {
       quality.unreadableSegmentMetadata += 1;
       continue;
     }
-    const startedAt = metadata.started_at ?? metadata.startedAt;
-    const endedAt = metadata.ended_at ?? metadata.endedAt;
+    const { startedAt, endedAt } = metadata;
     if (!endedAt) {
       quality.openSegmentsSkipped += 1;
       continue;
@@ -742,7 +741,7 @@ function comparisonMarkdown(title, comparison) {
 
 function markdown(report) {
   const selected = report.selection.selectedCases;
-  const heading = `# Computer History visual value benchmark\n\n`;
+  const heading = `# DeskLore visual value benchmark\n\n`;
   const common =
     `Generated at ${report.generatedAt}. Input: ${report.input.root}.\n\n` +
     `This benchmark keeps the existing visual-policy replay separate. It compares paired summaries over identical sampled event IDs: AX-only removes visual evidence, while AX + Visual retains persisted OCR and visual understanding. Raw pixels are never read.\n\n` +
@@ -753,7 +752,7 @@ function markdown(report) {
       heading +
       common +
       `## Manifest only\n\nNo model requests were made. To run the paired summary and blind judge with already-sanitized text evidence:\n\n` +
-      "```sh\nOPENAI_API_KEY=... npm run eval:visual-value -- --run-models\n```\n\n" +
+      "```sh\nOPENAI_API_KEY=... pnpm eval:visual-value -- --run-models\n```\n\n" +
       `## Interpretation limits\n\n` +
       report.limitations.map((item) => `- ${item}`).join("\n") +
       "\n"

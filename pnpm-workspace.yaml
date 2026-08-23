@@ -1,0 +1,5 @@
+allowBuilds:
+  electron-winstaller: false
+peerDependencyRules:
+  allowedVersions:
+    vite: 0.2.9

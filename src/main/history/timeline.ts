@@ -14,7 +14,7 @@ import type {
 } from "./types.js";
 
 const excludedBundleIdentifiers = new Set([
-  "com.ziwen.computer-history.desktop",
+  "com.desklore.desktop",
   "com.apple.loginwindow",
   "com.apple.ScreenSaver.Engine",
   "com.apple.SecurityAgent",
@@ -46,7 +46,7 @@ function isExcludedEvent(event: HistoryEvent): boolean {
   if (excludedBundleIdentifiers.has(event.application.bundleIdentifier)) return true;
   return (
     event.application.bundleIdentifier === "com.github.Electron" &&
-    event.window?.title === "Computer History"
+    event.window?.title === "DeskLore"
   );
 }
 

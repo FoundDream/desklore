@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import appIcon from "./assets/app-icon.png";
 import type {
   AgentSnapshot,
   DesktopSnapshot,
@@ -241,7 +242,9 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
 }
 
 function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
-  if (!desktop || desktop.connectionState === "connected") return null;
+  if (!desktop || !desktop.recordingConsentGranted || desktop.connectionState === "connected") {
+    return null;
+  }
   const labels = {
     starting: "正在启动本地采集器…",
     stopped: "本地采集器已停止",
@@ -259,6 +262,78 @@ function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
         <button onClick={() => void window.computerHistory.startAgent()}>重新启动</button>
       )}
     </div>
+  );
+}
+
+function RecordingConsentView({
+  run,
+  busy,
+  error,
+  onDismissError,
+}: {
+  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
+  busy: boolean;
+  error?: string;
+  onDismissError: () => void;
+}) {
+  return (
+    <section className="onboarding-screen">
+      <header className="onboarding-brand">
+        <img src={appIcon} alt="" />
+        <strong>DeskLore</strong>
+      </header>
+
+      {error && (
+        <div className="error-banner onboarding-error">
+          <strong>操作没有完成</strong>
+          <span>{error}</span>
+          <button onClick={onDismissError}>关闭</button>
+        </div>
+      )}
+
+      <div className="onboarding-layout">
+        <div className="onboarding-copy">
+          <span className="onboarding-kicker">只保存在这台 Mac</span>
+          <h1>
+            把今天做过的事，
+            <br />
+            留给未来的自己。
+          </h1>
+          <p>DeskLore 把应用、窗口、网页和交互语义整理成可以回看的时间线，不需要持续录屏。</p>
+          <div className="onboarding-actions">
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => void run(() => window.computerHistory.grantRecordingConsent())}
+            >
+              {busy ? "正在启动…" : "同意并开始记录"}
+            </button>
+            <small>之后可以随时暂停、删除单段历史或清空全部数据。</small>
+          </div>
+        </div>
+
+        <div className="onboarding-boundary" aria-label="记录边界">
+          <span className="onboarding-boundary-title">记录边界</span>
+          <div className="onboarding-fact">
+            <span>
+              <i className="recording" />
+              会记录
+            </span>
+            <p>应用名、窗口标题、网页 URL、交互与辅助功能语义</p>
+          </div>
+          <div className="onboarding-fact">
+            <span>
+              <i />
+              默认关闭
+            </span>
+            <p>窗口截图、外部模型与遥测</p>
+          </div>
+          <p className="onboarding-privacy-note">
+            敏感系统界面、隐私浏览和密码字段会被拦截。未同意前，采集器不会启动。
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -281,8 +356,7 @@ function Sidebar({
           <i />
         </span>
         <div>
-          <strong>Computer</strong>
-          <strong>History</strong>
+          <strong>DeskLore</strong>
         </div>
       </div>
       <nav>
@@ -681,7 +755,7 @@ function MemoryView({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="例如：Computer History 打包最后是什么状态？"
+            placeholder="例如：DeskLore 打包最后是什么状态？"
             maxLength={500}
           />
           <button disabled={searching}>{searching ? "检索中" : "检索"}</button>
@@ -878,6 +952,7 @@ function SettingsView({
   const [understandingMode, setUnderstandingMode] = useState<"off" | "ocr" | "luna">(
     agent?.visual.understandingMode ?? "off",
   );
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   useEffect(() => {
     if (!agent) return;
     setEnabled(agent.llm.enabled);
@@ -1109,6 +1184,27 @@ function SettingsView({
             )}
           </div>
         </div>
+        <div className="settings-divider" />
+        <div className="settings-section observation">
+          <div className="settings-copy">
+            <h2>删除本地历史</h2>
+            <span>清空原始事件、时间线、长期记忆和视觉证据，并暂停记录。</span>
+          </div>
+          <button
+            className={confirmClearHistory ? "danger-confirm" : "text-danger"}
+            onBlur={() => setConfirmClearHistory(false)}
+            onClick={() => {
+              if (confirmClearHistory) {
+                setConfirmClearHistory(false);
+                void run(() => window.computerHistory.clearHistory());
+              } else {
+                setConfirmClearHistory(true);
+              }
+            }}
+          >
+            {confirmClearHistory ? "确认清空并暂停" : "清空全部历史"}
+          </button>
+        </div>
       </section>
     </>
   );
@@ -1147,7 +1243,9 @@ export function App() {
   }, []);
 
   const toggleRecording = (): void => {
-    if (desktop?.connectionState !== "connected") {
+    if (!desktop?.recordingConsentGranted) {
+      void run(() => window.computerHistory.grantRecordingConsent());
+    } else if (desktop.connectionState !== "connected") {
       void run(() => window.computerHistory.startAgent());
     } else if (desktop.agent?.recorderState === "running") {
       void run(() => window.computerHistory.pause());
@@ -1186,6 +1284,33 @@ export function App() {
     [desktop?.agent?.documents],
   );
 
+  if (!desktop) {
+    return (
+      <div className="startup-screen">
+        {error && (
+          <div className="error-banner">
+            <strong>DeskLore 无法启动</strong>
+            <span>{error}</span>
+            <button onClick={() => setError(undefined)}>关闭</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!desktop.recordingConsentGranted) {
+    return (
+      <div className={`onboarding-root ${busy ? "busy" : ""}`}>
+        <RecordingConsentView
+          run={run}
+          busy={busy}
+          error={error}
+          onDismissError={() => setError(undefined)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`app-shell ${busy ? "busy" : ""}`}>
       <Sidebar
@@ -1203,7 +1328,7 @@ export function App() {
             <button onClick={() => setError(undefined)}>关闭</button>
           </div>
         )}
-        {view === "timeline" && (
+        {view === "timeline" ? (
           <TimelineView
             agent={desktop?.agent}
             run={run}
@@ -1211,12 +1336,13 @@ export function App() {
             referencedDocumentIDs={referencedDocumentIDs}
             onSelectDate={selectTimelineDate}
           />
-        )}
-        {view === "memory" && (
+        ) : view === "memory" ? (
           <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
+        ) : view === "health" ? (
+          <HealthView agent={desktop?.agent} run={run} />
+        ) : (
+          <SettingsView agent={desktop?.agent} run={run} />
         )}
-        {view === "health" && <HealthView agent={desktop?.agent} run={run} />}
-        {view === "settings" && <SettingsView agent={desktop?.agent} run={run} />}
       </main>
     </div>
   );

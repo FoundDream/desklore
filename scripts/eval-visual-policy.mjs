@@ -7,11 +7,13 @@ import {
   VisualCapturePolicyScheduler,
   visualCaptureLimits,
 } from "../src/main/history/visual-policy.ts";
+import {
+  normalizeEventEvidenceEnrichment,
+  normalizeHistoryEvent,
+  normalizeMetadata,
+} from "../src/main/history/types.ts";
 
-const defaultExcludedBundles = new Set([
-  "com.github.Electron",
-  "com.ziwen.computer-history.desktop",
-]);
+const defaultExcludedBundles = new Set(["com.github.Electron", "com.desklore.desktop"]);
 const axDecisions = new Set(["enough", "needs_visual", "uncertain"]);
 
 function argumentsFrom(argv) {
@@ -85,16 +87,14 @@ function windowIdentity(applicationKey, runtimeIdentifier) {
 
 function normalizedTraceRecord(event, evidence, segmentID) {
   const eventID = string(event.id)?.toLowerCase();
-  const timestamp = string(evidence.event_timestamp ?? evidence.eventTimestamp ?? event.timestamp);
+  const timestamp = string(evidence.eventTimestamp ?? event.timestamp);
   const timestampMilliseconds = timestamp ? Date.parse(timestamp) : Number.NaN;
-  const application = event.application ?? event.app ?? {};
-  const bundleIdentifier = string(application.bundle_identifier ?? application.bundleIdentifier);
+  const application = event.application;
+  const bundleIdentifier = string(application.bundleIdentifier);
   const applicationName = string(application.name) ?? "<missing>";
   const applicationKey = bundleIdentifier ?? applicationName;
-  const runtimeIdentifier = number(
-    event.window?.runtime_identifier ?? event.window?.runtimeIdentifier,
-  );
-  const ax = evidence.ax_sufficiency ?? evidence.axSufficiency;
+  const runtimeIdentifier = number(event.window?.runtimeIdentifier);
+  const ax = evidence.axSufficiency;
   const decision = string(ax?.decision);
   if (!eventID || !Number.isFinite(timestampMilliseconds) || !axDecisions.has(decision)) {
     return undefined;
@@ -103,7 +103,7 @@ function normalizedTraceRecord(event, evidence, segmentID) {
   const identity = windowIdentity(applicationKey, runtimeIdentifier);
   const visualStatus = string(visual?.status);
   const visualReason = string(visual?.reason);
-  const ocrText = string(visual?.ocr_text ?? visual?.ocrText);
+  const ocrText = string(visual?.ocrText);
   const understanding = string(visual?.understanding);
   const privacy = string(visual?.privacy);
   const observedReuse = visualReason === "visual_reused";
@@ -112,11 +112,9 @@ function normalizedTraceRecord(event, evidence, segmentID) {
     !observedReuse &&
     ((privacy === "redacted_remote" && understanding !== undefined) ||
       visualReason?.startsWith("visual_model_") === true);
-  const axJudgedAt = string(ax?.judged_at ?? ax?.judgedAt);
+  const axJudgedAt = string(ax?.judgedAt);
   const parsedAxJudgedAtMilliseconds = axJudgedAt ? Date.parse(axJudgedAt) : Number.NaN;
-  const assessmentStartedAt = string(
-    evidence.assessment_started_at ?? evidence.assessmentStartedAt,
-  );
+  const assessmentStartedAt = string(evidence.assessmentStartedAt);
   const parsedAssessmentStartedAtMilliseconds = assessmentStartedAt
     ? Date.parse(assessmentStartedAt)
     : Number.NaN;
@@ -187,6 +185,7 @@ async function readTrace(root, includeOpen) {
   let openSegmentsSkipped = 0;
   let evidenceRows = 0;
   let malformedLines = 0;
+  let invalidEventRows = 0;
   let unmatchedEvidenceRows = 0;
   let invalidEvidenceRows = 0;
 
@@ -195,11 +194,13 @@ async function readTrace(root, includeOpen) {
     const directory = path.join(segmentsRoot, entry.name);
     let metadata;
     try {
-      metadata = JSON.parse(await readFile(path.join(directory, "metadata.json"), "utf8"));
+      metadata = normalizeMetadata(
+        JSON.parse(await readFile(path.join(directory, "metadata.json"), "utf8")),
+      );
     } catch {
       continue;
     }
-    const completed = Boolean(metadata.ended_at ?? metadata.endedAt);
+    const completed = Boolean(metadata.endedAt);
     if (!completed && !includeOpen) {
       openSegmentsSkipped += 1;
       continue;
@@ -213,23 +214,30 @@ async function readTrace(root, includeOpen) {
     if (evidenceFile.values.length === 0) continue;
     segmentsRead += 1;
     evidenceRows += evidenceFile.values.length;
-    const eventsByID = new Map(
-      eventsFile.values
-        .map((event) => [string(event.id)?.toLowerCase(), event])
-        .filter(([id]) => id !== undefined),
-    );
+    const eventsByID = new Map();
+    for (const raw of eventsFile.values) {
+      try {
+        const event = normalizeHistoryEvent(raw);
+        eventsByID.set(event.id.toLowerCase(), event);
+      } catch {
+        invalidEventRows += 1;
+      }
+    }
     const evidenceByID = new Map();
-    for (const evidence of evidenceFile.values) {
-      const eventID = string(evidence.event_id ?? evidence.eventID)?.toLowerCase();
-      if (!eventID) {
+    for (const raw of evidenceFile.values) {
+      let evidence;
+      try {
+        evidence = normalizeEventEvidenceEnrichment(raw);
+      } catch {
         invalidEvidenceRows += 1;
         continue;
       }
+      const eventID = evidence.eventID;
       const previous = evidenceByID.get(eventID) ?? {};
       evidenceByID.set(eventID, {
         ...previous,
         ...evidence,
-        ax_sufficiency: evidence.ax_sufficiency ?? previous.ax_sufficiency,
+        axSufficiency: evidence.axSufficiency ?? previous.axSufficiency,
         visual: evidence.visual ?? previous.visual,
       });
     }
@@ -252,6 +260,7 @@ async function readTrace(root, includeOpen) {
       openSegmentsSkipped,
       evidenceRows,
       malformedLines,
+      invalidEventRows,
       unmatchedEvidenceRows,
       invalidEvidenceRows,
     },
@@ -627,7 +636,7 @@ function markdown(report) {
     )
     .join("\n");
   return (
-    `# Computer History visual policy benchmark\n\n` +
+    `# DeskLore visual policy benchmark\n\n` +
     `Generated at ${report.generatedAt}. This is a same-input policy replay: it does not take screenshots or call a model.\n\n` +
     `Input: ${report.input.root}. Completed evidence-bearing segments: ${report.dataQuality.segmentsRead}; ` +
     `open segments skipped: ${report.dataQuality.openSegmentsSkipped}.\n\n` +
@@ -674,8 +683,7 @@ function markdown(report) {
 export async function run(argv = process.argv.slice(2)) {
   const args = argumentsFrom(argv);
   const inputRoot = path.resolve(
-    args.get("input") ??
-      path.join(os.homedir(), "Library/Application Support/ComputerHistoryDesktop"),
+    args.get("input") ?? path.join(os.homedir(), "Library/Application Support/DeskLore/history"),
   );
   const outputDirectory = path.resolve(args.get("output") ?? ".eval-data/visual-policy");
   const includeOpen = args.get("include-open") === "true";

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import type { AgentClient } from "../agent-client.js";
 import { HistoryService } from "./service.js";
 import { HistorySettingsStore } from "./settings.js";
 import { ensureStorage, makeStorageLayout } from "./storage.js";
+import type { TimelineDocumentRecord } from "./types.js";
 
 vi.mock("electron", () => ({
   safeStorage: {
@@ -27,8 +28,94 @@ afterEach(async () => {
 });
 
 describe("History settings", () => {
+  it("cascades timeline deletion to its source segment before refreshing memory", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-delete-"));
+    temporaryDirectories.push(root);
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "stopped" as const }),
+    }) as unknown as AgentClient;
+    const service = new HistoryService(collector, root);
+    const document: TimelineDocumentRecord = {
+      schemaVersion: 4,
+      id: "timeline-document",
+      sourceSegmentID: "2026-08-23T00-00-00Z",
+      startedAt: "2026-08-23T00:00:00.000Z",
+      endedAt: "2026-08-23T00:10:00.000Z",
+      title: "Synthetic history",
+      description: "Synthetic history for cascade deletion.",
+      claims: [],
+      applications: [],
+      evidenceEventIDs: [],
+      generator: { type: "rules", version: 1 },
+      createdAt: "2026-08-23T00:10:01.000Z",
+      body: "Synthetic history",
+      filePath: path.join(root, "timeline", "synthetic.md"),
+    };
+    const internals = service as unknown as {
+      documents: TimelineDocumentRecord[];
+      segments: { deleteSegment(id: string): Promise<boolean> };
+      timeline: { delete(value: TimelineDocumentRecord): Promise<void> };
+      refreshDocuments(): Promise<void>;
+    };
+    internals.documents = [document];
+    const deleteSegment = vi.spyOn(internals.segments, "deleteSegment").mockResolvedValue(true);
+    const deleteTimeline = vi.spyOn(internals.timeline, "delete").mockResolvedValue();
+    const refreshDocuments = vi.spyOn(internals, "refreshDocuments").mockResolvedValue();
+
+    await service.deleteDocument(document.id);
+
+    expect(deleteSegment).toHaveBeenCalledWith(document.sourceSegmentID);
+    expect(deleteTimeline).toHaveBeenCalledWith(document);
+    expect(deleteSegment.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteTimeline.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(refreshDocuments).toHaveBeenCalledOnce();
+  });
+
+  it("does not start the collector before recording consent is stored", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-consent-"));
+    temporaryDirectories.push(root);
+    const start = vi.fn(async () => ({ connectionState: "stopped" as const }));
+    const stop = vi.fn(async () => ({ connectionState: "stopped" as const }));
+    const terminate = vi.fn();
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "stopped" as const }),
+      start,
+      stop,
+      terminate,
+    }) as unknown as AgentClient;
+    const service = new HistoryService(collector, root);
+
+    await expect(service.start()).resolves.toMatchObject({
+      recordingConsentGranted: false,
+      connectionState: "stopped",
+    });
+    expect(start).not.toHaveBeenCalled();
+
+    await expect(service.grantRecordingConsent()).resolves.toMatchObject({
+      recordingConsentGranted: true,
+    });
+    expect(start).toHaveBeenCalledOnce();
+    await service.stop();
+    expect(stop).toHaveBeenCalledOnce();
+    service.terminate();
+    expect(terminate).toHaveBeenCalledOnce();
+  });
+
+  it("persists explicit recording consent", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-consent-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const settingsStore = new HistorySettingsStore(layout);
+
+    await expect(settingsStore.hasRecordingConsent()).resolves.toBe(false);
+    await settingsStore.grantRecordingConsent(new Date("2026-08-23T00:00:00.000Z"));
+    await expect(settingsStore.hasRecordingConsent()).resolves.toBe(true);
+  });
+
   it("keeps visual capabilities independently disabled by default and persists opt-in", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-settings-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-visual-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     await ensureStorage(layout);
@@ -51,8 +138,23 @@ describe("History settings", () => {
     });
   });
 
+  it("rejects unversioned settings instead of migrating them", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-unversioned-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    await writeFile(
+      path.join(layout.state, "visual-settings.json"),
+      JSON.stringify({ axJudge: "rules", captureMode: "off", understandingMode: "off" }),
+    );
+
+    await expect(new HistorySettingsStore(layout).loadVisualSettings()).rejects.toThrow(
+      "Unsupported visual settings schema",
+    );
+  });
+
   it("persists the long-term-memory synthesis toggle independently", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-settings-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     await ensureStorage(layout);
