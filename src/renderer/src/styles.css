@@ -1,6 +1,6 @@
 :root {
-  color: #18181b;
-  background: #fafafa;
+  color: #303033;
+  background: #f1f1f1;
   font-family:
     Inter,
     ui-sans-serif,
@@ -11,15 +11,19 @@
     "Microsoft YaHei",
     sans-serif;
   font-synthesis: none;
-  --background: #fafafa;
+  --background: #f1f1f1;
   --surface: #ffffff;
-  --sidebar: #f4f4f5;
-  --foreground: #18181b;
-  --muted: #71717a;
-  --muted-soft: #a1a1aa;
-  --border: #e4e4e7;
-  --accent: #f1f1f3;
-  --accent-strong: #e7e7ea;
+  --sidebar: #f6f6f6;
+  --foreground: #303033;
+  --muted: #6f7075;
+  --muted-soft: #9c9da2;
+  --border: #e2e2e4;
+  --border-soft: #ececee;
+  --accent: #f3f3f4;
+  --accent-strong: #e9e9eb;
+  --selection: #eaf3fc;
+  --selection-strong: #dcecfb;
+  --selection-foreground: #477dab;
   --primary: #18181b;
   --success: #15803d;
   --success-bg: #f0fdf4;
@@ -70,7 +74,7 @@ svg {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 228px minmax(0, 1fr);
   height: 100vh;
   background: var(--background);
 }
@@ -289,9 +293,8 @@ svg {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 42px 8px 10px;
+  padding: 44px 10px 12px;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
 }
 
 .brand {
@@ -335,9 +338,9 @@ nav button {
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 40px;
-  padding: 0 10px;
-  border: 0;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid transparent;
   border-radius: 8px;
   color: #27272a;
   background: transparent;
@@ -351,9 +354,10 @@ nav button:hover {
 }
 
 nav button.active {
-  color: var(--foreground);
-  background: var(--accent-strong);
-  box-shadow: inset 0 0 0 1px rgba(24, 24, 27, 0.04);
+  border-color: rgba(71, 125, 171, 0.08);
+  color: var(--selection-foreground);
+  background: var(--selection);
+  box-shadow: none;
 }
 
 nav button svg {
@@ -379,6 +383,10 @@ nav button b {
   font-size: 9px;
   font-weight: 550;
   text-align: center;
+}
+
+nav button.active b {
+  color: var(--selection-foreground);
 }
 
 nav button > i {
@@ -457,8 +465,11 @@ nav button > i.warn {
 .content {
   position: relative;
   min-width: 0;
+  margin: 8px 8px 8px 0;
   overflow: auto;
-  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
 }
 
 .content-header {
@@ -466,24 +477,24 @@ nav button > i.warn {
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  width: min(920px, calc(100% - 64px));
-  margin: 0 auto;
-  padding: 58px 0 28px;
+  width: 100%;
+  min-height: 112px;
+  padding: 44px 22px 20px;
 }
 
 .section-kicker {
   display: block;
   margin-bottom: 7px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0;
 }
 
 .content-header h1 {
   margin: 0;
-  font-size: 27px;
-  font-weight: 650;
+  font-size: 22px;
+  font-weight: 670;
   line-height: 1.2;
   letter-spacing: -0.025em;
 }
@@ -817,10 +828,15 @@ button.primary:hover {
 
 .archive {
   display: grid;
-  gap: 24px;
-  width: min(920px, calc(100% - 64px));
-  margin: 0 auto;
-  padding: 0 0 72px;
+  width: 100%;
+  padding: 0 16px 20px;
+}
+
+.day-group {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
 }
 
 .day-switcher {
@@ -887,43 +903,43 @@ button.primary:hover {
 
 .timeline-entry {
   display: grid;
-  grid-template-columns: 68px 16px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
   background: var(--surface);
+  transition: background 120ms ease;
 }
 
 .timeline-entry.referenced {
-  background: #fcfcfc;
-  box-shadow: inset 2px 0 0 var(--muted);
+  background: var(--selection);
+  box-shadow: inset 3px 0 0 var(--selection-foreground);
 }
 
 .timeline-entry + .timeline-entry {
-  margin-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.timeline-entry:hover,
+.timeline-entry:focus-within {
+  background: #f9f9fa;
+}
+
+.timeline-entry.referenced:hover,
+.timeline-entry.referenced:focus-within {
+  background: var(--selection-strong);
 }
 
 .timeline-entry > time {
-  align-self: baseline;
+  padding: 21px 12px 0 18px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
-  text-align: right;
-}
-
-.timeline-rail {
-  position: relative;
-}
-
-.timeline-rail::after {
-  display: none;
+  text-align: left;
 }
 
 .entry-body {
-  align-self: baseline;
   min-width: 0;
-  padding: 17px 18px 16px 6px;
+  padding: 17px 18px 15px 0;
 }
 
 .entry-title {
@@ -936,19 +952,19 @@ button.primary:hover {
 .entry-title h3 {
   overflow: hidden;
   margin: 0;
-  font-size: 13px;
-  font-weight: 620;
+  font-size: 14px;
+  font-weight: 640;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .entry-body > p {
-  max-width: 700px;
+  max-width: 760px;
   margin: 6px 0 13px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.58;
 }
 
 .summary-error {
@@ -992,7 +1008,7 @@ button.primary:hover {
   border-radius: 5px;
   color: #52525b;
   background: #fafafa;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .app-token-icon {
@@ -1019,12 +1035,12 @@ button.primary:hover {
 
 .app-overflow {
   color: var(--muted-soft);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .duration {
   color: var(--muted-soft);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .entry-actions {
@@ -1047,7 +1063,7 @@ button.primary:hover {
   border-radius: 5px;
   color: #52525b;
   background: transparent;
-  font-size: 9px;
+  font-size: 10px;
   cursor: pointer;
 }
 

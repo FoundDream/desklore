@@ -486,14 +486,12 @@ function Sidebar({
   );
 }
 
-function TimelineCard({
+function ActivityRow({
   document,
-  isLast,
   referenced,
   onAction,
 }: {
   document: TimelineDocument;
-  isLast: boolean;
   referenced: boolean;
   onAction: (action: "open" | "delete", id: string) => Promise<void>;
 }) {
@@ -502,7 +500,6 @@ function TimelineCard({
   return (
     <article className={`timeline-entry ${referenced ? "referenced" : ""}`}>
       <time>{timeLabel(document.startedAt, locale)}</time>
-      <div className={`timeline-rail ${isLast ? "last" : ""}`} />
       <div className="entry-body">
         <div className="entry-title">
           <h3>{document.title}</h3>
@@ -686,11 +683,10 @@ function TimelineView({
           </div>
         ) : selectedDay ? (
           <div className="day-group" key={selectedDay.date}>
-            {selectedDay.documents.map((document, index) => (
-              <TimelineCard
+            {selectedDay.documents.map((document) => (
+              <ActivityRow
                 key={document.id}
                 document={document}
-                isLast={index === selectedDay.documents.length - 1}
                 referenced={referencedDocuments.has(document.id)}
                 onAction={action}
               />
