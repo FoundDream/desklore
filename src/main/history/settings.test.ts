@@ -150,7 +150,7 @@ describe("History settings", () => {
     });
   });
 
-  it("rejects unversioned settings instead of migrating them", async () => {
+  it("rejects unversioned visual settings instead of migrating them", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-unversioned-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
@@ -163,6 +163,36 @@ describe("History settings", () => {
     await expect(new HistorySettingsStore(layout).loadVisualSettings()).rejects.toThrow(
       "Unsupported visual settings schema",
     );
+  });
+
+  it("migrates the known unversioned LLM settings shape", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-legacy-llm-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    await writeFile(
+      path.join(layout.state, "llm-settings.json"),
+      JSON.stringify({
+        enabled: false,
+        memorySynthesisEnabled: true,
+        model: "gpt-5.6-luna",
+        endpoint: "https://api.openai.com/v1/responses",
+      }),
+    );
+
+    const settingsStore = new HistorySettingsStore(layout);
+    await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
+      enabled: false,
+      memorySynthesisEnabled: true,
+      model: "gpt-5.6-luna",
+      endpoint: "https://api.openai.com/v1/responses",
+    });
+    await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
+      enabled: false,
+      memorySynthesisEnabled: true,
+      model: "gpt-5.6-luna",
+      endpoint: "https://api.openai.com/v1/responses",
+    });
   });
 
   it("persists the long-term-memory synthesis toggle independently", async () => {

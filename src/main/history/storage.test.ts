@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   clearHistoryData,
   ensureStorage,
+  latestHistoryArchive,
   makeStorageLayout,
+  pruneHistoryArchives,
+  restoreHistoryData,
   SegmentStore,
   segmentIdentifier,
 } from "./storage.js";
@@ -87,7 +90,7 @@ describe("history storage deletion and retention", () => {
     expect(stored.visual).toBeUndefined();
   });
 
-  it("clears history directories without deleting settings", async () => {
+  it("moves cleared history into a recoverable archive without deleting settings", async () => {
     const { root, store, event } = await fixture();
     const layout = makeStorageLayout(root);
     await store.append(event);
@@ -95,9 +98,20 @@ describe("history storage deletion and retention", () => {
     await writeFile(path.join(layout.memoryDay, "example.md"), "memory", { mode: 0o600 });
     await writeFile(path.join(layout.state, "recording-consent.json"), "{}", { mode: 0o600 });
 
-    await clearHistoryData(layout);
+    const archive = await clearHistoryData(
+      layout,
+      { documentCount: 1, memoryCount: 1 },
+      new Date("2026-08-24T08:09:10.123Z"),
+    );
     store.reset();
 
+    expect(archive).toEqual({
+      id: "2026-08-24T08-09-10-123Z",
+      deletedAt: "2026-08-24T08:09:10.123Z",
+      documentCount: 1,
+      memoryCount: 1,
+    });
+    await expect(latestHistoryArchive(layout)).resolves.toEqual(archive);
     await expect(stat(path.join(layout.state, "recording-consent.json"))).resolves.toBeDefined();
     await expect(stat(path.join(layout.timeline, "example.md"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -106,7 +120,43 @@ describe("history storage deletion and retention", () => {
       code: "ENOENT",
     });
     await expect(
+      stat(path.join(layout.trash, archive.id, "timeline", "example.md")),
+    ).resolves.toBeDefined();
+
+    await expect(restoreHistoryData(layout, archive.id)).resolves.toEqual(archive);
+    await expect(readFile(path.join(layout.timeline, "example.md"), "utf8")).resolves.toBe(
+      "timeline",
+    );
+    await expect(readFile(path.join(layout.memoryDay, "example.md"), "utf8")).resolves.toBe(
+      "memory",
+    );
+    await expect(latestHistoryArchive(layout)).resolves.toBeUndefined();
+  });
+
+  it("refuses to replace new history while restoring", async () => {
+    const { root, store, event } = await fixture();
+    const layout = makeStorageLayout(root);
+    await store.append(event);
+    const archive = await clearHistoryData(layout);
+    store.reset();
+    await expect(
       store.append({ ...event, id: "33333333-3333-4333-8333-333333333333" }),
     ).resolves.toBeUndefined();
+    await expect(restoreHistoryData(layout, archive.id)).rejects.toThrow("New history exists");
+  });
+
+  it("prunes only recovery archives older than the retention cutoff", async () => {
+    const { root } = await fixture();
+    const layout = makeStorageLayout(root);
+    const oldArchive = await clearHistoryData(layout, {}, new Date("2026-06-01T00:00:00.000Z"));
+    const recentArchive = await clearHistoryData(layout, {}, new Date("2026-08-20T00:00:00.000Z"));
+
+    await expect(pruneHistoryArchives(layout, new Date("2026-08-01T00:00:00.000Z"))).resolves.toBe(
+      1,
+    );
+    await expect(stat(path.join(layout.trash, oldArchive.id))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(latestHistoryArchive(layout)).resolves.toEqual(recentArchive);
   });
 });

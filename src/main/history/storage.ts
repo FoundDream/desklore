@@ -34,7 +34,18 @@ export interface StorageLayout {
   memorySixHour: string;
   memoryDay: string;
   state: string;
+  trash: string;
 }
+
+export interface HistoryArchive {
+  id: string;
+  deletedAt: string;
+  documentCount: number;
+  memoryCount: number;
+}
+
+const historyArchiveSchemaVersion = 1;
+const historyArchiveMetadataFile = "archive.json";
 
 export function makeStorageLayout(root: string): StorageLayout {
   const memory = path.join(root, "memory");
@@ -46,6 +57,7 @@ export function makeStorageLayout(root: string): StorageLayout {
     memorySixHour: path.join(memory, "6h"),
     memoryDay: path.join(memory, "day"),
     state: path.join(root, "state"),
+    trash: path.join(root, ".trash"),
   };
 }
 
@@ -59,6 +71,7 @@ export async function ensureStorage(layout: StorageLayout): Promise<void> {
       layout.memorySixHour,
       layout.memoryDay,
       layout.state,
+      layout.trash,
     ].map(async (directory) => {
       await mkdir(directory, { recursive: true, mode: 0o700 });
       await chmod(directory, 0o700);
@@ -86,15 +99,202 @@ export async function hardenStoragePermissions(layout: StorageLayout): Promise<v
   }
 }
 
-export async function clearHistoryData(layout: StorageLayout): Promise<void> {
-  for (const directory of [layout.segments, layout.timeline, layout.memory]) {
-    const normalized = path.normalize(directory);
-    if (path.dirname(normalized) !== path.normalize(layout.root)) {
-      throw new Error("History directory is outside the storage root");
-    }
-    await rm(normalized, { recursive: true, force: true });
+function assertApplicationOwnedHistoryDirectory(layout: StorageLayout, directory: string): string {
+  const normalized = path.normalize(directory);
+  if (path.dirname(normalized) !== path.normalize(layout.root)) {
+    throw new Error("History directory is outside the storage root");
   }
+  return normalized;
+}
+
+function archiveDirectory(layout: StorageLayout, id: string): string {
+  if (!id || path.basename(id) !== id || !/^[a-zA-Z0-9-]+$/.test(id)) {
+    throw new Error("Invalid history archive identifier");
+  }
+  const directory = path.join(layout.trash, id);
+  if (path.dirname(directory) !== path.normalize(layout.trash)) {
+    throw new Error("History archive is outside the trash directory");
+  }
+  return directory;
+}
+
+function normalizeHistoryArchive(value: unknown): HistoryArchive | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const stored = value as Partial<HistoryArchive> & { schemaVersion?: unknown };
+  if (
+    stored.schemaVersion !== historyArchiveSchemaVersion ||
+    typeof stored.id !== "string" ||
+    path.basename(stored.id) !== stored.id ||
+    !/^[a-zA-Z0-9-]+$/.test(stored.id) ||
+    typeof stored.deletedAt !== "string" ||
+    !Number.isFinite(Date.parse(stored.deletedAt)) ||
+    !Number.isInteger(stored.documentCount) ||
+    (stored.documentCount ?? -1) < 0 ||
+    !Number.isInteger(stored.memoryCount) ||
+    (stored.memoryCount ?? -1) < 0
+  ) {
+    return undefined;
+  }
+  return {
+    id: stored.id,
+    deletedAt: stored.deletedAt,
+    documentCount: stored.documentCount,
+    memoryCount: stored.memoryCount,
+  } as HistoryArchive;
+}
+
+async function readHistoryArchive(
+  layout: StorageLayout,
+  id: string,
+): Promise<HistoryArchive | undefined> {
+  const directory = archiveDirectory(layout, id);
+  try {
+    const stats = await lstat(directory);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) return undefined;
+    const stored = normalizeHistoryArchive(
+      JSON.parse(await readFile(path.join(directory, historyArchiveMetadataFile), "utf8")),
+    );
+    return stored?.id === id ? stored : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return undefined;
+  }
+}
+
+export async function latestHistoryArchive(
+  layout: StorageLayout,
+): Promise<HistoryArchive | undefined> {
   await ensureStorage(layout);
+  const entries = await readdir(layout.trash, { withFileTypes: true });
+  const archives = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .map((entry) => readHistoryArchive(layout, entry.name)),
+  );
+  return archives
+    .filter((archive): archive is HistoryArchive => archive !== undefined)
+    .sort((lhs, rhs) => Date.parse(rhs.deletedAt) - Date.parse(lhs.deletedAt))[0];
+}
+
+export async function clearHistoryData(
+  layout: StorageLayout,
+  counts: { documentCount?: number; memoryCount?: number } = {},
+  date = new Date(),
+): Promise<HistoryArchive> {
+  await ensureStorage(layout);
+  const deletedAt = date.toISOString();
+  const baseID = deletedAt.replace(/[:.]/g, "-");
+  let id = baseID;
+  let directory = archiveDirectory(layout, id);
+  for (let suffix = 1; ; suffix += 1) {
+    try {
+      await mkdir(directory, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      id = `${baseID}-${suffix}`;
+      directory = archiveDirectory(layout, id);
+    }
+  }
+
+  const archive: HistoryArchive = {
+    id,
+    deletedAt,
+    documentCount: Math.max(0, counts.documentCount ?? 0),
+    memoryCount: Math.max(0, counts.memoryCount ?? 0),
+  };
+  const moved: Array<{ source: string; destination: string }> = [];
+  try {
+    for (const source of [layout.segments, layout.timeline, layout.memory]) {
+      const normalized = assertApplicationOwnedHistoryDirectory(layout, source);
+      const stats = await lstat(normalized);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error("History path is not an application-owned directory");
+      }
+      const destination = path.join(directory, path.basename(normalized));
+      await rename(normalized, destination);
+      moved.push({ source: normalized, destination });
+    }
+    await writeFile(
+      path.join(directory, historyArchiveMetadataFile),
+      `${JSON.stringify({ schemaVersion: historyArchiveSchemaVersion, ...archive }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    await ensureStorage(layout);
+    return archive;
+  } catch (error) {
+    for (const item of moved.reverse()) {
+      await rm(item.source, { recursive: true, force: true }).catch(() => undefined);
+      await rename(item.destination, item.source).catch(() => undefined);
+    }
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    await ensureStorage(layout).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function historyDirectoriesAreEmpty(layout: StorageLayout): Promise<boolean> {
+  if ((await readdir(layout.segments)).length || (await readdir(layout.timeline)).length) {
+    return false;
+  }
+  const memoryEntries = await readdir(layout.memory, { withFileTypes: true });
+  for (const entry of memoryEntries) {
+    if (!entry.isDirectory() || !["6h", "day"].includes(entry.name)) return false;
+    if ((await readdir(path.join(layout.memory, entry.name))).length) return false;
+  }
+  return true;
+}
+
+export async function restoreHistoryData(
+  layout: StorageLayout,
+  id: string,
+): Promise<HistoryArchive> {
+  await ensureStorage(layout);
+  const archive = await readHistoryArchive(layout, id);
+  if (!archive) throw new Error("History recovery archive was not found");
+  if (!(await historyDirectoriesAreEmpty(layout))) {
+    throw new Error("New history exists. Clear it before restoring the previous archive.");
+  }
+
+  const directory = archiveDirectory(layout, id);
+  const restored: Array<{ source: string; destination: string }> = [];
+  try {
+    for (const destination of [layout.segments, layout.timeline, layout.memory]) {
+      const normalized = assertApplicationOwnedHistoryDirectory(layout, destination);
+      const source = path.join(directory, path.basename(normalized));
+      const stats = await lstat(source);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error("History recovery archive is incomplete");
+      }
+      await rm(normalized, { recursive: true, force: true });
+      await rename(source, normalized);
+      restored.push({ source, destination: normalized });
+    }
+    await rm(path.join(directory, historyArchiveMetadataFile), { force: true });
+    await rm(directory, { recursive: true });
+    await ensureStorage(layout);
+    return archive;
+  } catch (error) {
+    for (const item of restored.reverse()) {
+      await rename(item.destination, item.source).catch(() => undefined);
+    }
+    await ensureStorage(layout).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function pruneHistoryArchives(layout: StorageLayout, cutoff: Date): Promise<number> {
+  await ensureStorage(layout);
+  const entries = await readdir(layout.trash, { withFileTypes: true });
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const archive = await readHistoryArchive(layout, entry.name);
+    if (!archive || Date.parse(archive.deletedAt) >= cutoff.getTime()) continue;
+    await rm(archiveDirectory(layout, archive.id), { recursive: true });
+    removed += 1;
+  }
+  return removed;
 }
 
 export function segmentStart(date: Date): Date {

@@ -127,12 +127,20 @@ export interface AgentSnapshot {
   lastError?: string;
 }
 
+export interface HistoryRecovery {
+  id: string;
+  deletedAt: string;
+  documentCount: number;
+  memoryCount: number;
+}
+
 export interface DesktopSnapshot {
   locale: AppLocale;
   connectionState: AgentConnectionState;
   recordingConsentGranted: boolean;
   agent?: AgentSnapshot;
   connectionError?: string;
+  historyRecovery?: HistoryRecovery;
 }
 
 export interface LLMConfigurationInput {
@@ -168,6 +176,7 @@ export interface ComputerHistoryAPI {
   openDocument(id: string): Promise<DesktopSnapshot>;
   deleteDocument(id: string): Promise<DesktopSnapshot>;
   clearHistory(): Promise<DesktopSnapshot>;
+  restoreHistory(id: string): Promise<DesktopSnapshot>;
   revealStorage(): Promise<DesktopSnapshot>;
   getApplicationIcon(iconPath: string): Promise<string | undefined>;
   searchMemory(query: string): Promise<HistorySearchResponse>;

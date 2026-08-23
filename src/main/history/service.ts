@@ -4,6 +4,7 @@ import { shell } from "electron";
 import type {
   AgentSnapshot,
   DesktopSnapshot,
+  HistoryRecovery,
   LLMConfigurationInput,
   MemoryRollup,
   TimelineApplication,
@@ -25,7 +26,10 @@ import {
   clearHistoryData,
   ensureStorage,
   hardenStoragePermissions,
+  latestHistoryArchive,
   makeStorageLayout,
+  pruneHistoryArchives,
+  restoreHistoryData,
   SegmentStore,
   segmentIdentifier,
 } from "./storage.js";
@@ -121,6 +125,7 @@ export class HistoryService extends EventEmitter {
   private recordingConsentGranted = false;
   private documents: TimelineDocumentRecord[] = [];
   private memories: MemoryRollupRecord[] = [];
+  private historyRecovery?: HistoryRecovery;
   private lastError?: string;
   private initialized = false;
   private captureWork: Promise<unknown> = Promise.resolve();
@@ -239,6 +244,7 @@ export class HistoryService extends EventEmitter {
       recordingConsentGranted: this.recordingConsentGranted,
       agent: snapshot,
       connectionError: native.connectionError,
+      historyRecovery: this.historyRecovery,
     };
   }
 
@@ -474,7 +480,10 @@ export class HistoryService extends EventEmitter {
     this.cancelAllPendingVisualIntents();
     await this.visualWork;
     await this.timelineWork;
-    await clearHistoryData(this.layout);
+    this.historyRecovery = await clearHistoryData(this.layout, {
+      documentCount: this.documents.length,
+      memoryCount: this.memories.length,
+    });
     this.segments.reset();
     this.coalescer.reset();
     this.burstCoalescer.reset();
@@ -484,6 +493,41 @@ export class HistoryService extends EventEmitter {
     this.visualUnderstandingCache.clear();
     this.currentCaptureSegmentID = undefined;
     this.lastError = undefined;
+    if (this.collector.current().connectionState === "connected") this.startTimers();
+    this.emitSnapshot();
+    return this.current();
+  }
+
+  async restoreHistory(id: string): Promise<DesktopSnapshot> {
+    await this.initialize();
+    this.stopTimers();
+    const wasRunning =
+      this.collector.current().connectionState === "connected" &&
+      this.collector.current().agent?.recorderState === "running";
+    if (wasRunning) await this.collector.request("pause").catch(() => undefined);
+    try {
+      await this.enqueueCapture(async () => {
+        for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
+      });
+      await this.captureWork;
+      this.cancelAllPendingVisualIntents();
+      await this.visualWork;
+      await this.timelineWork;
+      await restoreHistoryData(this.layout, id);
+      this.segments.reset();
+      this.coalescer.reset();
+      this.burstCoalescer.reset();
+      this.applicationIconPaths.clear();
+      this.visualUnderstandingCache.clear();
+      this.currentCaptureSegmentID = undefined;
+      this.historyRecovery = await latestHistoryArchive(this.layout);
+      this.lastError = undefined;
+      await this.refreshDocuments();
+    } catch (error) {
+      if (wasRunning) await this.collector.request("resume").catch(() => undefined);
+      if (this.collector.current().connectionState === "connected") this.startTimers();
+      throw error;
+    }
     if (this.collector.current().connectionState === "connected") this.startTimers();
     this.emitSnapshot();
     return this.current();
@@ -518,6 +562,7 @@ export class HistoryService extends EventEmitter {
       this.settingsStore.hasRecordingConsent(),
     ]);
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
+    this.historyRecovery = await latestHistoryArchive(this.layout);
     this.documents = await this.timeline.loadDocuments();
     this.memories = await this.memory.refresh(this.documents);
     this.initialized = true;
@@ -590,6 +635,8 @@ export class HistoryService extends EventEmitter {
     const completed = await this.segments.pendingClosedSegments();
     await this.segments.pruneVisualEvidence(new Date(Date.now() - 24 * 60 * 60 * 1_000));
     await this.segments.pruneSegments(new Date(Date.now() - 48 * 60 * 60 * 1_000));
+    await pruneHistoryArchives(this.layout, new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000));
+    this.historyRecovery = await latestHistoryArchive(this.layout);
     void this.enqueueTimeline(async () => {
       await this.timeline.retryFallbackDocuments(completed);
       await this.refreshDocuments();

@@ -65,6 +65,19 @@ function documentID(value: unknown): string {
   return value;
 }
 
+function historyArchiveID(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 128 ||
+    path.basename(value) !== value ||
+    !/^[a-zA-Z0-9-]+$/.test(value)
+  ) {
+    throw new Error("Invalid history archive ID");
+  }
+  return value;
+}
+
 function historyQuery(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 500) {
     throw new Error("Invalid history query");
@@ -326,6 +339,10 @@ function registerIPC(): void {
   ipcMain.handle("history:clear", async (event) => {
     assertRenderer(event);
     return history.clearHistory();
+  });
+  ipcMain.handle("history:restore", async (event, id: unknown) => {
+    assertRenderer(event);
+    return history.restoreHistory(historyArchiveID(id));
   });
 }
 

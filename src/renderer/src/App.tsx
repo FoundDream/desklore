@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import appIcon from "./assets/app-icon.png";
 import { I18nProvider, useI18n } from "./i18n.js";
+import { SettingsView as SettingsPage } from "./SettingsView.js";
 import type {
   AgentSnapshot,
   DesktopSnapshot,
@@ -13,6 +14,8 @@ import type { MessageKey } from "../../shared/i18n.js";
 import { translate } from "../../shared/i18n.js";
 
 type View = "timeline" | "memory" | "health" | "settings";
+type PrimaryView = Exclude<View, "settings">;
+type RunAction = (action: () => Promise<DesktopSnapshot>) => Promise<boolean>;
 
 const summaryFailureLabels: Record<string, MessageKey> = {
   api_key_missing: "summary.apiKeyMissing",
@@ -281,7 +284,7 @@ function RecordingConsentView({
   error,
   onDismissError,
 }: {
-  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
+  run: RunAction;
   busy: boolean;
   error?: string;
   onDismissError: () => void;
@@ -581,7 +584,7 @@ function TimelineView({
   onSelectDate,
 }: {
   agent?: AgentSnapshot;
-  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
+  run: RunAction;
   selectedDate?: string;
   referencedDocumentIDs: string[];
   onSelectDate: (date?: string) => void;
@@ -717,7 +720,7 @@ function MemoryView({
   onOpenTimeline,
 }: {
   agent?: AgentSnapshot;
-  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
+  run: RunAction;
   onOpenTimeline: (memory: MemoryRollup) => void;
 }) {
   const { locale, t } = useI18n();
@@ -901,13 +904,7 @@ function MemoryView({
   );
 }
 
-function HealthView({
-  agent,
-  run,
-}: {
-  agent?: AgentSnapshot;
-  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
-}) {
+function HealthView({ agent, run }: { agent?: AgentSnapshot; run: RunAction }) {
   const { t } = useI18n();
   const health = agent?.health;
   const rows = [
@@ -998,317 +995,9 @@ function HealthView({
   );
 }
 
-function SettingsView({
-  agent,
-  run,
-}: {
-  agent?: AgentSnapshot;
-  run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
-}) {
-  const { locale, t } = useI18n();
-  const [enabled, setEnabled] = useState(agent?.llm.enabled ?? false);
-  const [memorySynthesisEnabled, setMemorySynthesisEnabled] = useState(
-    agent?.llm.memorySynthesisEnabled ?? false,
-  );
-  const [model, setModel] = useState(agent?.llm.model ?? "gpt-5.6-luna");
-  const [endpoint, setEndpoint] = useState(
-    agent?.llm.endpoint ?? "https://api.openai.com/v1/responses",
-  );
-  const [apiKey, setAPIKey] = useState("");
-  const [axJudge, setAXJudge] = useState<"rules" | "luna">(agent?.visual.axJudge ?? "rules");
-  const [captureMode, setCaptureMode] = useState<"off" | "fallback">(
-    agent?.visual.captureMode ?? "off",
-  );
-  const [understandingMode, setUnderstandingMode] = useState<"off" | "ocr" | "luna">(
-    agent?.visual.understandingMode ?? "off",
-  );
-  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
-  useEffect(() => {
-    if (!agent) return;
-    setEnabled(agent.llm.enabled);
-    setMemorySynthesisEnabled(agent.llm.memorySynthesisEnabled);
-    setModel(agent.llm.model);
-    setEndpoint(agent.llm.endpoint);
-    setAXJudge(agent.visual.axJudge);
-    setCaptureMode(agent.visual.captureMode);
-    setUnderstandingMode(agent.visual.understandingMode);
-  }, [
-    agent?.llm.enabled,
-    agent?.llm.memorySynthesisEnabled,
-    agent?.llm.model,
-    agent?.llm.endpoint,
-    agent?.visual.axJudge,
-    agent?.visual.captureMode,
-    agent?.visual.understandingMode,
-  ]);
-  return (
-    <>
-      <PageHeader eyebrow={t("settings.eyebrow")} title={t("settings.title")} />
-      <section className="settings-sheet">
-        <div className="settings-section">
-          <div className="settings-copy">
-            <h2>{t("settings.language")}</h2>
-            <span>{t("settings.languageHint")}</span>
-          </div>
-          <select
-            className="settings-language"
-            aria-label={t("settings.language")}
-            value={locale}
-            onChange={(event) =>
-              void run(() => window.computerHistory.setLocale(event.target.value as "en" | "zh-CN"))
-            }
-          >
-            <option value="en">{t("language.english")}</option>
-            <option value="zh-CN">{t("language.simplifiedChinese")}</option>
-          </select>
-        </div>
-        <div className="settings-divider" />
-        <div className="settings-section">
-          <div className="settings-copy">
-            <h2>{t("settings.semanticSummaries")}</h2>
-          </div>
-          <label className="switch">
-            <input
-              type="checkbox"
-              aria-label={t("settings.semanticSummaries")}
-              checked={enabled}
-              onChange={(event) =>
-                void run(() => window.computerHistory.setLLMEnabled(event.target.checked))
-              }
-            />
-            <span />
-          </label>
-        </div>
-        <div className="form-grid">
-          <label>
-            <span>{t("settings.model")}</span>
-            <input value={model} onChange={(event) => setModel(event.target.value)} />
-          </label>
-          <label className="wide">
-            <span>Responses Endpoint</span>
-            <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />
-          </label>
-          <label className="wide">
-            <span>
-              API Key {agent?.llm.apiKeyConfigured && <b>{t("settings.keychainSaved")}</b>}
-            </span>
-            <input
-              type="password"
-              placeholder={agent?.llm.apiKeyConfigured ? t("settings.keepExistingKey") : "sk-…"}
-              value={apiKey}
-              onChange={(event) => setAPIKey(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="settings-actions">
-          <button
-            className="primary"
-            onClick={() =>
-              void run(async () => {
-                const result = await window.computerHistory.configureLLM({
-                  enabled,
-                  memorySynthesisEnabled,
-                  model,
-                  endpoint,
-                  apiKey,
-                });
-                setAPIKey("");
-                return result;
-              })
-            }
-          >
-            {t("settings.saveModel")}
-          </button>
-          {agent?.llm.apiKeyConfigured && (
-            <button
-              className="text-danger"
-              onClick={() => void run(() => window.computerHistory.removeLLMAPIKey())}
-            >
-              {t("settings.removeKey")}
-            </button>
-          )}
-        </div>
-        <div className="settings-subtoggle">
-          <div>
-            <strong>{t("settings.memorySynthesis")}</strong>
-            <span>{t("settings.memorySynthesisDetail")}</span>
-          </div>
-          <label className="switch">
-            <input
-              type="checkbox"
-              aria-label={t("settings.memorySynthesis")}
-              checked={memorySynthesisEnabled}
-              onChange={(event) =>
-                void run(() =>
-                  window.computerHistory.setMemorySynthesisEnabled(event.target.checked),
-                )
-              }
-            />
-            <span />
-          </label>
-        </div>
-        <div className="privacy-boundary">
-          <strong>{t("settings.dataBoundary")}</strong>
-          <span>{t("settings.dataBoundaryDetail")}</span>
-        </div>
-        <div className="settings-divider" />
-        <div className="settings-section observation">
-          <div className="settings-copy">
-            <h2>{t("settings.visualEvidence")}</h2>
-            <span>{t("settings.visualEvidenceDetail")}</span>
-          </div>
-        </div>
-        <div className="form-grid">
-          <label>
-            <span>{t("settings.axJudge")}</span>
-            <select
-              value={axJudge}
-              onChange={(event) => setAXJudge(event.target.value as "rules" | "luna")}
-            >
-              <option value="rules">{t("settings.localRules")}</option>
-              <option value="luna">{t("settings.lunaGrayAreas")}</option>
-            </select>
-          </label>
-          <label>
-            <span>{t("settings.windowCapture")}</span>
-            <select
-              value={captureMode}
-              onChange={(event) => setCaptureMode(event.target.value as "off" | "fallback")}
-            >
-              <option value="off">{t("settings.off")}</option>
-              <option value="fallback">{t("settings.whenAXInsufficient")}</option>
-            </select>
-          </label>
-          <label>
-            <span>{t("settings.visualUnderstanding")}</span>
-            <select
-              value={understandingMode}
-              onChange={(event) =>
-                setUnderstandingMode(event.target.value as "off" | "ocr" | "luna")
-              }
-            >
-              <option value="off">{t("settings.verifyCaptureOnly")}</option>
-              <option value="ocr">{t("settings.localOCR")}</option>
-              <option value="luna">{t("settings.redactedLuna")}</option>
-            </select>
-          </label>
-        </div>
-        <div className="settings-actions">
-          <button
-            className="primary"
-            onClick={() =>
-              void run(() =>
-                window.computerHistory.configureVisual({
-                  axJudge,
-                  captureMode,
-                  understandingMode,
-                }),
-              )
-            }
-          >
-            {t("settings.saveVisual")}
-          </button>
-          {captureMode === "fallback" && agent?.visual.providerStatus === "permission_required" && (
-            <button
-              onClick={() =>
-                void run(() => window.computerHistory.requestScreenCapturePermission())
-              }
-            >
-              {t("settings.grantScreenRecording")}
-            </button>
-          )}
-        </div>
-        <div className="privacy-boundary">
-          <strong>
-            {t("settings.provider", {
-              status:
-                agent?.visual.providerStatus === "ready"
-                  ? t("common.ready")
-                  : agent?.visual.providerStatus === "permission_required"
-                    ? t("settings.awaitingScreenRecording")
-                    : agent?.visual.providerStatus === "unavailable"
-                      ? t("common.notInstalled")
-                      : t("common.disabled"),
-            })}
-          </strong>
-          <span>{t("settings.visualBoundaryDetail")}</span>
-        </div>
-        <div className="settings-divider" />
-        <div className="settings-section observation">
-          <div className="settings-copy">
-            <h2>{t("settings.currentScope")}</h2>
-          </div>
-        </div>
-        <div className="scope-list">
-          <div>
-            <span>{t("settings.currentApplication")}</span>
-            <strong>
-              {agent?.activeApplication?.name ?? t("settings.noForegroundApplication")}
-            </strong>
-            {agent?.activeApplication && (
-              <button
-                onClick={() =>
-                  void run(() =>
-                    agent.activeApplicationAllowed
-                      ? window.computerHistory.blockActiveApplication()
-                      : window.computerHistory.allowActiveApplication(),
-                  )
-                }
-              >
-                {agent.activeApplicationAllowed
-                  ? t("settings.stopObserving")
-                  : t("settings.allowObserving")}
-              </button>
-            )}
-          </div>
-          <div>
-            <span>{t("settings.currentDomain")}</span>
-            <strong>{agent?.activeDomain ?? t("settings.noBrowserDomain")}</strong>
-            {agent?.activeDomain && (
-              <button
-                onClick={() =>
-                  void run(() =>
-                    agent.activeDomainAllowed
-                      ? window.computerHistory.blockActiveDomain()
-                      : window.computerHistory.allowActiveDomain(),
-                  )
-                }
-              >
-                {agent.activeDomainAllowed
-                  ? t("settings.stopObserving")
-                  : t("settings.allowObserving")}
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="settings-divider" />
-        <div className="settings-section observation">
-          <div className="settings-copy">
-            <h2>{t("settings.deleteHistory")}</h2>
-            <span>{t("settings.deleteHistoryDetail")}</span>
-          </div>
-          <button
-            className={confirmClearHistory ? "danger-confirm" : "text-danger"}
-            onBlur={() => setConfirmClearHistory(false)}
-            onClick={() => {
-              if (confirmClearHistory) {
-                setConfirmClearHistory(false);
-                void run(() => window.computerHistory.clearHistory());
-              } else {
-                setConfirmClearHistory(true);
-              }
-            }}
-          >
-            {confirmClearHistory ? t("settings.confirmClear") : t("settings.clearHistory")}
-          </button>
-        </div>
-      </section>
-    </>
-  );
-}
-
 export function App() {
   const [view, setView] = useState<View>("timeline");
+  const [returnView, setReturnView] = useState<PrimaryView>("timeline");
   const [desktop, setDesktop] = useState<DesktopSnapshot>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -1327,17 +1016,40 @@ export function App() {
     document.querySelector<HTMLElement>(".content")?.scrollTo({ top: 0 });
   }, [view]);
 
-  const run = useCallback(async (action: () => Promise<DesktopSnapshot>): Promise<void> => {
+  const run = useCallback(async (action: () => Promise<DesktopSnapshot>): Promise<boolean> => {
     setBusy(true);
     try {
-      setDesktop(await action());
-      setError(undefined);
+      const result = await action();
+      setDesktop(result);
+      setError(result.agent?.lastError);
+      return !result.agent?.lastError;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(false);
     }
   }, []);
+
+  const navigate = useCallback(
+    (next: View): void => {
+      if (next === "settings" && view !== "settings") setReturnView(view);
+      setView(next);
+    },
+    [view],
+  );
+
+  const closeSettings = useCallback((): void => setView(returnView), [returnView]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== ",") return;
+      event.preventDefault();
+      navigate("settings");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [navigate]);
 
   const toggleRecording = (): void => {
     if (!desktop?.recordingConsentGranted) {
@@ -1416,13 +1128,29 @@ export function App() {
     );
   }
 
+  if (view === "settings") {
+    return (
+      <I18nProvider locale={locale}>
+        <SettingsPage
+          desktop={desktop}
+          run={run}
+          busy={busy}
+          error={error}
+          onDismissError={() => setError(undefined)}
+          onBack={closeSettings}
+          onOpenHealth={() => setView("health")}
+        />
+      </I18nProvider>
+    );
+  }
+
   return (
     <I18nProvider locale={locale}>
       <div className={`app-shell ${busy ? "busy" : ""}`}>
         <Sidebar
           view={view}
           agent={desktop?.agent}
-          onView={setView}
+          onView={navigate}
           onToggleRecording={toggleRecording}
         />
         <main className="content">
@@ -1444,10 +1172,8 @@ export function App() {
             />
           ) : view === "memory" ? (
             <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
-          ) : view === "health" ? (
-            <HealthView agent={desktop?.agent} run={run} />
           ) : (
-            <SettingsView agent={desktop?.agent} run={run} />
+            <HealthView agent={desktop?.agent} run={run} />
           )}
         </main>
       </div>

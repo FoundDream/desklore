@@ -119,7 +119,6 @@ export class HistorySettingsStore {
       | undefined;
     if (!stored) return { ...defaultLLMSettings };
     if (
-      stored.schemaVersion !== 1 ||
       typeof stored.enabled !== "boolean" ||
       typeof stored.memorySynthesisEnabled !== "boolean" ||
       typeof stored.model !== "string" ||
@@ -134,6 +133,11 @@ export class HistorySettingsStore {
       endpoint: stored.endpoint,
     };
     if (!validateLLMSettings(settings)) throw new Error("Invalid model settings");
+    if (stored.schemaVersion === undefined) {
+      await this.saveLLMSettings(settings);
+    } else if (stored.schemaVersion !== 1) {
+      throw new Error("Unsupported model settings schema");
+    }
     return settings;
   }
 

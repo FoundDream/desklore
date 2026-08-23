@@ -35,6 +35,7 @@ const api: ComputerHistoryAPI = {
   openDocument: (id: string) => ipcRenderer.invoke("history:open-document", id),
   deleteDocument: (id: string) => ipcRenderer.invoke("history:delete-document", id),
   clearHistory: () => invoke("history:clear"),
+  restoreHistory: (id: string) => ipcRenderer.invoke("history:restore", id),
   revealStorage: () => invoke("history:reveal-storage"),
   getApplicationIcon: (iconPath: string) =>
     ipcRenderer.invoke("history:get-application-icon", iconPath),
