@@ -276,11 +276,36 @@ function RecordingConsentView({
   error?: string;
   onDismissError: () => void;
 }) {
+  const [step, setStep] = useState<"boundary" | "permission">("boundary");
+  const isBoundaryStep = step === "boundary";
+  const details = isBoundaryStep
+    ? [
+        ["默认关闭", "窗口截图、外部模型和遥测"],
+        ["自动过滤", "隐私浏览、密码字段和敏感系统界面"],
+      ]
+    : [
+        ["独立授权", "系统会显示 DeskLore Collector"],
+        ["无需录屏", "录屏权限仅在以后开启视觉补充时申请"],
+      ];
+
   return (
     <section className="onboarding-screen">
-      <header className="onboarding-brand">
-        <img src={appIcon} alt="" />
-        <strong>DeskLore</strong>
+      <header className="onboarding-header">
+        <div className="onboarding-brand">
+          <img src={appIcon} alt="" />
+          <strong>DeskLore</strong>
+        </div>
+        <div
+          className="onboarding-progress"
+          role="progressbar"
+          aria-label={`设置进度：第 ${isBoundaryStep ? 1 : 2} 步，共 2 步`}
+          aria-valuemin={1}
+          aria-valuemax={2}
+          aria-valuenow={isBoundaryStep ? 1 : 2}
+        >
+          <i className="active" />
+          <i className={isBoundaryStep ? "" : "active"} />
+        </div>
       </header>
 
       {error && (
@@ -291,46 +316,46 @@ function RecordingConsentView({
         </div>
       )}
 
-      <div className="onboarding-layout">
-        <div className="onboarding-copy">
-          <span className="onboarding-kicker">只保存在这台 Mac</span>
-          <h1>
-            把今天做过的事，
-            <br />
-            留给未来的自己。
-          </h1>
-          <p>DeskLore 把应用、窗口、网页和交互语义整理成可以回看的时间线，不需要持续录屏。</p>
+      <div className="onboarding-stage">
+        <div className="onboarding-panel">
+          <img className="onboarding-app-icon" src={appIcon} alt="" />
+          <span className="onboarding-kicker">第 {isBoundaryStep ? 1 : 2} 步，共 2 步</span>
+          <h1>{isBoundaryStep ? "确认记录范围" : "允许辅助功能访问"}</h1>
+          <p className="onboarding-lead">
+            {isBoundaryStep
+              ? "应用名、窗口标题、网页 URL 和交互语义会保存在这台 Mac。"
+              : "macOS 将请求辅助功能权限，用于读取应用和窗口语义。"}
+          </p>
+
+          <div className="onboarding-details">
+            {details.map(([label, value]) => (
+              <div key={label}>
+                <strong>{label}</strong>
+                <span>{value}</span>
+              </div>
+            ))}
+          </div>
+
           <div className="onboarding-actions">
+            {!isBoundaryStep && (
+              <button className="secondary" disabled={busy} onClick={() => setStep("boundary")}>
+                返回
+              </button>
+            )}
             <button
               className="primary"
               disabled={busy}
-              onClick={() => void run(() => window.computerHistory.grantRecordingConsent())}
+              onClick={() => {
+                if (isBoundaryStep) {
+                  setStep("permission");
+                } else {
+                  void run(() => window.computerHistory.grantRecordingConsent());
+                }
+              }}
             >
-              {busy ? "正在启动…" : "同意并开始记录"}
+              {busy ? "正在启动…" : isBoundaryStep ? "继续" : "同意并开始记录"}
             </button>
-            <small>之后可以随时暂停、删除单段历史或清空全部数据。</small>
           </div>
-        </div>
-
-        <div className="onboarding-boundary" aria-label="记录边界">
-          <span className="onboarding-boundary-title">记录边界</span>
-          <div className="onboarding-fact">
-            <span>
-              <i className="recording" />
-              会记录
-            </span>
-            <p>应用名、窗口标题、网页 URL、交互与辅助功能语义</p>
-          </div>
-          <div className="onboarding-fact">
-            <span>
-              <i />
-              默认关闭
-            </span>
-            <p>窗口截图、外部模型与遥测</p>
-          </div>
-          <p className="onboarding-privacy-note">
-            敏感系统界面、隐私浏览和密码字段会被拦截。未同意前，采集器不会启动。
-          </p>
         </div>
       </div>
     </section>
