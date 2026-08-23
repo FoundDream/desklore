@@ -611,6 +611,47 @@ a {
   margin-top: 34px;
 }
 
+/* English copy runs longer than Chinese, so it uses a quieter display scale. */
+:root[lang="en"] .hero h1 {
+  max-width: 18ch;
+  font-size: clamp(4.25rem, 7.5vw, 6.75rem);
+  letter-spacing: -0.045em;
+  line-height: 0.9;
+}
+
+:root[lang="en"] .manifesto h2 {
+  max-width: 860px;
+  font-size: clamp(2.35rem, 4.25vw, 3.9rem);
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+:root[lang="en"] .product-story__copy h2,
+:root[lang="en"] .principles h2,
+:root[lang="en"] .consent-story h2,
+:root[lang="en"] .flow h2,
+:root[lang="en"] .open-source h2 {
+  font-size: clamp(2.35rem, 4.35vw, 4.05rem);
+  letter-spacing: -0.047em;
+  line-height: 1.03;
+}
+
+:root[lang="en"] .principle-list h3 {
+  font-size: clamp(1.7rem, 2.65vw, 2.5rem);
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+@media (min-width: 901px) {
+  :root[lang="en"] .product-story {
+    grid-template-columns: minmax(320px, 0.88fr) minmax(0, 1.12fr);
+  }
+
+  :root[lang="en"] .consent-story {
+    grid-template-columns: minmax(0, 1.22fr) minmax(320px, 0.78fr);
+  }
+}
+
 .site-footer {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -930,6 +971,32 @@ a {
   .open-source h2 {
     font-size: clamp(2.7rem, 12vw, 4rem);
     line-height: 1;
+  }
+
+  :root[lang="en"] .hero h1 {
+    max-width: 100%;
+    font-size: clamp(3.35rem, 11.6vw, 4.25rem);
+    letter-spacing: -0.04em;
+    line-height: 0.94;
+  }
+
+  :root[lang="en"] .manifesto h2 {
+    font-size: clamp(2rem, 7.3vw, 2.65rem);
+    line-height: 1.08;
+  }
+
+  :root[lang="en"] .product-story__copy h2,
+  :root[lang="en"] .principles h2,
+  :root[lang="en"] .consent-story h2,
+  :root[lang="en"] .flow h2,
+  :root[lang="en"] .open-source h2 {
+    font-size: clamp(2.2rem, 8.3vw, 3rem);
+    line-height: 1.05;
+  }
+
+  :root[lang="en"] .principle-list h3 {
+    font-size: clamp(1.65rem, 6vw, 2rem);
+    line-height: 1.14;
   }
 
   .section-label {

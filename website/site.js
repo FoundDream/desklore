@@ -1,6 +1,6 @@
 const translations = {
   en: {
-    "meta.title": "DeskLore — Computer history for your Mac",
+    "meta.title": "DeskLore - Computer history for your Mac",
     "meta.description":
       "DeskLore is open-source computer history for macOS: semantic-first, local-first, and built without continuous screen recording.",
     "language.label": "Language",
@@ -14,7 +14,7 @@ const translations = {
     "hero.titleLine1": "Your Mac,",
     "hero.titleLine2": "with a memory of its own.",
     "hero.lead":
-      "Turn everyday activity into a readable timeline—without continuous screen recording or uploading raw history.",
+      "Turn everyday activity into a readable timeline, without continuous screen recording or uploading raw history.",
     "hero.howItWorks": "See how it works",
     "hero.privacyBoundary": "Explore the privacy boundary",
     "manifesto.iconAlt": "DeskLore app icon",
@@ -66,7 +66,7 @@ const translations = {
     "footer.privacy": "Privacy",
   },
   "zh-CN": {
-    "meta.title": "DeskLore — 你的 Mac，也有记忆",
+    "meta.title": "DeskLore - 你的 Mac，也有记忆",
     "meta.description":
       "DeskLore 是开源的 macOS Computer History。语义优先，本地运行，不持续录屏。",
     "language.label": "语言",
