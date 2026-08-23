@@ -16,7 +16,7 @@ interface SettingsViewProps {
   error?: string;
   onDismissError: () => void;
   onBack: () => void;
-  onOpenHealth: () => void;
+  onOpenDiagnostics: () => void;
 }
 
 function BackIcon() {
@@ -143,7 +143,7 @@ export function SettingsView({
   error,
   onDismissError,
   onBack,
-  onOpenHealth,
+  onOpenDiagnostics,
 }: SettingsViewProps) {
   const { locale, t } = useI18n();
   const agent = desktop.agent;
@@ -210,6 +210,16 @@ export function SettingsView({
   }, [dialog, requestExit]);
 
   const recording = agent?.recorderState === "running";
+  const collectorReady = desktop.connectionState === "connected" && Boolean(agent);
+  const captureStatus = !collectorReady
+    ? "unavailable"
+    : !agent?.health.accessibilityGranted
+      ? "permission"
+      : !agent.health.interactionMonitorActive
+        ? "attention"
+        : recording
+          ? "ready"
+          : "paused";
   const visualEnabled = agent?.visual.captureMode === "fallback";
   const providerStatus = agent?.visual.providerStatus;
   const providerLabel =
@@ -356,40 +366,57 @@ export function SettingsView({
                   </button>
                 </SettingRow>
                 <SettingRow
-                  title={t("settings.collector")}
+                  title={t("settings.captureStatus")}
                   description={
-                    desktop.connectionState === "connected"
-                      ? t("settings.collectorConnected")
-                      : t("settings.collectorUnavailable")
+                    captureStatus === "unavailable"
+                      ? desktop.connectionState === "starting"
+                        ? t("connection.starting")
+                        : t("settings.collectorUnavailable")
+                      : captureStatus === "permission"
+                        ? t("settings.capturePermissionRequired")
+                        : captureStatus === "attention"
+                          ? t("settings.captureNeedsAttentionDetail")
+                          : captureStatus === "ready"
+                            ? t("settings.captureReadyDetail")
+                            : t("settings.recordingPaused")
                   }
                 >
                   <StatusPill
-                    tone={desktop.connectionState === "connected" ? "success" : "warning"}
-                  >
-                    {desktop.connectionState === "connected"
-                      ? t("common.ready")
-                      : t("common.notReady")}
-                  </StatusPill>
-                </SettingRow>
-                <SettingRow
-                  title={t("settings.accessibilityAccess")}
-                  description={t("settings.accessibilityDetail")}
-                >
-                  <StatusPill tone={agent?.health.accessibilityGranted ? "success" : "warning"}>
-                    {agent?.health.accessibilityGranted ? t("common.ready") : t("common.notReady")}
-                  </StatusPill>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      agent?.health.accessibilityGranted
-                        ? requestExit(onOpenHealth)
-                        : void run(() => window.computerHistory.requestPermissions())
+                    tone={
+                      captureStatus === "ready"
+                        ? "success"
+                        : captureStatus === "paused"
+                          ? "neutral"
+                          : "warning"
                     }
                   >
-                    {agent?.health.accessibilityGranted
-                      ? t("settings.openCaptureHealth")
-                      : t("settings.grantAccessibility")}
-                  </button>
+                    {captureStatus === "ready"
+                      ? t("common.ready")
+                      : captureStatus === "paused"
+                        ? t("sidebar.paused")
+                        : t("common.notReady")}
+                  </StatusPill>
+                  {captureStatus === "unavailable" ? (
+                    desktop.connectionState !== "starting" && (
+                      <button
+                        disabled={busy}
+                        onClick={() => void run(() => window.computerHistory.startAgent())}
+                      >
+                        {t("connection.restart")}
+                      </button>
+                    )
+                  ) : captureStatus === "permission" ? (
+                    <button
+                      disabled={busy}
+                      onClick={() => void run(() => window.computerHistory.requestPermissions())}
+                    >
+                      {t("settings.grantAccessibility")}
+                    </button>
+                  ) : (
+                    <button disabled={busy} onClick={() => requestExit(onOpenDiagnostics)}>
+                      {t("settings.openDiagnostics")}
+                    </button>
+                  )}
                 </SettingRow>
               </SettingsSection>
             </>

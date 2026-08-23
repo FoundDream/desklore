@@ -13,8 +13,8 @@ import type {
 import type { MessageKey } from "../../shared/i18n.js";
 import { translate } from "../../shared/i18n.js";
 
-type View = "timeline" | "memory" | "health" | "settings";
-type PrimaryView = Exclude<View, "settings">;
+type View = "timeline" | "memory" | "diagnostics" | "settings";
+type PrimaryView = "timeline" | "memory";
 type RunAction = (action: () => Promise<DesktopSnapshot>) => Promise<boolean>;
 
 const summaryFailureLabels: Record<string, MessageKey> = {
@@ -145,7 +145,7 @@ function ContinuationHint({ item }: { item?: string }) {
   );
 }
 
-function Icon({ name }: { name: "timeline" | "memory" | "health" | "settings" | "folder" }) {
+function Icon({ name }: { name: "timeline" | "memory" | "settings" | "folder" }) {
   const paths = {
     timeline: (
       <>
@@ -158,12 +158,6 @@ function Icon({ name }: { name: "timeline" | "memory" | "health" | "settings" | 
       <>
         <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22z" />
         <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5a2.5 2.5 0 0 1 2.5 2z" />
-      </>
-    ),
-    health: (
-      <>
-        <path d="M3 12h3l2-6 3.5 12 2.2-6H21" />
-        <path d="M4 4h16v16H4z" opacity=".2" />
       </>
     ),
     settings: (
@@ -251,11 +245,48 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
   );
 }
 
-function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
+function ConnectionNotice({
+  desktop,
+  run,
+  onOpenDiagnostics,
+}: {
+  desktop?: DesktopSnapshot;
+  run: RunAction;
+  onOpenDiagnostics: () => void;
+}) {
   const { t } = useI18n();
-  if (!desktop || !desktop.recordingConsentGranted || desktop.connectionState === "connected") {
-    return null;
+  if (!desktop || !desktop.recordingConsentGranted) return null;
+
+  if (desktop.connectionState === "connected") {
+    const agent = desktop.agent;
+    if (!agent || agent.recorderState !== "running") return null;
+    const permissionMissing = !agent.health.accessibilityGranted;
+    const monitorUnavailable =
+      agent.health.accessibilityGranted && !agent.health.interactionMonitorActive;
+    if (!permissionMissing && !monitorUnavailable) return null;
+    return (
+      <div className="connection-notice">
+        <span className="signal failed" />
+        <div>
+          <strong>
+            {permissionMissing
+              ? t("health.permissionRequired")
+              : t("settings.captureNeedsAttention")}
+          </strong>
+        </div>
+        <button
+          onClick={() =>
+            permissionMissing
+              ? void run(() => window.computerHistory.requestPermissions())
+              : onOpenDiagnostics()
+          }
+        >
+          {permissionMissing ? t("settings.grantAccessibility") : t("settings.openDiagnostics")}
+        </button>
+      </div>
+    );
   }
+
   const labels = {
     starting: t("connection.starting"),
     stopped: t("connection.stopped"),
@@ -270,7 +301,7 @@ function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
         {desktop.connectionError && <small>{desktop.connectionError}</small>}
       </div>
       {desktop.connectionState !== "starting" && (
-        <button onClick={() => void window.computerHistory.startAgent()}>
+        <button onClick={() => void run(() => window.computerHistory.startAgent())}>
           {t("connection.restart")}
         </button>
       )}
@@ -430,12 +461,10 @@ function Sidebar({
           <span>{t("sidebar.memory")}</span>
           <b>{agent ? agent.memories.filter((memory) => memory.kind === "day").length : "—"}</b>
         </button>
-        <button className={view === "health" ? "active" : ""} onClick={() => onView("health")}>
-          <Icon name="health" />
-          <span>{t("sidebar.health")}</span>
-          <i className={agent?.health.accessibilityGranted ? "ok" : "warn"} />
-        </button>
-        <button className={view === "settings" ? "active" : ""} onClick={() => onView("settings")}>
+        <button
+          className={view === "settings" || view === "diagnostics" ? "active" : ""}
+          onClick={() => onView("settings")}
+        >
           <Icon name="settings" />
           <span>{t("sidebar.settings")}</span>
         </button>
@@ -904,7 +933,15 @@ function MemoryView({
   );
 }
 
-function HealthView({ agent, run }: { agent?: AgentSnapshot; run: RunAction }) {
+function DiagnosticsView({
+  agent,
+  run,
+  onBack,
+}: {
+  agent?: AgentSnapshot;
+  run: RunAction;
+  onBack: () => void;
+}) {
   const { t } = useI18n();
   const health = agent?.health;
   const rows = [
@@ -918,12 +955,23 @@ function HealthView({ agent, run }: { agent?: AgentSnapshot; run: RunAction }) {
         eyebrow={t("health.eyebrow")}
         title={t("health.title")}
         action={
-          <button
-            className="secondary"
-            onClick={() => void run(() => window.computerHistory.refreshPermissions())}
-          >
-            {t("health.recheck")}
-          </button>
+          <div className="header-actions">
+            <button className="secondary" onClick={onBack}>
+              {t("health.backToSettings")}
+            </button>
+            <button
+              className="secondary"
+              onClick={() =>
+                void run(() =>
+                  health?.accessibilityGranted && !health.interactionMonitorActive
+                    ? window.computerHistory.requestPermissions()
+                    : window.computerHistory.refreshPermissions(),
+                )
+              }
+            >
+              {t("health.recheck")}
+            </button>
+          </div>
         }
       />
       <section className="health-layout">
@@ -1033,11 +1081,18 @@ export function App() {
 
   const navigate = useCallback(
     (next: View): void => {
-      if (next === "settings" && view !== "settings") setReturnView(view);
+      if (next === "settings" && (view === "timeline" || view === "memory")) {
+        setReturnView(view);
+      }
       setView(next);
     },
     [view],
   );
+
+  const openDiagnostics = useCallback((): void => {
+    if (view === "timeline" || view === "memory") setReturnView(view);
+    setView("diagnostics");
+  }, [view]);
 
   const closeSettings = useCallback((): void => setView(returnView), [returnView]);
 
@@ -1138,7 +1193,7 @@ export function App() {
           error={error}
           onDismissError={() => setError(undefined)}
           onBack={closeSettings}
-          onOpenHealth={() => setView("health")}
+          onOpenDiagnostics={openDiagnostics}
         />
       </I18nProvider>
     );
@@ -1154,7 +1209,7 @@ export function App() {
           onToggleRecording={toggleRecording}
         />
         <main className="content">
-          <ConnectionNotice desktop={desktop} />
+          <ConnectionNotice desktop={desktop} run={run} onOpenDiagnostics={openDiagnostics} />
           {error && (
             <div className="error-banner">
               <strong>{t("common.actionFailed")}</strong>
@@ -1173,7 +1228,7 @@ export function App() {
           ) : view === "memory" ? (
             <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
           ) : (
-            <HealthView agent={desktop?.agent} run={run} />
+            <DiagnosticsView agent={desktop?.agent} run={run} onBack={() => setView("settings")} />
           )}
         </main>
       </div>
