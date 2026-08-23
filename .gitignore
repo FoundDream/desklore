@@ -7,3 +7,7 @@ node_modules/
 out/
 release/
 .eval-data/
+.desklore-demo/
+.desklore-onboarding/
+.demo-history-test-*/
+.demo-onboarding-test-*/

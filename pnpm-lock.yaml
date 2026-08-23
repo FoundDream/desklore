@@ -45,6 +45,9 @@ importers:
       vite-plus:
         specifier: 0.2.9
         version: 0.2.9(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(jiti@2.7.0)(typescript@5.9.3)
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(vitest@4.1.10))(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
 
 packages:
 
@@ -2417,7 +2420,7 @@ snapshots:
       '@testing-library/dom': 10.4.1
       '@testing-library/user-event': 14.6.6(@testing-library/dom@10.4.1)
       '@vitest/browser': 4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(vitest@4.1.10)
-      vitest: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
+      vitest: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(vitest@4.1.10))(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
     transitivePeerDependencies:
       - bufferutil
       - msw
@@ -2433,7 +2436,7 @@ snapshots:
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.1.1
-      vitest: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
+      vitest: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(vitest@4.1.10))(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
       ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
@@ -3110,7 +3113,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.4
+      semver: 7.8.5
       serialize-error: 7.0.1
     optional: true
 
@@ -3358,11 +3361,11 @@ snapshots:
 
   node-abi@4.33.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-gyp@12.4.0:
     dependencies:
@@ -3371,7 +3374,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.5
       tar: 7.5.22
       tinyglobby: 0.2.17
       undici: 6.28.0
@@ -3773,7 +3776,7 @@ snapshots:
       oxfmt: 0.62.0(vite-plus@0.2.9(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(jiti@2.7.0)(typescript@5.9.3))
       oxlint: 1.77.0(oxlint-tsgolint@7.0.2001)(vite-plus@0.2.9(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(jiti@2.7.0)(typescript@5.9.3))
       oxlint-tsgolint: 7.0.2001
-      vitest: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
+      vitest: 4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(vitest@4.1.10))(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))
     optionalDependencies:
       '@voidzero-dev/vite-plus-darwin-arm64': 0.2.9
       '@voidzero-dev/vite-plus-darwin-x64': 0.2.9
@@ -3814,7 +3817,7 @@ snapshots:
       - vite
       - yaml
 
-  vitest@4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3)):
+  vitest@4.1.10(@types/node@24.13.3)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))(vitest@4.1.10))(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3)):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.13.3)(jiti@2.7.0)(typescript@5.9.3))

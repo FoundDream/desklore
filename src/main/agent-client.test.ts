@@ -22,6 +22,18 @@ describe("AgentClient", () => {
     });
   });
 
+  it("uses an inert connected agent for synthetic demo roots", async () => {
+    const client = new AgentClient([], undefined, true);
+
+    await expect(client.start()).resolves.toMatchObject({
+      connectionState: "connected",
+      agent: { recorderState: "paused", health: { capturedEventCount: 0 } },
+    });
+    await expect(client.request("pause")).resolves.toMatchObject({
+      connectionState: "connected",
+    });
+  });
+
   it("resolves development and packaged agent locations", () => {
     process.env.DESKLORE_COLLECTOR_PATH = "/custom/DeskLoreCollector";
 

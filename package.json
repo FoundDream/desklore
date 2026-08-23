@@ -25,6 +25,9 @@
     "eval:history": "node scripts/eval-history-data.mjs",
     "eval:visual": "node scripts/eval-visual-policy.mjs",
     "eval:visual-value": "node scripts/eval-visual-value.mjs",
+    "demo:seed": "node scripts/create-demo-history.mjs --root .desklore-demo --mode timeline",
+    "demo:onboarding": "node scripts/create-demo-history.mjs --root .desklore-onboarding --mode onboarding",
+    "demo": "pnpm demo:seed && DESKLORE_DEMO_ROOT=\"$PWD/.desklore-demo\" pnpm dev:ui",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
     "package:mac": "pnpm build && electron-builder --mac"
@@ -43,7 +46,8 @@
     "electron-vite-plus": "0.1.0-alpha.2",
     "typescript": "^5.9.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9",
-    "vite-plus": "0.2.9"
+    "vite-plus": "0.2.9",
+    "vitest": "4.1.10"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"

@@ -7,6 +7,7 @@ import {
   Tray,
   type IpcMainInvokeEvent,
 } from "electron";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -23,12 +24,31 @@ let tray: Tray | undefined;
 let quitting = false;
 
 app.setName("DeskLore");
-app.setPath("userData", path.join(app.getPath("appData"), "DeskLore"));
+
+const demoRoot = process.env.DESKLORE_DEMO_ROOT?.trim();
+if (demoRoot) {
+  const resolvedDemoRoot = path.resolve(demoRoot);
+  const appDataRoot = path.resolve(app.getPath("appData"));
+  const markerPath = path.join(resolvedDemoRoot, ".desklore-demo.json");
+  if (
+    resolvedDemoRoot === appDataRoot ||
+    resolvedDemoRoot.startsWith(`${appDataRoot}${path.sep}`) ||
+    !existsSync(markerPath)
+  ) {
+    throw new Error(
+      "DESKLORE_DEMO_ROOT must point to a marked synthetic demo directory outside the normal app data directory",
+    );
+  }
+  app.setPath("userData", resolvedDemoRoot);
+} else {
+  app.setPath("userData", path.join(app.getPath("appData"), "DeskLore"));
+}
 
 const projectRoot = process.cwd();
 const collector = new AgentClient(
   agentExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
   app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
+  Boolean(demoRoot),
 );
 const history = new HistoryService(
   collector,

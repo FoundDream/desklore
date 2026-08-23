@@ -40,6 +40,31 @@ interface PendingRequest {
   timeout: NodeJS.Timeout;
 }
 
+const demoCaptureHealth: CaptureHealth = {
+  accessibilityGranted: false,
+  interactionMonitorActive: false,
+  axObserverActive: false,
+  axValueNotificationTargets: 0,
+  axSelectionNotificationTargets: 0,
+  returnKeyEventCount: 0,
+  keyboardSubmitCount: 0,
+  keyboardShortcutCount: 0,
+  textInputEventCount: 0,
+  selectionEventCount: 0,
+  capturedEventCount: 0,
+  persistedEventCount: 0,
+  policyBlockedEventCount: 0,
+  deduplicatedEventCount: 0,
+  burstCoalescedEventCount: 0,
+  lastAXSnapshotNodeCount: 0,
+  lastAXVisitedNodeCount: 0,
+  lastAXCaptureDurationMilliseconds: 0,
+  axSlowCaptureCount: 0,
+  axTruncatedCaptureCount: 0,
+  axCaptureBacklog: 0,
+  screenCaptureGranted: false,
+};
+
 export class AgentClient extends EventEmitter {
   private process?: ChildProcessWithoutNullStreams;
   private state: AgentConnectionState = "stopped";
@@ -51,6 +76,7 @@ export class AgentClient extends EventEmitter {
   constructor(
     private readonly executableCandidates: string[],
     private readonly hostBundleIdentifier?: string,
+    private readonly demoMode = false,
   ) {
     super();
   }
@@ -64,6 +90,14 @@ export class AgentClient extends EventEmitter {
   }
 
   async start(): Promise<CollectorConnection> {
+    if (this.demoMode) {
+      this.snapshot = {
+        recorderState: "paused",
+        health: { ...demoCaptureHealth },
+      };
+      this.updateState("connected");
+      return this.current();
+    }
     if (this.process && this.process.exitCode === null) return this.current();
     const executable = await this.findExecutable();
     if (!executable) {
@@ -113,6 +147,10 @@ export class AgentClient extends EventEmitter {
   }
 
   async stop(): Promise<CollectorConnection> {
+    if (this.demoMode) {
+      this.updateState("stopped");
+      return this.current();
+    }
     const child = this.process;
     if (!child || child.exitCode !== null) {
       this.snapshot = undefined;
@@ -158,6 +196,9 @@ export class AgentClient extends EventEmitter {
     command: string,
     payload: Record<string, unknown>,
   ): Promise<AgentMessage> {
+    if (this.demoMode) {
+      return { type: "response", payload: { command, ...payload } };
+    }
     if (!this.process || this.process.exitCode !== null) await this.start();
     if (!this.process || this.process.exitCode !== null) {
       throw new Error(this.connectionError ?? "Native agent is unavailable");

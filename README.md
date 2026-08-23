@@ -81,6 +81,25 @@ pnpm build           # production Electron and Swift build
 pnpm package:mac     # local DMG and ZIP; signing depends on your keychain
 ```
 
+## Capture-safe demo data
+
+The repository includes a deterministic synthetic history generator for screenshots, UI review,
+and onboarding checks. It writes only under a marked child directory of the checkout; the desktop
+app refuses an unmarked demo root and refuses a path inside the normal macOS application-data
+directory.
+
+```bash
+pnpm demo             # seed two synthetic timeline sessions and launch the UI
+pnpm demo:onboarding  # create an isolated first-run root for the onboarding state
+DESKLORE_DEMO_ROOT="$PWD/.desklore-onboarding" pnpm dev:ui
+```
+
+The demo contains fixed Example Writer, Example Browser, and Example Terminal events. Demo mode
+uses an inert collector, so it does not read the normal DeskLore history directory or capture new
+activity. It also does not enable model-backed features. Demo files are ignored by Git and should
+not be committed. The demo workflow validates UI state and privacy boundaries; it is not evidence
+of capture quality or external adoption.
+
 ## Architecture
 
 ```text
