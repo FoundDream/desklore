@@ -1,3 +1,5 @@
+import type { AppLocale } from "./i18n.js";
+
 export type AgentConnectionState = "starting" | "connected" | "stopped" | "missing" | "failed";
 
 export type RecorderState = "stopped" | "running" | "paused";
@@ -126,6 +128,7 @@ export interface AgentSnapshot {
 }
 
 export interface DesktopSnapshot {
+  locale: AppLocale;
   connectionState: AgentConnectionState;
   recordingConsentGranted: boolean;
   agent?: AgentSnapshot;
@@ -144,6 +147,7 @@ export type VisualConfigurationInput = VisualSettings;
 
 export interface ComputerHistoryAPI {
   getSnapshot(): Promise<DesktopSnapshot>;
+  setLocale(locale: AppLocale): Promise<DesktopSnapshot>;
   grantRecordingConsent(): Promise<DesktopSnapshot>;
   startAgent(): Promise<DesktopSnapshot>;
   stopAgent(): Promise<DesktopSnapshot>;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import appIcon from "./assets/app-icon.png";
+import { I18nProvider, useI18n } from "./i18n.js";
 import type {
   AgentSnapshot,
   DesktopSnapshot,
@@ -8,35 +9,40 @@ import type {
   TimelineApplication,
   TimelineDocument,
 } from "../../shared/contracts.js";
+import type { MessageKey } from "../../shared/i18n.js";
+import { translate } from "../../shared/i18n.js";
 
 type View = "timeline" | "memory" | "health" | "settings";
 
-const summaryFailureLabels: Record<string, string> = {
-  api_key_missing: "未配置 API Key",
-  invalid_json: "模型返回的不是合法 JSON",
-  invalid_fields: "模型返回字段不完整",
-  invalid_evidence_ids: "模型引用了无效事件",
-  empty_fields: "模型返回了空标题或描述",
-  content_too_long: "模型返回内容过长",
-  missing_output: "模型没有返回摘要文本",
-  incomplete_max_output_tokens: "模型输出达到长度上限",
-  incomplete_content_filter: "模型输出被内容过滤中断",
-  incomplete_unknown: "模型输出未完成",
-  model_refusal: "模型拒绝生成摘要",
-  response_failed: "模型响应执行失败",
-  network_timeout: "模型请求超时",
-  network_dns_failed: "模型服务域名无法解析",
-  network_cannot_connect: "无法连接模型服务",
-  network_request_failed: "模型网络请求失败",
-  unexpected_error: "摘要生成出现未知错误",
+const summaryFailureLabels: Record<string, MessageKey> = {
+  api_key_missing: "summary.apiKeyMissing",
+  invalid_json: "summary.invalidJson",
+  invalid_fields: "summary.invalidFields",
+  invalid_evidence_ids: "summary.invalidEvidenceIds",
+  empty_fields: "summary.emptyFields",
+  content_too_long: "summary.contentTooLong",
+  missing_output: "summary.missingOutput",
+  incomplete_max_output_tokens: "summary.maxOutputTokens",
+  incomplete_content_filter: "summary.contentFilter",
+  incomplete_unknown: "summary.incomplete",
+  model_refusal: "summary.refusal",
+  response_failed: "summary.responseFailed",
+  network_timeout: "summary.networkTimeout",
+  network_dns_failed: "summary.dnsFailed",
+  network_cannot_connect: "summary.cannotConnect",
+  network_request_failed: "summary.networkFailed",
+  unexpected_error: "summary.unexpectedError",
 };
 
-function summaryFailureLabel(reason: string): string {
+type Translate = ReturnType<typeof useI18n>["t"];
+
+function summaryFailureLabel(reason: string, t: Translate): string {
   if (reason.startsWith("http_status_")) {
-    return `模型服务返回 HTTP ${reason.slice("http_status_".length)}`;
+    return t("summary.httpStatus", { status: reason.slice("http_status_".length) });
   }
-  if (reason.startsWith("quality_gate_failed:")) return "旧版摘要校验未通过";
-  return summaryFailureLabels[reason] ?? "摘要生成失败";
+  if (reason.startsWith("quality_gate_failed:")) return t("summary.legacyQualityGate");
+  const key = summaryFailureLabels[reason];
+  return key ? t(key) : t("summary.failed");
 }
 
 const applicationIconCache = new Map<string, string | null>();
@@ -126,10 +132,11 @@ function ApplicationList({
 }
 
 function ContinuationHint({ item }: { item?: string }) {
+  const { t } = useI18n();
   if (!item) return null;
   return (
     <aside className="continuation-hints">
-      <span>接续线索</span>
+      <span>{t("timeline.continuationHint")}</span>
       <p>{item}</p>
     </aside>
   );
@@ -200,37 +207,37 @@ function dateKey(value: string): string {
   return new Date(value).toDateString();
 }
 
-function dayLabel(value: string): string {
+function dayLabel(value: string, locale: "en" | "zh-CN", t: Translate): string {
   const date = new Date(value);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
   const prefix =
     date.toDateString() === today.toDateString()
-      ? "今天"
+      ? t("common.today")
       : date.toDateString() === yesterday.toDateString()
-        ? "昨天"
-        : new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(date);
-  return `${prefix} · ${new Intl.DateTimeFormat("zh-CN", {
+        ? t("common.yesterday")
+        : new Intl.DateTimeFormat(locale, { weekday: "long" }).format(date);
+  return `${prefix} · ${new Intl.DateTimeFormat(locale, {
     month: "long",
     day: "numeric",
   }).format(date)}`;
 }
 
-function timeLabel(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
+function timeLabel(value: string, locale: "en" | "zh-CN"): string {
+  return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
 }
 
-function durationLabel(document: TimelineDocument): string {
+function durationLabel(document: TimelineDocument, t: Translate): string {
   const minutes = Math.max(
     1,
     Math.round((Date.parse(document.endedAt) - Date.parse(document.startedAt)) / 60_000),
   );
-  return `${minutes} 分钟`;
+  return t("common.minutes", { count: minutes });
 }
 
 function Chevron({ direction }: { direction: "left" | "right" }) {
@@ -242,14 +249,15 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
 }
 
 function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
+  const { t } = useI18n();
   if (!desktop || !desktop.recordingConsentGranted || desktop.connectionState === "connected") {
     return null;
   }
   const labels = {
-    starting: "正在启动本地采集器…",
-    stopped: "本地采集器已停止",
-    missing: "找不到本地采集器，请先运行 native:build",
-    failed: "本地采集器异常退出",
+    starting: t("connection.starting"),
+    stopped: t("connection.stopped"),
+    missing: t("connection.missing"),
+    failed: t("connection.failed"),
   } as const;
   return (
     <div className="connection-notice">
@@ -259,7 +267,9 @@ function ConnectionNotice({ desktop }: { desktop?: DesktopSnapshot }) {
         {desktop.connectionError && <small>{desktop.connectionError}</small>}
       </div>
       {desktop.connectionState !== "starting" && (
-        <button onClick={() => void window.computerHistory.startAgent()}>重新启动</button>
+        <button onClick={() => void window.computerHistory.startAgent()}>
+          {t("connection.restart")}
+        </button>
       )}
     </div>
   );
@@ -276,16 +286,17 @@ function RecordingConsentView({
   error?: string;
   onDismissError: () => void;
 }) {
+  const { locale, t } = useI18n();
   const [step, setStep] = useState<"boundary" | "permission">("boundary");
   const isBoundaryStep = step === "boundary";
   const details = isBoundaryStep
     ? [
-        ["默认关闭", "窗口截图、外部模型和遥测"],
-        ["自动过滤", "隐私浏览、密码字段和敏感系统界面"],
+        [t("onboarding.offByDefault"), t("onboarding.offByDefaultDetail")],
+        [t("onboarding.autoFiltered"), t("onboarding.autoFilteredDetail")],
       ]
     : [
-        ["独立授权", "系统会显示 DeskLore Collector"],
-        ["无需录屏", "录屏权限仅在以后开启视觉补充时申请"],
+        [t("onboarding.separatePermission"), t("onboarding.separatePermissionDetail")],
+        [t("onboarding.noScreenRecording"), t("onboarding.noScreenRecordingDetail")],
       ];
 
   return (
@@ -295,36 +306,52 @@ function RecordingConsentView({
           <img src={appIcon} alt="" />
           <strong>DeskLore</strong>
         </div>
-        <div
-          className="onboarding-progress"
-          role="progressbar"
-          aria-label={`设置进度：第 ${isBoundaryStep ? 1 : 2} 步，共 2 步`}
-          aria-valuemin={1}
-          aria-valuemax={2}
-          aria-valuenow={isBoundaryStep ? 1 : 2}
-        >
-          <i className="active" />
-          <i className={isBoundaryStep ? "" : "active"} />
+        <div className="onboarding-header-actions">
+          <select
+            className="onboarding-language"
+            aria-label={t("settings.language")}
+            value={locale}
+            disabled={busy}
+            onChange={(event) =>
+              void run(() => window.computerHistory.setLocale(event.target.value as "en" | "zh-CN"))
+            }
+          >
+            <option value="en">{t("language.english")}</option>
+            <option value="zh-CN">{t("language.simplifiedChinese")}</option>
+          </select>
+          <div
+            className="onboarding-progress"
+            role="progressbar"
+            aria-label={t("onboarding.progress", { step: isBoundaryStep ? 1 : 2 })}
+            aria-valuemin={1}
+            aria-valuemax={2}
+            aria-valuenow={isBoundaryStep ? 1 : 2}
+          >
+            <i className="active" />
+            <i className={isBoundaryStep ? "" : "active"} />
+          </div>
         </div>
       </header>
 
       {error && (
         <div className="error-banner onboarding-error">
-          <strong>操作没有完成</strong>
+          <strong>{t("common.actionFailed")}</strong>
           <span>{error}</span>
-          <button onClick={onDismissError}>关闭</button>
+          <button onClick={onDismissError}>{t("common.close")}</button>
         </div>
       )}
 
       <div className="onboarding-stage">
         <div className="onboarding-panel">
           <img className="onboarding-app-icon" src={appIcon} alt="" />
-          <span className="onboarding-kicker">第 {isBoundaryStep ? 1 : 2} 步，共 2 步</span>
-          <h1>{isBoundaryStep ? "确认记录范围" : "允许辅助功能访问"}</h1>
+          <span className="onboarding-kicker">
+            {t("onboarding.step", { step: isBoundaryStep ? 1 : 2 })}
+          </span>
+          <h1>
+            {isBoundaryStep ? t("onboarding.reviewBoundary") : t("onboarding.allowAccessibility")}
+          </h1>
           <p className="onboarding-lead">
-            {isBoundaryStep
-              ? "应用名、窗口标题、网页 URL 和交互语义会保存在这台 Mac。"
-              : "macOS 将请求辅助功能权限，用于读取应用和窗口语义。"}
+            {isBoundaryStep ? t("onboarding.boundaryLead") : t("onboarding.permissionLead")}
           </p>
 
           <div className="onboarding-details">
@@ -339,7 +366,7 @@ function RecordingConsentView({
           <div className="onboarding-actions">
             {!isBoundaryStep && (
               <button className="secondary" disabled={busy} onClick={() => setStep("boundary")}>
-                返回
+                {t("common.back")}
               </button>
             )}
             <button
@@ -353,7 +380,11 @@ function RecordingConsentView({
                 }
               }}
             >
-              {busy ? "正在启动…" : isBoundaryStep ? "继续" : "同意并开始记录"}
+              {busy
+                ? t("common.starting")
+                : isBoundaryStep
+                  ? t("common.continue")
+                  : t("onboarding.agreeAndStart")}
             </button>
           </div>
         </div>
@@ -373,6 +404,7 @@ function Sidebar({
   onView: (view: View) => void;
   onToggleRecording: () => void;
 }) {
+  const { t } = useI18n();
   const running = agent?.recorderState === "running";
   return (
     <aside className="sidebar">
@@ -387,22 +419,22 @@ function Sidebar({
       <nav>
         <button className={view === "timeline" ? "active" : ""} onClick={() => onView("timeline")}>
           <Icon name="timeline" />
-          <span>时间线</span>
+          <span>{t("sidebar.timeline")}</span>
           <b>{agent?.documents.length ?? "—"}</b>
         </button>
         <button className={view === "memory" ? "active" : ""} onClick={() => onView("memory")}>
           <Icon name="memory" />
-          <span>记忆</span>
+          <span>{t("sidebar.memory")}</span>
           <b>{agent ? agent.memories.filter((memory) => memory.kind === "day").length : "—"}</b>
         </button>
         <button className={view === "health" ? "active" : ""} onClick={() => onView("health")}>
           <Icon name="health" />
-          <span>采集健康</span>
+          <span>{t("sidebar.health")}</span>
           <i className={agent?.health.accessibilityGranted ? "ok" : "warn"} />
         </button>
         <button className={view === "settings" ? "active" : ""} onClick={() => onView("settings")}>
           <Icon name="settings" />
-          <span>设置</span>
+          <span>{t("sidebar.settings")}</span>
         </button>
       </nav>
       <div className="sidebar-bottom">
@@ -414,7 +446,7 @@ function Sidebar({
             <i />
           </span>
           <div>
-            <strong>{running ? "正在记录" : "记录已暂停"}</strong>
+            <strong>{running ? t("sidebar.recording") : t("sidebar.paused")}</strong>
           </div>
         </button>
       </div>
@@ -433,10 +465,11 @@ function TimelineCard({
   referenced: boolean;
   onAction: (action: "open" | "delete", id: string) => Promise<void>;
 }) {
+  const { locale, t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <article className={`timeline-entry ${referenced ? "referenced" : ""}`}>
-      <time>{timeLabel(document.startedAt)}</time>
+      <time>{timeLabel(document.startedAt, locale)}</time>
       <div className={`timeline-rail ${isLast ? "last" : ""}`} />
       <div className="entry-body">
         <div className="entry-title">
@@ -445,20 +478,24 @@ function TimelineCard({
         <p>{document.description}</p>
         {document.generatorFailureReason && (
           <div className="summary-error" role="status">
-            <strong>摘要失败</strong>
+            <strong>{t("summary.failed")}</strong>
             <span>
-              {summaryFailureLabel(document.generatorFailureReason)}（
-              {document.generatorFailureReason}），稍后自动重试
+              {t("summary.retrying", {
+                message: summaryFailureLabel(document.generatorFailureReason, t),
+                reason: document.generatorFailureReason,
+              })}
             </span>
           </div>
         )}
         <footer>
           <ApplicationList
             applications={document.applications}
-            trailing={<span className="duration">{durationLabel(document)}</span>}
+            trailing={<span className="duration">{durationLabel(document, t)}</span>}
           />
           <div className="entry-actions">
-            <button onClick={() => void onAction("open", document.id)}>打开原文</button>
+            <button onClick={() => void onAction("open", document.id)}>
+              {t("timeline.openRecord")}
+            </button>
             <button
               className={confirmDelete ? "confirm" : ""}
               onBlur={() => setConfirmDelete(false)}
@@ -467,7 +504,7 @@ function TimelineCard({
                 else setConfirmDelete(true);
               }}
             >
-              {confirmDelete ? "确认删除" : "删除"}
+              {confirmDelete ? t("common.confirmDelete") : t("common.delete")}
             </button>
           </div>
         </footer>
@@ -490,6 +527,7 @@ function DaySwitcher({
   selectedDate: string;
   onSelect: (date: string) => void;
 }) {
+  const { locale, t } = useI18n();
   const selectedIndex = Math.max(
     0,
     days.findIndex((day) => day.date === selectedDate),
@@ -499,25 +537,25 @@ function DaySwitcher({
   const newerDay = days[selectedIndex - 1];
 
   return (
-    <div className="day-switcher" role="group" aria-label="切换时间线日期">
+    <div className="day-switcher" role="group" aria-label={t("timeline.switchDate")}>
       <button
         type="button"
         disabled={!olderDay}
         onClick={() => olderDay && onSelect(olderDay.date)}
-        aria-label="查看更早日期"
-        title="查看更早日期"
+        aria-label={t("timeline.olderDate")}
+        title={t("timeline.olderDate")}
       >
         <Chevron direction="left" />
       </button>
       <div className="day-switcher-current">
         <select
-          aria-label="选择日期"
+          aria-label={t("timeline.selectDate")}
           value={selectedDay.date}
           onChange={(event) => onSelect(event.target.value)}
         >
           {days.map((day) => (
             <option key={day.date} value={day.date}>
-              {dayLabel(day.startedAt)}
+              {dayLabel(day.startedAt, locale, t)}
             </option>
           ))}
         </select>
@@ -526,8 +564,8 @@ function DaySwitcher({
         type="button"
         disabled={!newerDay}
         onClick={() => newerDay && onSelect(newerDay.date)}
-        aria-label="查看更晚日期"
-        title="查看更晚日期"
+        aria-label={t("timeline.newerDate")}
+        title={t("timeline.newerDate")}
       >
         <Chevron direction="right" />
       </button>
@@ -548,6 +586,7 @@ function TimelineView({
   referencedDocumentIDs: string[];
   onSelectDate: (date?: string) => void;
 }) {
+  const { t } = useI18n();
   const days = useMemo(() => {
     const groups = new Map<string, TimelineDocument[]>();
     const documents = [...(agent?.documents ?? [])].sort(
@@ -585,8 +624,8 @@ function TimelineView({
   return (
     <>
       <PageHeader
-        eyebrow="活动记录"
-        title="时间线"
+        eyebrow={t("timeline.eyebrow")}
+        title={t("timeline.title")}
         action={
           <div className="header-actions">
             <button
@@ -594,7 +633,7 @@ function TimelineView({
               onClick={() => void run(() => window.computerHistory.revealStorage())}
             >
               <Icon name="folder" />
-              显示文件
+              {t("common.revealFiles")}
             </button>
             {selectedDay && (
               <DaySwitcher days={days} selectedDate={selectedDay.date} onSelect={onSelectDate} />
@@ -606,12 +645,12 @@ function TimelineView({
         {!agent ? (
           <div className="empty-state">
             <div className="empty-clock" />
-            <h2>正在连接本地档案</h2>
+            <h2>{t("timeline.connecting")}</h2>
           </div>
         ) : days.length === 0 ? (
           <div className="empty-state">
             <div className="empty-clock" />
-            <h2>还没有时间线</h2>
+            <h2>{t("timeline.empty")}</h2>
           </div>
         ) : selectedDay ? (
           <div className="day-group" key={selectedDay.date}>
@@ -636,14 +675,14 @@ interface MemoryDay extends DatedGroup {
   periods: MemoryRollup[];
 }
 
-function memoryRangeLabel(memory: MemoryRollup): string {
-  return `${timeLabel(memory.startedAt)}–${timeLabel(memory.endedAt)}`;
+function memoryRangeLabel(memory: MemoryRollup, locale: "en" | "zh-CN"): string {
+  return `${timeLabel(memory.startedAt, locale)}–${timeLabel(memory.endedAt, locale)}`;
 }
 
-function searchKindLabel(kind: "10min" | "6h" | "day"): string {
-  if (kind === "day") return "当天概览";
-  if (kind === "6h") return "活动摘要";
-  return "时间线";
+function searchKindLabel(kind: "10min" | "6h" | "day", t: Translate): string {
+  if (kind === "day") return t("memory.dailyOverview");
+  if (kind === "6h") return t("memory.activitySummary");
+  return t("memory.timeline");
 }
 
 function visibleSearchAnswer(answer: string): string {
@@ -657,14 +696,15 @@ function MemorySourceFooter({
   memory: MemoryRollup;
   onOpenTimeline: (memory: MemoryRollup) => void;
 }) {
+  const { t } = useI18n();
   if (memory.sourceDocumentIDs.length === 0 && memory.applications.length === 0) return null;
   return (
     <footer className="memory-source">
       <ApplicationList applications={memory.applications} />
       {memory.sourceDocumentIDs.length > 0 && (
         <div className="memory-source-meta">
-          <span>基于 {memory.sourceDocumentIDs.length} 段活动</span>
-          <button onClick={() => onOpenTimeline(memory)}>查看时间线</button>
+          <span>{t("memory.basedOnActivities", { count: memory.sourceDocumentIDs.length })}</span>
+          <button onClick={() => onOpenTimeline(memory)}>{t("memory.viewTimeline")}</button>
         </div>
       )}
     </footer>
@@ -680,6 +720,7 @@ function MemoryView({
   run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
   onOpenTimeline: (memory: MemoryRollup) => void;
 }) {
+  const { locale, t } = useI18n();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<HistorySearchResponse>();
   const [searching, setSearching] = useState(false);
@@ -749,8 +790,8 @@ function MemoryView({
   return (
     <>
       <PageHeader
-        eyebrow="活动上下文"
-        title="记忆"
+        eyebrow={t("memory.eyebrow")}
+        title={t("memory.title")}
         action={
           <div className="header-actions">
             <button
@@ -758,7 +799,7 @@ function MemoryView({
               onClick={() => void run(() => window.computerHistory.revealStorage())}
             >
               <Icon name="folder" />
-              显示文件
+              {t("common.revealFiles")}
             </button>
             {selectedDay && (
               <DaySwitcher days={days} selectedDate={selectedDay.date} onSelect={setSelectedDate} />
@@ -768,8 +809,8 @@ function MemoryView({
       />
       <section className="memory-search">
         <div>
-          <span className="section-kicker">本地记忆检索</span>
-          <h2>询问过去的工作</h2>
+          <span className="section-kicker">{t("memory.searchKicker")}</span>
+          <h2>{t("memory.searchTitle")}</h2>
         </div>
         <form
           onSubmit={(event) => {
@@ -780,10 +821,12 @@ function MemoryView({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="例如：DeskLore 打包最后是什么状态？"
+            placeholder={t("memory.searchPlaceholder")}
             maxLength={500}
           />
-          <button disabled={searching}>{searching ? "检索中" : "检索"}</button>
+          <button disabled={searching}>
+            {searching ? t("memory.searching") : t("memory.search")}
+          </button>
         </form>
         {search && (
           <div className="memory-answer">
@@ -792,7 +835,7 @@ function MemoryView({
               <div>
                 {search.matches.slice(0, 5).map((match) => (
                   <span key={`${match.kind}-${match.id}`}>
-                    {searchKindLabel(match.kind)} · {match.title}
+                    {searchKindLabel(match.kind, t)} · {match.title}
                   </span>
                 ))}
               </div>
@@ -804,18 +847,18 @@ function MemoryView({
         {!agent ? (
           <div className="empty-state">
             <div className="empty-clock" />
-            <h2>正在连接本地档案</h2>
+            <h2>{t("memory.connecting")}</h2>
           </div>
         ) : days.length === 0 ? (
           <div className="empty-state">
             <div className="empty-clock" />
-            <h2>还没有长期记忆</h2>
+            <h2>{t("memory.empty")}</h2>
           </div>
         ) : selectedDay ? (
           <div className="memory-day" key={selectedDay.date}>
             {selectedDay.daily && (
               <article className="daily-memory">
-                <span className="section-kicker">当天概览</span>
+                <span className="section-kicker">{t("memory.dailyOverview")}</span>
                 <h2>{selectedDay.daily.title}</h2>
                 <p>{selectedDay.daily.description}</p>
                 <ContinuationHint item={selectedDay.daily.continuationHint} />
@@ -826,21 +869,21 @@ function MemoryView({
               <section className="memory-periods">
                 <header>
                   <div>
-                    <span className="section-kicker">按时间</span>
-                    <h2>活动摘要</h2>
+                    <span className="section-kicker">{t("memory.byTime")}</span>
+                    <h2>{t("memory.activitySummary")}</h2>
                   </div>
-                  <span>{selectedDay.periods.length} 段</span>
+                  <span>{t("memory.periodCount", { count: selectedDay.periods.length })}</span>
                 </header>
                 <div>
                   {selectedDay.periods.map((memory) => (
                     <details className="memory-period" key={memory.id}>
                       <summary>
-                        <time>{memoryRangeLabel(memory)}</time>
+                        <time>{memoryRangeLabel(memory, locale)}</time>
                         <div>
                           <h3>{memory.title}</h3>
                           <p>{memory.description}</p>
                         </div>
-                        <span>详情</span>
+                        <span>{t("common.details")}</span>
                       </summary>
                       <div className="memory-period-details">
                         <ContinuationHint item={memory.continuationHint} />
@@ -865,23 +908,24 @@ function HealthView({
   agent?: AgentSnapshot;
   run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const health = agent?.health;
   const rows = [
-    ["辅助功能权限", health?.accessibilityGranted],
-    ["全局交互监听", health?.interactionMonitorActive],
-    ["AX 语义监听", health?.axObserverActive],
+    [t("health.accessibility"), health?.accessibilityGranted],
+    [t("health.globalInteractions"), health?.interactionMonitorActive],
+    [t("health.axObserver"), health?.axObserverActive],
   ] as const;
   return (
     <>
       <PageHeader
-        eyebrow="原生采集器"
-        title="采集健康"
+        eyebrow={t("health.eyebrow")}
+        title={t("health.title")}
         action={
           <button
             className="secondary"
             onClick={() => void run(() => window.computerHistory.refreshPermissions())}
           >
-            重新检查
+            {t("health.recheck")}
           </button>
         }
       />
@@ -895,7 +939,7 @@ function HealthView({
               <div>
                 <strong>{label}</strong>
               </div>
-              <b>{healthy ? "正常" : "未就绪"}</b>
+              <b>{healthy ? t("common.ready") : t("common.notReady")}</b>
             </div>
           ))}
           {!health?.accessibilityGranted && (
@@ -903,21 +947,21 @@ function HealthView({
               className="permission-callout"
               onClick={() => void run(() => window.computerHistory.requestPermissions())}
             >
-              <span>需要辅助功能权限</span>
-              <strong>打开系统授权提示 →</strong>
+              <span>{t("health.permissionRequired")}</span>
+              <strong>{t("health.openPermission")}</strong>
             </button>
           )}
         </div>
         <div className="metric-grid">
           <div>
-            <span>采集耗时</span>
+            <span>{t("health.captureDuration")}</span>
             <strong>
               {Math.round(health?.lastAXCaptureDurationMilliseconds ?? 0)}
               <small> ms</small>
             </strong>
           </div>
           <div>
-            <span>语义事件</span>
+            <span>{t("health.semanticEvents")}</span>
             <strong>
               {(health?.keyboardSubmitCount ?? 0) +
                 (health?.keyboardShortcutCount ?? 0) +
@@ -925,27 +969,27 @@ function HealthView({
             </strong>
           </div>
           <div>
-            <span>采集队列</span>
+            <span>{t("health.captureQueue")}</span>
             <strong>{health?.axCaptureBacklog ?? 0}</strong>
           </div>
           <div>
-            <span>原始事件</span>
+            <span>{t("health.rawEvents")}</span>
             <strong>{health?.capturedEventCount ?? 0}</strong>
           </div>
           <div>
-            <span>已写入</span>
+            <span>{t("health.persisted")}</span>
             <strong>{health?.persistedEventCount ?? 0}</strong>
           </div>
           <div>
-            <span>策略拦截</span>
+            <span>{t("health.policyBlocked")}</span>
             <strong>{health?.policyBlockedEventCount ?? 0}</strong>
           </div>
           <div>
-            <span>重复丢弃</span>
+            <span>{t("health.duplicatesDropped")}</span>
             <strong>{health?.deduplicatedEventCount ?? 0}</strong>
           </div>
           <div>
-            <span>合并事件</span>
+            <span>{t("health.eventsCoalesced")}</span>
             <strong>{health?.burstCoalescedEventCount ?? 0}</strong>
           </div>
         </div>
@@ -961,6 +1005,7 @@ function SettingsView({
   agent?: AgentSnapshot;
   run: (action: () => Promise<DesktopSnapshot>) => Promise<void>;
 }) {
+  const { locale, t } = useI18n();
   const [enabled, setEnabled] = useState(agent?.llm.enabled ?? false);
   const [memorySynthesisEnabled, setMemorySynthesisEnabled] = useState(
     agent?.llm.memorySynthesisEnabled ?? false,
@@ -998,15 +1043,34 @@ function SettingsView({
   ]);
   return (
     <>
-      <PageHeader eyebrow="偏好设置" title="设置" />
+      <PageHeader eyebrow={t("settings.eyebrow")} title={t("settings.title")} />
       <section className="settings-sheet">
         <div className="settings-section">
           <div className="settings-copy">
-            <h2>语义摘要</h2>
+            <h2>{t("settings.language")}</h2>
+            <span>{t("settings.languageHint")}</span>
+          </div>
+          <select
+            className="settings-language"
+            aria-label={t("settings.language")}
+            value={locale}
+            onChange={(event) =>
+              void run(() => window.computerHistory.setLocale(event.target.value as "en" | "zh-CN"))
+            }
+          >
+            <option value="en">{t("language.english")}</option>
+            <option value="zh-CN">{t("language.simplifiedChinese")}</option>
+          </select>
+        </div>
+        <div className="settings-divider" />
+        <div className="settings-section">
+          <div className="settings-copy">
+            <h2>{t("settings.semanticSummaries")}</h2>
           </div>
           <label className="switch">
             <input
               type="checkbox"
+              aria-label={t("settings.semanticSummaries")}
               checked={enabled}
               onChange={(event) =>
                 void run(() => window.computerHistory.setLLMEnabled(event.target.checked))
@@ -1017,7 +1081,7 @@ function SettingsView({
         </div>
         <div className="form-grid">
           <label>
-            <span>模型</span>
+            <span>{t("settings.model")}</span>
             <input value={model} onChange={(event) => setModel(event.target.value)} />
           </label>
           <label className="wide">
@@ -1025,10 +1089,12 @@ function SettingsView({
             <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />
           </label>
           <label className="wide">
-            <span>API Key {agent?.llm.apiKeyConfigured && <b>已保存在 Keychain</b>}</span>
+            <span>
+              API Key {agent?.llm.apiKeyConfigured && <b>{t("settings.keychainSaved")}</b>}
+            </span>
             <input
               type="password"
-              placeholder={agent?.llm.apiKeyConfigured ? "留空以保留现有密钥" : "sk-…"}
+              placeholder={agent?.llm.apiKeyConfigured ? t("settings.keepExistingKey") : "sk-…"}
               value={apiKey}
               onChange={(event) => setAPIKey(event.target.value)}
             />
@@ -1051,25 +1117,26 @@ function SettingsView({
               })
             }
           >
-            保存模型设置
+            {t("settings.saveModel")}
           </button>
           {agent?.llm.apiKeyConfigured && (
             <button
               className="text-danger"
               onClick={() => void run(() => window.computerHistory.removeLLMAPIKey())}
             >
-              移除密钥
+              {t("settings.removeKey")}
             </button>
           )}
         </div>
         <div className="settings-subtoggle">
           <div>
-            <strong>模型归纳长期记忆</strong>
-            <span>将本地十分钟摘要发送到同一模型 endpoint，生成 6 小时和每日综合记忆。</span>
+            <strong>{t("settings.memorySynthesis")}</strong>
+            <span>{t("settings.memorySynthesisDetail")}</span>
           </div>
           <label className="switch">
             <input
               type="checkbox"
+              aria-label={t("settings.memorySynthesis")}
               checked={memorySynthesisEnabled}
               onChange={(event) =>
                 void run(() =>
@@ -1081,50 +1148,48 @@ function SettingsView({
           </label>
         </div>
         <div className="privacy-boundary">
-          <strong>数据边界</strong>
-          <span>
-            原始事件、时间线和长期记忆保存在本机。开启语义摘要会发送经过过滤的事件样本；“模型归纳长期记忆”另行发送本地十分钟摘要。两个开关均关闭时，检索与确定性聚合完全离线。
-          </span>
+          <strong>{t("settings.dataBoundary")}</strong>
+          <span>{t("settings.dataBoundaryDetail")}</span>
         </div>
         <div className="settings-divider" />
         <div className="settings-section observation">
           <div className="settings-copy">
-            <h2>视觉证据</h2>
-            <span>作为 AX 不足时的可选补充能力，默认关闭。</span>
+            <h2>{t("settings.visualEvidence")}</h2>
+            <span>{t("settings.visualEvidenceDetail")}</span>
           </div>
         </div>
         <div className="form-grid">
           <label>
-            <span>AX 充分性判断</span>
+            <span>{t("settings.axJudge")}</span>
             <select
               value={axJudge}
               onChange={(event) => setAXJudge(event.target.value as "rules" | "luna")}
             >
-              <option value="rules">本地规则</option>
-              <option value="luna">Luna 判断灰区</option>
+              <option value="rules">{t("settings.localRules")}</option>
+              <option value="luna">{t("settings.lunaGrayAreas")}</option>
             </select>
           </label>
           <label>
-            <span>窗口截图</span>
+            <span>{t("settings.windowCapture")}</span>
             <select
               value={captureMode}
               onChange={(event) => setCaptureMode(event.target.value as "off" | "fallback")}
             >
-              <option value="off">关闭</option>
-              <option value="fallback">AX 不足时启用</option>
+              <option value="off">{t("settings.off")}</option>
+              <option value="fallback">{t("settings.whenAXInsufficient")}</option>
             </select>
           </label>
           <label>
-            <span>视觉理解</span>
+            <span>{t("settings.visualUnderstanding")}</span>
             <select
               value={understandingMode}
               onChange={(event) =>
                 setUnderstandingMode(event.target.value as "off" | "ocr" | "luna")
               }
             >
-              <option value="off">仅验证截图能力</option>
-              <option value="ocr">本地 OCR</option>
-              <option value="luna">本地脱敏后发送 Luna</option>
+              <option value="off">{t("settings.verifyCaptureOnly")}</option>
+              <option value="ocr">{t("settings.localOCR")}</option>
+              <option value="luna">{t("settings.redactedLuna")}</option>
             </select>
           </label>
         </div>
@@ -1141,7 +1206,7 @@ function SettingsView({
               )
             }
           >
-            保存视觉设置
+            {t("settings.saveVisual")}
           </button>
           {captureMode === "fallback" && agent?.visual.providerStatus === "permission_required" && (
             <button
@@ -1149,36 +1214,37 @@ function SettingsView({
                 void run(() => window.computerHistory.requestScreenCapturePermission())
               }
             >
-              授予录屏权限
+              {t("settings.grantScreenRecording")}
             </button>
           )}
         </div>
         <div className="privacy-boundary">
           <strong>
-            Provider：
-            {agent?.visual.providerStatus === "ready"
-              ? "已就绪"
-              : agent?.visual.providerStatus === "permission_required"
-                ? "等待录屏权限"
-                : agent?.visual.providerStatus === "unavailable"
-                  ? "未安装"
-                  : "未启用"}
+            {t("settings.provider", {
+              status:
+                agent?.visual.providerStatus === "ready"
+                  ? t("common.ready")
+                  : agent?.visual.providerStatus === "permission_required"
+                    ? t("settings.awaitingScreenRecording")
+                    : agent?.visual.providerStatus === "unavailable"
+                      ? t("common.notInstalled")
+                      : t("common.disabled"),
+            })}
           </strong>
-          <span>
-            原始像素不写入事件或渲染层。Luna 灰区判断会发送过滤后的 AX 证据；Luna
-            视觉理解会发送经过本地 OCR 与敏感模式规则处理的窗口图像。应用与域名排除策略仍优先执行。
-          </span>
+          <span>{t("settings.visualBoundaryDetail")}</span>
         </div>
         <div className="settings-divider" />
         <div className="settings-section observation">
           <div className="settings-copy">
-            <h2>当前观察范围</h2>
+            <h2>{t("settings.currentScope")}</h2>
           </div>
         </div>
         <div className="scope-list">
           <div>
-            <span>当前应用</span>
-            <strong>{agent?.activeApplication?.name ?? "没有前台应用"}</strong>
+            <span>{t("settings.currentApplication")}</span>
+            <strong>
+              {agent?.activeApplication?.name ?? t("settings.noForegroundApplication")}
+            </strong>
             {agent?.activeApplication && (
               <button
                 onClick={() =>
@@ -1189,13 +1255,15 @@ function SettingsView({
                   )
                 }
               >
-                {agent.activeApplicationAllowed ? "停止观察" : "允许观察"}
+                {agent.activeApplicationAllowed
+                  ? t("settings.stopObserving")
+                  : t("settings.allowObserving")}
               </button>
             )}
           </div>
           <div>
-            <span>当前域名</span>
-            <strong>{agent?.activeDomain ?? "未检测到浏览器域名"}</strong>
+            <span>{t("settings.currentDomain")}</span>
+            <strong>{agent?.activeDomain ?? t("settings.noBrowserDomain")}</strong>
             {agent?.activeDomain && (
               <button
                 onClick={() =>
@@ -1206,7 +1274,9 @@ function SettingsView({
                   )
                 }
               >
-                {agent.activeDomainAllowed ? "停止观察" : "允许观察"}
+                {agent.activeDomainAllowed
+                  ? t("settings.stopObserving")
+                  : t("settings.allowObserving")}
               </button>
             )}
           </div>
@@ -1214,8 +1284,8 @@ function SettingsView({
         <div className="settings-divider" />
         <div className="settings-section observation">
           <div className="settings-copy">
-            <h2>删除本地历史</h2>
-            <span>清空原始事件、时间线、长期记忆和视觉证据，并暂停记录。</span>
+            <h2>{t("settings.deleteHistory")}</h2>
+            <span>{t("settings.deleteHistoryDetail")}</span>
           </div>
           <button
             className={confirmClearHistory ? "danger-confirm" : "text-danger"}
@@ -1229,7 +1299,7 @@ function SettingsView({
               }
             }}
           >
-            {confirmClearHistory ? "确认清空并暂停" : "清空全部历史"}
+            {confirmClearHistory ? t("settings.confirmClear") : t("settings.clearHistory")}
           </button>
         </div>
       </section>
@@ -1311,66 +1381,76 @@ export function App() {
     [desktop?.agent?.documents],
   );
 
+  const locale = desktop?.locale ?? "en";
+  const t = (key: MessageKey, values?: Record<string, string | number>): string =>
+    translate(locale, key, values);
+
   if (!desktop) {
     return (
-      <div className="startup-screen">
-        {error && (
-          <div className="error-banner">
-            <strong>DeskLore 无法启动</strong>
-            <span>{error}</span>
-            <button onClick={() => setError(undefined)}>关闭</button>
-          </div>
-        )}
-      </div>
+      <I18nProvider locale={locale}>
+        <div className="startup-screen">
+          {error && (
+            <div className="error-banner">
+              <strong>{t("startup.failed")}</strong>
+              <span>{error}</span>
+              <button onClick={() => setError(undefined)}>{t("common.close")}</button>
+            </div>
+          )}
+        </div>
+      </I18nProvider>
     );
   }
 
   if (!desktop.recordingConsentGranted) {
     return (
-      <div className={`onboarding-root ${busy ? "busy" : ""}`}>
-        <RecordingConsentView
-          run={run}
-          busy={busy}
-          error={error}
-          onDismissError={() => setError(undefined)}
-        />
-      </div>
+      <I18nProvider locale={locale}>
+        <div className={`onboarding-root ${busy ? "busy" : ""}`}>
+          <RecordingConsentView
+            run={run}
+            busy={busy}
+            error={error}
+            onDismissError={() => setError(undefined)}
+          />
+        </div>
+      </I18nProvider>
     );
   }
 
   return (
-    <div className={`app-shell ${busy ? "busy" : ""}`}>
-      <Sidebar
-        view={view}
-        agent={desktop?.agent}
-        onView={setView}
-        onToggleRecording={toggleRecording}
-      />
-      <main className="content">
-        <ConnectionNotice desktop={desktop} />
-        {error && (
-          <div className="error-banner">
-            <strong>操作没有完成</strong>
-            <span>{error}</span>
-            <button onClick={() => setError(undefined)}>关闭</button>
-          </div>
-        )}
-        {view === "timeline" ? (
-          <TimelineView
-            agent={desktop?.agent}
-            run={run}
-            selectedDate={selectedTimelineDate}
-            referencedDocumentIDs={referencedDocumentIDs}
-            onSelectDate={selectTimelineDate}
-          />
-        ) : view === "memory" ? (
-          <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
-        ) : view === "health" ? (
-          <HealthView agent={desktop?.agent} run={run} />
-        ) : (
-          <SettingsView agent={desktop?.agent} run={run} />
-        )}
-      </main>
-    </div>
+    <I18nProvider locale={locale}>
+      <div className={`app-shell ${busy ? "busy" : ""}`}>
+        <Sidebar
+          view={view}
+          agent={desktop?.agent}
+          onView={setView}
+          onToggleRecording={toggleRecording}
+        />
+        <main className="content">
+          <ConnectionNotice desktop={desktop} />
+          {error && (
+            <div className="error-banner">
+              <strong>{t("common.actionFailed")}</strong>
+              <span>{error}</span>
+              <button onClick={() => setError(undefined)}>{t("common.close")}</button>
+            </div>
+          )}
+          {view === "timeline" ? (
+            <TimelineView
+              agent={desktop?.agent}
+              run={run}
+              selectedDate={selectedTimelineDate}
+              referencedDocumentIDs={referencedDocumentIDs}
+              onSelectDate={selectTimelineDate}
+            />
+          ) : view === "memory" ? (
+            <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
+          ) : view === "health" ? (
+            <HealthView agent={desktop?.agent} run={run} />
+          ) : (
+            <SettingsView agent={desktop?.agent} run={run} />
+          )}
+        </main>
+      </div>
+    </I18nProvider>
   );
 }

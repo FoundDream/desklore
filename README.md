@@ -28,6 +28,8 @@ visual fallback exists for gaps in Accessibility evidence, but it is disabled by
   API credentials stay on your Mac unless you explicitly enable a model-backed feature.
 - **Explicit recording consent.** The native collector does not start before the first-run consent
   screen is accepted.
+- **Bilingual interface.** English is the default; Simplified Chinese can be selected during
+  onboarding or later in Settings.
 - **Inspectable artifacts.** Timeline and memory outputs are Markdown files with source IDs and
   deterministic fallbacks.
 
@@ -106,7 +108,7 @@ Local data lives at:
   timeline/       # derived Markdown timeline cards
   memory/6h/      # six-hour Markdown rollups
   memory/day/     # daily Markdown rollups
-  state/          # consent, policy, visual, and model settings
+  state/          # consent, language, policy, visual, and model settings
 ```
 
 Files are created with owner-only permissions where supported. DeskLore does not add application-

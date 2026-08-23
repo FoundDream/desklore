@@ -9,6 +9,8 @@ import type {
   TimelineApplication,
   TimelineDocument,
 } from "../../shared/contracts.js";
+import type { AppLocale } from "../../shared/i18n.js";
+import { translate } from "../../shared/i18n.js";
 import { AgentClient } from "../agent-client.js";
 import { classifyKeyboardEvent, EventBurstCoalescer, EventCoalescer } from "./coalescer.js";
 import {
@@ -115,6 +117,7 @@ export class HistoryService extends EventEmitter {
   };
   private apiKeyConfigured = false;
   private visualSettings: VisualSettings = { ...defaultVisualSettings };
+  private locale: AppLocale = "en";
   private recordingConsentGranted = false;
   private documents: TimelineDocumentRecord[] = [];
   private memories: MemoryRollupRecord[] = [];
@@ -174,14 +177,21 @@ export class HistoryService extends EventEmitter {
     this.layout = makeStorageLayout(storageRoot);
     this.segments = new SegmentStore(this.layout);
     this.settingsStore = new HistorySettingsStore(this.layout);
-    this.timeline = new TimelineRepository(this.layout, this.segments, async () =>
-      this.llmRuntime(),
+    this.timeline = new TimelineRepository(
+      this.layout,
+      this.segments,
+      async () => this.llmRuntime(),
+      () => this.locale,
     );
-    this.memory = new MemoryRepository(this.layout, async () => {
-      if (!this.llmSettings.memorySynthesisEnabled) return undefined;
-      const runtime = await this.llmRuntime();
-      return runtime && !("failureReason" in runtime) ? runtime : undefined;
-    });
+    this.memory = new MemoryRepository(
+      this.layout,
+      async () => {
+        if (!this.llmSettings.memorySynthesisEnabled) return undefined;
+        const runtime = await this.llmRuntime();
+        return runtime && !("failureReason" in runtime) ? runtime : undefined;
+      },
+      () => this.locale,
+    );
     collector.on("snapshot", () => this.emitSnapshot());
     collector.on("event", (event: HistoryEvent) => {
       if (!this.receivedNativeEvent) {
@@ -224,6 +234,7 @@ export class HistoryService extends EventEmitter {
         }
       : undefined;
     return {
+      locale: this.locale,
       connectionState: native.connectionState,
       recordingConsentGranted: this.recordingConsentGranted,
       agent: snapshot,
@@ -340,6 +351,15 @@ export class HistoryService extends EventEmitter {
     return this.current();
   }
 
+  async setLocale(locale: AppLocale): Promise<DesktopSnapshot> {
+    await this.initialize();
+    await this.settingsStore.saveLocale(locale);
+    this.locale = locale;
+    this.lastError = undefined;
+    this.emitSnapshot();
+    return this.current();
+  }
+
   async configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot> {
     const next = {
       enabled: input.enabled,
@@ -348,12 +368,12 @@ export class HistoryService extends EventEmitter {
       endpoint: input.endpoint.trim(),
     };
     if (!validateLLMSettings(next)) {
-      this.lastError = "模型名称或 Endpoint 无效；远程地址必须使用 HTTPS。";
+      this.lastError = translate(this.locale, "error.invalidModelSettings");
       this.emitSnapshot();
       return this.current();
     }
     const apiKey = input.apiKey.trim();
-    if (apiKey) await this.settingsStore.saveAPIKey(apiKey);
+    if (apiKey) await this.settingsStore.saveAPIKey(apiKey, this.locale);
     await this.settingsStore.saveLLMSettings(next);
     this.llmSettings = next;
     this.visualUnderstandingCache.clear();
@@ -402,7 +422,7 @@ export class HistoryService extends EventEmitter {
 
   async requestScreenCapturePermission(): Promise<DesktopSnapshot> {
     if (!this.visualCaptureProvider) {
-      this.lastError = "视觉截图 Provider 未安装。";
+      this.lastError = translate(this.locale, "error.visualProviderUnavailable");
       this.emitSnapshot();
       return this.current();
     }
@@ -484,13 +504,19 @@ export class HistoryService extends EventEmitter {
     if (this.initialized) return;
     await ensureStorage(this.layout);
     await hardenStoragePermissions(this.layout);
-    [this.policy, this.llmSettings, this.visualSettings, this.recordingConsentGranted] =
-      await Promise.all([
-        this.settingsStore.loadPolicy(),
-        this.settingsStore.loadLLMSettings(),
-        this.settingsStore.loadVisualSettings(),
-        this.settingsStore.hasRecordingConsent(),
-      ]);
+    [
+      this.locale,
+      this.policy,
+      this.llmSettings,
+      this.visualSettings,
+      this.recordingConsentGranted,
+    ] = await Promise.all([
+      this.settingsStore.loadLocale(),
+      this.settingsStore.loadPolicy(),
+      this.settingsStore.loadLLMSettings(),
+      this.settingsStore.loadVisualSettings(),
+      this.settingsStore.hasRecordingConsent(),
+    ]);
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
     this.documents = await this.timeline.loadDocuments();
     this.memories = await this.memory.refresh(this.documents);

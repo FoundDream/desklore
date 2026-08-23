@@ -1,6 +1,8 @@
 import { safeStorage } from "electron";
 import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { AppLocale } from "../../shared/i18n.js";
+import { isAppLocale, translate } from "../../shared/i18n.js";
 import { defaultObservationPolicy } from "./policy.js";
 import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "./types.js";
 import type { StorageLayout } from "./storage.js";
@@ -44,6 +46,7 @@ export class HistorySettingsStore {
   private readonly apiKeyPath: string;
   private readonly visualPath: string;
   private readonly recordingConsentPath: string;
+  private readonly interfacePath: string;
 
   constructor(layout: StorageLayout) {
     this.policyPath = path.join(layout.state, "observation-policy.json");
@@ -51,6 +54,25 @@ export class HistorySettingsStore {
     this.apiKeyPath = path.join(layout.state, "llm-api-key.bin");
     this.visualPath = path.join(layout.state, "visual-settings.json");
     this.recordingConsentPath = path.join(layout.state, "recording-consent.json");
+    this.interfacePath = path.join(layout.state, "interface-settings.json");
+  }
+
+  async loadLocale(): Promise<AppLocale> {
+    const stored = (await readJSON(this.interfacePath)) as
+      | { schemaVersion?: unknown; locale?: unknown }
+      | undefined;
+    if (!stored) return "en";
+    if (stored.schemaVersion !== 1 || !isAppLocale(stored.locale)) {
+      throw new Error("Unsupported interface settings schema");
+    }
+    return stored.locale;
+  }
+
+  async saveLocale(locale: AppLocale): Promise<void> {
+    await atomicWrite(
+      this.interfacePath,
+      `${JSON.stringify({ schemaVersion: 1, locale }, null, 2)}\n`,
+    );
   }
 
   async loadPolicy(): Promise<ObservationPolicy> {
@@ -166,9 +188,9 @@ export class HistorySettingsStore {
     }
   }
 
-  async saveAPIKey(apiKey: string): Promise<void> {
+  async saveAPIKey(apiKey: string, locale: AppLocale = "en"): Promise<void> {
     if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error("系统安全存储当前不可用，API Key 未保存。");
+      throw new Error(translate(locale, "error.secureStorageUnavailable"));
     }
     await atomicWrite(this.apiKeyPath, safeStorage.encryptString(apiKey));
     await chmod(this.apiKeyPath, 0o600);

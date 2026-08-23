@@ -14,6 +14,8 @@ import type {
   LLMConfigurationInput,
   VisualConfigurationInput,
 } from "../shared/contracts.js";
+import type { AppLocale } from "../shared/i18n.js";
+import { isAppLocale, translate } from "../shared/i18n.js";
 import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
 import { NativeAgentVisualCaptureProvider } from "./history/native-visual-provider.js";
 import { HistoryService } from "./history/service.js";
@@ -144,21 +146,22 @@ function setDevelopmentDockIcon(): void {
 function rebuildTray(snapshot: DesktopSnapshot): void {
   if (!tray) return;
   const running = snapshot.agent?.recorderState === "running";
-  tray.setToolTip(running ? "DeskLore · 正在记录" : "DeskLore");
+  const t = (key: Parameters<typeof translate>[1]): string => translate(snapshot.locale, key);
+  tray.setToolTip(running ? t("tray.recording") : "DeskLore");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "打开时间线", click: showWindow },
+      { label: t("tray.openTimeline"), click: showWindow },
       { type: "separator" },
       !snapshot.recordingConsentGranted
-        ? { label: "允许并启动记录", click: () => void history.grantRecordingConsent() }
+        ? { label: t("tray.allowAndStart"), click: () => void history.grantRecordingConsent() }
         : snapshot.connectionState !== "connected"
-          ? { label: "启动采集器", click: () => void history.start() }
+          ? { label: t("tray.startCollector"), click: () => void history.start() }
           : running
-            ? { label: "暂停记录", click: () => void history.pause() }
-            : { label: "继续记录", click: () => void history.resume() },
+            ? { label: t("tray.pause"), click: () => void history.pause() }
+            : { label: t("tray.resume"), click: () => void history.resume() },
       { type: "separator" },
       {
-        label: "退出 DeskLore",
+        label: t("tray.quit"),
         click: () => app.quit(),
       },
     ]),
@@ -202,6 +205,11 @@ function registerIPC(): void {
   ipcMain.handle("history:get-snapshot", (event) => {
     assertRenderer(event);
     return history.current();
+  });
+  ipcMain.handle("history:set-locale", async (event, locale: AppLocale) => {
+    assertRenderer(event);
+    if (!isAppLocale(locale)) throw new Error("Invalid interface language");
+    return history.setLocale(locale);
   });
   ipcMain.handle("history:grant-recording-consent", async (event) => {
     assertRenderer(event);
@@ -343,7 +351,11 @@ if (!hasSingleInstanceLock) {
           mainWindow?.webContents.send("history:snapshot", snapshot);
         }
       });
-      await history.start();
+      const initialSnapshot = await history.start();
+      rebuildTray(initialSnapshot);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("history:snapshot", initialSnapshot);
+      }
     })
     .catch((error: unknown) => {
       console.error("[desklore] Failed to start the desktop app:", error);

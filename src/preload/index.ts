@@ -5,11 +5,13 @@ import type {
   LLMConfigurationInput,
   VisualConfigurationInput,
 } from "../shared/contracts.js";
+import type { AppLocale } from "../shared/i18n.js";
 
 const invoke = (channel: string): Promise<DesktopSnapshot> => ipcRenderer.invoke(channel);
 
 const api: ComputerHistoryAPI = {
   getSnapshot: () => invoke("history:get-snapshot"),
+  setLocale: (locale: AppLocale) => ipcRenderer.invoke("history:set-locale", locale),
   grantRecordingConsent: () => invoke("history:grant-recording-consent"),
   startAgent: () => invoke("history:start-agent"),
   stopAgent: () => invoke("history:stop-agent"),

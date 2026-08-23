@@ -131,6 +131,31 @@ svg {
   gap: 6px;
 }
 
+.onboarding-header-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.onboarding-language {
+  max-width: 150px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+}
+
+.onboarding-language:hover,
+.onboarding-language:focus-visible {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
 .onboarding-progress i {
   width: 24px;
   height: 3px;
@@ -1240,6 +1265,35 @@ button.primary:hover {
   margin-top: 4px;
   color: var(--muted);
   font-size: 9px;
+}
+
+.settings-language {
+  width: 180px;
+  height: 36px;
+  flex: none;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  appearance: none;
+  color: var(--foreground);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, #71717a 50%),
+    linear-gradient(135deg, #71717a 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 15px,
+    calc(100% - 10px) 15px;
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
+  font-size: 10px;
+}
+
+.settings-language:focus-visible {
+  border-color: #a1a1aa;
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .switch {

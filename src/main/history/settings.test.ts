@@ -114,6 +114,18 @@ describe("History settings", () => {
     await expect(settingsStore.hasRecordingConsent()).resolves.toBe(true);
   });
 
+  it("defaults the interface to English and persists an explicit language choice", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-interface-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const settingsStore = new HistorySettingsStore(layout);
+
+    await expect(settingsStore.loadLocale()).resolves.toBe("en");
+    await settingsStore.saveLocale("zh-CN");
+    await expect(settingsStore.loadLocale()).resolves.toBe("zh-CN");
+  });
+
   it("keeps visual capabilities independently disabled by default and persists opt-in", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-visual-settings-"));
     temporaryDirectories.push(root);
