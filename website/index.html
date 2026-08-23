@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111b45" />
+    <meta
+      name="description"
+      content="DeskLore is open-source computer history for macOS: semantic-first, local-first, and built without continuous screen recording."
+    />
+    <link rel="icon" href="./assets/icon.png" />
+    <link rel="preload" as="image" href="./assets/hero-memory.jpg" fetchpriority="high" />
+    <title>DeskLore — Computer history for your Mac</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <img
+          class="hero__image"
+          src="./assets/hero-memory.jpg"
+          alt="A translucent ribbon of memories floating in deep blue space"
+          data-i18n-alt="hero.imageAlt"
+          width="1680"
+          height="933"
+          fetchpriority="high"
+        />
+        <div class="hero__veil" aria-hidden="true"></div>
+
+        <header class="site-header page-shell">
+          <a
+            class="brand"
+            href="#top"
+            aria-label="Back to the DeskLore home page"
+            data-i18n-aria-label="nav.home"
+          >
+            <img src="./assets/icon.png" alt="" width="32" height="32" />
+            <span>DeskLore</span>
+          </a>
+          <nav class="site-nav" aria-label="Primary navigation" data-i18n-aria-label="nav.primary">
+            <a href="#history" data-i18n="nav.timeline">Timeline</a>
+            <a href="#privacy" data-i18n="nav.privacy">Privacy</a>
+            <a href="#open-source" data-i18n="nav.openSource">Open source</a>
+          </nav>
+          <div class="site-header__actions">
+            <select
+              class="language-switcher"
+              aria-label="Language"
+              data-i18n-aria-label="language.label"
+            >
+              <option value="en">English</option>
+              <option value="zh-CN">简体中文</option>
+            </select>
+            <a
+              class="header-cta"
+              href="https://github.com/FoundDream/desklore"
+              target="_blank"
+              rel="noreferrer"
+              data-i18n="common.viewSource"
+            >
+              View source
+            </a>
+          </div>
+        </header>
+
+        <div class="hero__content page-shell" id="top">
+          <h1 id="hero-title">
+            <span data-i18n="hero.titleLine1">Your Mac,</span>
+            <span data-i18n="hero.titleLine2">with a memory of its own.</span>
+          </h1>
+          <p data-i18n="hero.lead">
+            Turn everyday activity into a readable timeline—without continuous screen recording or
+            uploading raw history.
+          </p>
+          <div class="hero__actions">
+            <a class="button button--light" href="#history" data-i18n="hero.howItWorks"
+              >See how it works</a
+            >
+            <a class="text-link text-link--light" href="#privacy" data-i18n="hero.privacyBoundary"
+              >Explore the privacy boundary</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <div class="page-body">
+        <section class="manifesto section-shell reveal" aria-labelledby="manifesto-title">
+          <img
+            class="manifesto__icon"
+            src="./assets/icon.png"
+            alt="DeskLore app icon"
+            data-i18n-alt="manifesto.iconAlt"
+            width="96"
+            height="96"
+            loading="lazy"
+          />
+          <h2 id="manifesto-title" data-i18n="manifesto.title">
+            Computer history should not be a pile of recordings. It should be readable, searchable,
+            and yours to control.
+          </h2>
+          <p data-i18n="manifesto.body">
+            DeskLore focuses on apps, windows, web pages, and interaction semantics, turning
+            scattered activity into a personal timeline.
+          </p>
+        </section>
+
+        <section class="product-story section-shell" id="history" aria-labelledby="history-title">
+          <div class="product-story__copy reveal">
+            <span class="section-label" data-i18n="history.label">Readable computer history</span>
+            <h2 id="history-title" data-i18n="history.title">
+              What you did today should not depend on memory alone.
+            </h2>
+            <p data-i18n="history.body">
+              DeskLore groups continuous events into clear activity segments, preserving time,
+              context, and sources so your day becomes traceable again.
+            </p>
+          </div>
+          <figure class="product-window product-window--timeline reveal">
+            <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+            <img
+              src="./assets/timeline.png"
+              alt="DeskLore timeline showing the day's activity by time"
+              data-i18n-alt="history.imageAlt"
+              width="1162"
+              height="680"
+              loading="lazy"
+            />
+          </figure>
+        </section>
+
+        <section class="principles section-shell" id="privacy" aria-labelledby="privacy-title">
+          <div class="principles__lead reveal">
+            <h2 id="privacy-title" data-i18n="privacy.title">Consent first. Recording second.</h2>
+            <p data-i18n="privacy.body">
+              DeskLore processes history locally by default. Visual fallback is off, sensitive
+              surfaces are filtered, and raw events are kept only briefly.
+            </p>
+            <a
+              class="text-link"
+              href="https://github.com/FoundDream/desklore/blob/main/PRIVACY.md"
+              target="_blank"
+              rel="noreferrer"
+              data-i18n="privacy.readPolicy"
+            >
+              Read the full privacy policy
+            </a>
+          </div>
+          <div class="principle-list reveal">
+            <article>
+              <span data-i18n="privacy.semanticLabel">Semantics first</span>
+              <h3 data-i18n="privacy.semanticTitle">
+                Understand activity instead of saving the whole screen.
+              </h3>
+              <p data-i18n="privacy.semanticBody">
+                Apps, windows, URLs, and interactions are normalized and filtered first.
+              </p>
+            </article>
+            <article>
+              <span data-i18n="privacy.visualLabel">Visuals on demand</span>
+              <h3 data-i18n="privacy.visualTitle">
+                Screenshots are off by default, and raw pixels are not persisted.
+              </h3>
+              <p data-i18n="privacy.visualBody">
+                Window visuals are added only when semantics are insufficient and the user
+                explicitly enables them.
+              </p>
+            </article>
+            <article>
+              <span data-i18n="privacy.inspectableLabel">Inspectable results</span>
+              <h3 data-i18n="privacy.inspectableTitle">
+                Timelines and memories are saved as Markdown.
+              </h3>
+              <p data-i18n="privacy.inspectableBody">
+                Records include source IDs and can be deleted or regenerated by the user.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="consent-story section-shell" aria-labelledby="consent-title">
+          <div class="consent-story__media reveal">
+            <figure class="product-window product-window--onboarding">
+              <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+              <img
+                src="./assets/onboarding.png"
+                alt="DeskLore onboarding explaining its recording and privacy boundaries"
+                data-i18n-alt="consent.imageAlt"
+                width="2360"
+                height="1560"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+          <div class="consent-story__copy reveal">
+            <h2 id="consent-title" data-i18n="consent.title">
+              Make the boundary clear before recording.
+            </h2>
+            <p data-i18n="consent.body">
+              DeskLore does not capture anything immediately on first launch. You review the
+              recording scope before deciding whether to grant macOS Accessibility access.
+            </p>
+          </div>
+        </section>
+
+        <section class="flow section-shell" aria-labelledby="flow-title">
+          <h2 id="flow-title" class="reveal" data-i18n="flow.title">
+            From the present moment to history you can revisit.
+          </h2>
+          <div class="flow__grid reveal">
+            <article>
+              <strong data-i18n="flow.observeTitle">Observe</strong>
+              <p data-i18n="flow.observeBody">
+                Read app, window, and interaction semantics through macOS Accessibility.
+              </p>
+            </article>
+            <article>
+              <strong data-i18n="flow.filterTitle">Filter</strong>
+              <p data-i18n="flow.filterBody">
+                Remove password fields, private browsing, and sensitive system surfaces at the
+                native capture boundary.
+              </p>
+            </article>
+            <article>
+              <strong data-i18n="flow.organizeTitle">Organize</strong>
+              <p data-i18n="flow.organizeBody">
+                Create searchable Markdown timelines and progressively roll them into long-term
+                memory.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="open-source section-shell" id="open-source" aria-labelledby="open-title">
+          <div class="open-source__mark reveal" aria-hidden="true">
+            <img src="./assets/icon.png" alt="" width="112" height="112" loading="lazy" />
+          </div>
+          <span class="section-label reveal" data-i18n="openSource.label">Open source</span>
+          <h2 id="open-title" class="reveal" data-i18n="openSource.title">
+            Your history should stay under your control.
+          </h2>
+          <p class="reveal" data-i18n="openSource.body">
+            DeskLore runs locally and is open source under Apache-2.0. You can inspect how it
+            captures, filters, stores, and deletes data.
+          </p>
+          <a
+            class="button button--dark reveal"
+            href="https://github.com/FoundDream/desklore"
+            target="_blank"
+            rel="noreferrer"
+            data-i18n="common.viewSource"
+          >
+            View source
+          </a>
+        </section>
+
+        <footer class="site-footer page-shell">
+          <a class="brand brand--footer" href="#top">
+            <img src="./assets/icon.png" alt="" width="28" height="28" loading="lazy" />
+            <span>DeskLore</span>
+          </a>
+          <p data-i18n="footer.tagline">Open-source computer history for macOS.</p>
+          <div class="footer-links">
+            <a href="https://github.com/FoundDream/desklore" target="_blank" rel="noreferrer"
+              >GitHub</a
+            >
+            <a
+              href="https://github.com/FoundDream/desklore/blob/main/README.md"
+              data-i18n-href="footer.guideHref"
+              target="_blank"
+              rel="noreferrer"
+              data-i18n="footer.guide"
+              >Guide</a
+            >
+            <a
+              href="https://github.com/FoundDream/desklore/blob/main/PRIVACY.md"
+              target="_blank"
+              rel="noreferrer"
+              data-i18n="footer.privacy"
+              >Privacy</a
+            >
+          </div>
+        </footer>
+      </div>
+    </main>
+    <script type="module" src="./site.js"></script>
+  </body>
+</html>
