@@ -1,4 +1,5 @@
 export const visualCaptureLimits = {
+  settleMilliseconds: 500,
   windowCooldownMilliseconds: 12_000,
   cacheTTLMilliseconds: 30 * 60_000,
   providerBackoffMilliseconds: [30_000, 2 * 60_000, 10 * 60_000] as const,

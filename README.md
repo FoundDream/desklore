@@ -96,9 +96,10 @@ Open **设置 → 视觉证据** to enable any part of this chain. It is default
 ```text
 policy-filtered event
   → clear AX rules
-  → Luna only for uncertain AX evidence (optional)
-  → screenshot provider only when AX remains insufficient (optional)
-  → local OCR or Luna image understanding (optional)
+  → per-window last-event-wins intent + 500 ms settle (optional)
+  → uncertain AX: Luna judgment ∥ transient screenshot candidate
+  → final needs_visual: local OCR or Luna image understanding (optional)
+  → final enough/uncertain: discard any transient candidate
   → event-linked evidence.jsonl
 ```
 
@@ -108,11 +109,19 @@ runtime window ID, with a title/unique-window fallback that refuses ambiguous
 matches. Capture requests expire eight seconds after the source event; stale or
 ambiguous targets are recorded as visual gaps instead of capturing another window.
 
-Screenshot fallback is rate-limited after the existing 0.8–2 second event-burst
-coalescing: a window can request at most one capture every 12 seconds, without a
-global hard capture quota. Provider failures back off from 30 seconds to two
-minutes and then ten minutes. Only a final `needs_visual`
-decision may request pixels; `uncertain` decisions are recorded as visual gaps.
+After the existing 0.8–2 second event-burst coalescing, screenshot fallback keeps
+only the newest pending intent for each window and waits another 500 ms for the
+visible result to settle. For gray-zone AX, Luna judgment runs independently from
+that timer: an early `enough` or `uncertain` result cancels the candidate; a later
+result discards an already captured candidate without persisting OCR, image bytes,
+or calling the image model. Only final `needs_visual` candidates continue into
+OCR or image understanding.
+
+The screenshot provider remains serial and a window can attempt at most one
+candidate every 12 seconds, without a global hard capture quota. Genuine provider
+failures back off from 30 seconds to two minutes and then ten minutes. A stale
+request or unavailable target window is an event-local gap and does not activate
+provider-wide backoff.
 For Luna understanding, an exact signature of the transient privacy-processed
 window image reuses the last structured result when the pixels have not changed.
 The cache stores no image bytes and expires after 30 minutes.
@@ -215,20 +224,27 @@ npm run eval:visual -- \
 ```
 
 The baseline requests a screenshot for every non-`enough` AX decision. The
-candidate requests one only for `needs_visual`, then applies the runtime's shared
-per-window cooldown without a global hard quota. The ignored
+candidate replays the runtime's per-window last-event-wins intent, 500 ms settle,
+AX judgment timing, transient candidate discard, and per-window cooldown without
+a global hard quota. The ignored
 `.eval-data/visual-policy/` directory contains `report.json`, `report.md`, and a
 Screenpipe-style `decisions.jsonl` row for every judged event. Rows contain gate
 outcomes and evidence-presence flags, but no window titles, URLs, OCR text,
 understanding text, or pixels.
 
-The report compares screenshot requests per active minute, upper-bound Luna
-calls, gate reasons, and observed reuse. It also reports a limited fidelity proxy:
+New evidence rows include an `assessment_started_at` timestamp so the replay starts
+the 500 ms settle delay at the same point as runtime. Older rows fall back to a
+rules judgment timestamp when available, otherwise to the source event timestamp;
+the report counts each timing source explicitly.
+
+The report separately compares transient screenshot requests and upper-bound image
+Luna calls, plus coalesced intents, discarded candidates, gate reasons, and
+observed reuse. It also reports a limited fidelity proxy:
 changes in captured local-OCR fingerprints should receive a compatible candidate
-capture trigger within 15 seconds. This is not a score for non-text visual change
+capture within 15 seconds. This is not a score for non-text visual change
 or image-understanding quality, and its completeness depends on how densely the
 source trace actually captured frames. Use `--since`, `--until`,
-`--coverage-ms`, or `--window-cooldown-ms` for controlled comparisons. Open
+`--coverage-ms`, `--settle-ms`, or `--window-cooldown-ms` for controlled comparisons. Open
 segments are excluded unless `--include-open` is passed.
 
 ## Verify

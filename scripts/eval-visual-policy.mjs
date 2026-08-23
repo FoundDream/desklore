@@ -112,6 +112,24 @@ function normalizedTraceRecord(event, evidence, segmentID) {
     !observedReuse &&
     ((privacy === "redacted_remote" && understanding !== undefined) ||
       visualReason?.startsWith("visual_model_") === true);
+  const axJudgedAt = string(ax?.judged_at ?? ax?.judgedAt);
+  const parsedAxJudgedAtMilliseconds = axJudgedAt ? Date.parse(axJudgedAt) : Number.NaN;
+  const assessmentStartedAt = string(
+    evidence.assessment_started_at ?? evidence.assessmentStartedAt,
+  );
+  const parsedAssessmentStartedAtMilliseconds = assessmentStartedAt
+    ? Date.parse(assessmentStartedAt)
+    : Number.NaN;
+  const assessmentTimestampSource = Number.isFinite(parsedAssessmentStartedAtMilliseconds)
+    ? "assessment_started_at"
+    : string(ax?.source) === "rules" && Number.isFinite(parsedAxJudgedAtMilliseconds)
+      ? "ax_judged_at_fallback"
+      : "event_timestamp_fallback";
+  const assessmentStartedAtMilliseconds = Number.isFinite(parsedAssessmentStartedAtMilliseconds)
+    ? parsedAssessmentStartedAtMilliseconds
+    : assessmentTimestampSource === "ax_judged_at_fallback"
+      ? parsedAxJudgedAtMilliseconds
+      : timestampMilliseconds;
   return {
     eventID,
     timestamp,
@@ -123,6 +141,14 @@ function normalizedTraceRecord(event, evidence, segmentID) {
     ...identity,
     axDecision: decision,
     axSource: string(ax?.source) ?? "unknown",
+    axJudgedAt,
+    axJudgmentTimestampObserved: Number.isFinite(parsedAxJudgedAtMilliseconds),
+    axJudgedAtMilliseconds: Number.isFinite(parsedAxJudgedAtMilliseconds)
+      ? parsedAxJudgedAtMilliseconds
+      : timestampMilliseconds,
+    assessmentStartedAt,
+    assessmentStartedAtMilliseconds,
+    assessmentTimestampSource,
     visualStatus,
     visualReason,
     observedOCR: ocrText !== undefined,
@@ -251,7 +277,8 @@ function nextCompatibleCapture(checkpoint, capturesByApplication) {
   let high = captures.length;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    if (captures[middle].timestampMilliseconds < checkpoint.timestampMilliseconds) low = middle + 1;
+    if (captures[middle].candidate.captureTimestampMilliseconds < checkpoint.timestampMilliseconds)
+      low = middle + 1;
     else high = middle;
   }
   for (let index = low; index < captures.length; index += 1) {
@@ -283,27 +310,11 @@ export function replayVisualPolicy(records, options = {}) {
   const scheduler = new VisualCapturePolicyScheduler(limits);
   const ordered = [...records].sort(
     (lhs, rhs) =>
-      lhs.timestampMilliseconds - rhs.timestampMilliseconds ||
+      lhs.assessmentStartedAtMilliseconds - rhs.assessmentStartedAtMilliseconds ||
       lhs.eventID.localeCompare(rhs.eventID),
   );
   const decisions = ordered.map((record) => {
     const baselineCaptureRequested = record.axDecision !== "enough";
-    let candidateCaptureRequested = false;
-    let candidateReason = record.axDecision === "enough" ? "ax_enough" : "ax_uncertain";
-    let retryAfterMilliseconds;
-    if (record.axDecision === "needs_visual") {
-      const gate = scheduler.reserve(
-        {
-          applicationKey: record.applicationKey,
-          windowKey: record.windowKey,
-          hasStableWindowIdentity: record.hasStableWindowIdentity,
-        },
-        record.timestampMilliseconds,
-      );
-      candidateCaptureRequested = gate.allowed;
-      candidateReason = gate.reason;
-      retryAfterMilliseconds = gate.retryAfterMilliseconds;
-    }
     return {
       ...record,
       baseline: {
@@ -311,10 +322,14 @@ export function replayVisualPolicy(records, options = {}) {
         visionCallUpperBound: baselineCaptureRequested,
       },
       candidate: {
-        captureRequested: candidateCaptureRequested,
-        visionCallUpperBound: candidateCaptureRequested,
-        reason: candidateReason,
-        retryAfterMilliseconds,
+        intentCreated: false,
+        captureRequested: false,
+        captureTimestampMilliseconds: undefined,
+        visionCallUpperBound: false,
+        discarded: false,
+        coalesced: false,
+        reason: "no_visual_intent",
+        retryAfterMilliseconds: undefined,
       },
       proxy: {
         meaningfulOCRCheckpoint: false,
@@ -323,6 +338,68 @@ export function replayVisualPolicy(records, options = {}) {
       },
     };
   });
+
+  const pendingByWindow = new Map();
+  const firePending = (decision) => {
+    const dueAt = decision.assessmentStartedAtMilliseconds + limits.settleMilliseconds;
+    pendingByWindow.delete(decision.windowKey);
+    if (decision.axJudgedAtMilliseconds <= dueAt && decision.axDecision !== "needs_visual") {
+      decision.candidate.reason = `ax_${decision.axDecision}_before_settle`;
+      return;
+    }
+    const gate = scheduler.reserve(
+      {
+        applicationKey: decision.applicationKey,
+        windowKey: decision.windowKey,
+        hasStableWindowIdentity: decision.hasStableWindowIdentity,
+      },
+      dueAt,
+    );
+    decision.candidate.captureRequested = gate.allowed;
+    decision.candidate.captureTimestampMilliseconds = gate.allowed ? dueAt : undefined;
+    decision.candidate.reason = gate.reason;
+    decision.candidate.retryAfterMilliseconds = gate.retryAfterMilliseconds;
+    if (!gate.allowed) return;
+    if (decision.axDecision === "needs_visual") {
+      decision.candidate.visionCallUpperBound = true;
+      return;
+    }
+    decision.candidate.discarded = true;
+    decision.candidate.reason = `candidate_discarded_ax_${decision.axDecision}`;
+  };
+  const firePendingThrough = (timestampMilliseconds) => {
+    const due = [...pendingByWindow.values()]
+      .filter(
+        (decision) =>
+          decision.assessmentStartedAtMilliseconds + limits.settleMilliseconds <=
+          timestampMilliseconds,
+      )
+      .sort(
+        (lhs, rhs) =>
+          lhs.assessmentStartedAtMilliseconds - rhs.assessmentStartedAtMilliseconds ||
+          lhs.eventID.localeCompare(rhs.eventID),
+      );
+    for (const decision of due) {
+      if (pendingByWindow.get(decision.windowKey) === decision) firePending(decision);
+    }
+  };
+
+  for (const decision of decisions) {
+    firePendingThrough(decision.assessmentStartedAtMilliseconds);
+    const pending = pendingByWindow.get(decision.windowKey);
+    if (pending) {
+      pendingByWindow.delete(decision.windowKey);
+      pending.candidate.coalesced = true;
+      pending.candidate.reason = "intent_coalesced";
+    }
+    const createsIntent =
+      decision.axSource.startsWith("luna") || decision.axDecision === "needs_visual";
+    if (!createsIntent) continue;
+    decision.candidate.intentCreated = true;
+    decision.candidate.reason = "settling";
+    pendingByWindow.set(decision.windowKey, decision);
+  }
+  firePendingThrough(Number.POSITIVE_INFINITY);
 
   const checkpoints = [];
   const previousFingerprintByWindow = new Map();
@@ -353,7 +430,7 @@ export function replayVisualPolicy(records, options = {}) {
   for (const checkpoint of checkpoints) {
     const capture = nextCompatibleCapture(checkpoint, capturesByApplication);
     const delay = capture
-      ? capture.timestampMilliseconds - checkpoint.timestampMilliseconds
+      ? capture.candidate.captureTimestampMilliseconds - checkpoint.timestampMilliseconds
       : undefined;
     const covered = delay !== undefined && delay <= coverageMilliseconds;
     checkpoint.proxy.coveredWithinDeadline = covered;
@@ -377,6 +454,12 @@ export function replayVisualPolicy(records, options = {}) {
   const candidateCaptureRequests = decisions.filter(
     (decision) => decision.candidate.captureRequested,
   ).length;
+  const candidateVisionCalls = decisions.filter(
+    (decision) => decision.candidate.visionCallUpperBound,
+  ).length;
+  const candidateIntents = decisions.filter((decision) => decision.candidate.intentCreated).length;
+  const candidateCoalesced = decisions.filter((decision) => decision.candidate.coalesced).length;
+  const candidateDiscarded = decisions.filter((decision) => decision.candidate.discarded).length;
   const activeMinutes = activeMinuteCount(decisions);
   const firstTimestamp = decisions[0]?.timestampMilliseconds;
   const lastTimestamp = decisions.at(-1)?.timestampMilliseconds;
@@ -401,6 +484,10 @@ export function replayVisualPolicy(records, options = {}) {
         enough: decisions.filter((decision) => decision.axDecision === "enough").length,
         needsVisual: decisions.filter((decision) => decision.axDecision === "needs_visual").length,
         uncertain: decisions.filter((decision) => decision.axDecision === "uncertain").length,
+        missingAXJudgmentTimestamps: decisions.filter(
+          (decision) => !decision.axJudgmentTimestampObserved,
+        ).length,
+        assessmentTimeSources: countBy(decisions, (decision) => decision.assessmentTimestampSource),
         unresolvedWindowIdentity: decisions.filter((decision) => !decision.hasStableWindowIdentity)
           .length,
         activeMinutes,
@@ -413,16 +500,22 @@ export function replayVisualPolicy(records, options = {}) {
         visionCallsUpperBound: baselineCaptureRequests,
       },
       candidate: {
-        policy: "needs_visual_then_window_cooldown",
+        policy: "per_window_settle_then_parallel_ax_and_candidate_capture",
+        intents: candidateIntents,
+        coalescedIntents: candidateCoalesced,
         screenshotRequests: candidateCaptureRequests,
+        discardedScreenshots: candidateDiscarded,
         screenshotsPerActiveMinute: rate(candidateCaptureRequests, activeMinutes),
-        visionCallsUpperBound: candidateCaptureRequests,
+        visionCallsUpperBound: candidateVisionCalls,
         gateReasons: countBy(decisions, (decision) => decision.candidate.reason),
       },
       delta: {
         screenshotRequestReduction: reduction,
         screenshotRequestsSaved: baselineCaptureRequests - candidateCaptureRequests,
-        visionCallUpperBoundReduction: reduction,
+        visionCallUpperBoundReduction:
+          baselineCaptureRequests > 0
+            ? (baselineCaptureRequests - candidateVisionCalls) / baselineCaptureRequests
+            : 0,
       },
       observed: {
         baselineRequestedEventsWithCapturedFrame: observedCaptured,
@@ -434,7 +527,7 @@ export function replayVisualPolicy(records, options = {}) {
         visualReuses: decisions.filter((decision) => decision.observedReuse).length,
       },
       fidelityProxy: {
-        method: "captured_local_ocr_fingerprint_change_to_next_candidate_trigger",
+        method: "captured_local_ocr_fingerprint_change_to_next_candidate_capture_time",
         deadlineMilliseconds: coverageMilliseconds,
         meaningfulOCRCheckpoints: checkpoints.length,
         coveredCheckpoints,
@@ -461,7 +554,7 @@ export function replayVisualPolicy(records, options = {}) {
 
 function serializableDecision(decision) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     event_id: decision.eventID,
     event_timestamp: decision.timestamp,
     segment_id: decision.segmentID,
@@ -471,12 +564,22 @@ function serializableDecision(decision) {
     stable_window_identity: decision.hasStableWindowIdentity,
     ax_decision: decision.axDecision,
     ax_source: decision.axSource,
+    ax_judged_at: decision.axJudgedAt,
+    assessment_started_at: decision.assessmentStartedAt,
+    assessment_time_source: decision.assessmentTimestampSource,
     baseline: {
       capture_requested: decision.baseline.captureRequested,
       vision_call_upper_bound: decision.baseline.visionCallUpperBound,
     },
     candidate: {
+      intent_created: decision.candidate.intentCreated,
+      intent_coalesced: decision.candidate.coalesced,
       capture_requested: decision.candidate.captureRequested,
+      capture_timestamp:
+        decision.candidate.captureTimestampMilliseconds === undefined
+          ? undefined
+          : new Date(decision.candidate.captureTimestampMilliseconds).toISOString(),
+      discarded: decision.candidate.discarded,
       vision_call_upper_bound: decision.candidate.visionCallUpperBound,
       reason: decision.candidate.reason,
       retry_after_ms: decision.candidate.retryAfterMilliseconds,
@@ -511,6 +614,9 @@ function milliseconds(value) {
 
 function markdown(report) {
   const { trace, baseline, candidate, delta, observed, fidelityProxy } = report.comparison;
+  const assessmentTimeSources = Object.entries(trace.assessmentTimeSources)
+    .map(([source, count]) => `${source}: ${count}`)
+    .join(", ");
   const gateRows = Object.entries(candidate.gateReasons)
     .map(([reason, count]) => `| ${reason} | ${count} |`)
     .join("\n");
@@ -525,7 +631,10 @@ function markdown(report) {
     `Generated at ${report.generatedAt}. This is a same-input policy replay: it does not take screenshots or call a model.\n\n` +
     `Input: ${report.input.root}. Completed evidence-bearing segments: ${report.dataQuality.segmentsRead}; ` +
     `open segments skipped: ${report.dataQuality.openSegmentsSkipped}.\n\n` +
-    `Candidate policy: needs_visual only with a ${report.policy.windowCooldownMilliseconds} ms per-window cooldown. ` +
+    `Candidate policy: last-event-wins per window, a ${report.policy.settleMilliseconds} ms settle delay, ` +
+    `then AX judgment and a transient screenshot candidate proceed independently. ` +
+    `Candidates are discarded when AX resolves to enough or uncertain, while final needs_visual candidates may continue to image processing. ` +
+    `A ${report.policy.windowCooldownMilliseconds} ms per-window cooldown still applies at capture time. ` +
     `There is no global hard capture quota. ` +
     `Provider backoff is excluded because replay has no provider outcomes.\n\n` +
     `## A/B result\n\n` +
@@ -534,13 +643,17 @@ function markdown(report) {
     `| Screenshots / active minute | ${decimal(baseline.screenshotsPerActiveMinute)} | ${decimal(candidate.screenshotsPerActiveMinute)} |\n` +
     `| Vision calls, upper bound | ${baseline.visionCallsUpperBound} | ${candidate.visionCallsUpperBound} |\n\n` +
     `Request reduction: ${percent(delta.screenshotRequestReduction)} (${delta.screenshotRequestsSaved} fewer requests). ` +
+    `The candidate created ${candidate.intents} intents, coalesced ${candidate.coalescedIntents}, and discarded ` +
+    `${candidate.discardedScreenshots} transient screenshots before image processing. ` +
     `The trace contains ${trace.decisions} judged events across ${trace.activeMinutes} active minutes ` +
     `(${trace.needsVisual} needs_visual, ${trace.uncertain} uncertain, ${trace.enough} enough); ` +
-    `${trace.unresolvedWindowIdentity} decisions lack a stable window ID.\n\n` +
+    `${trace.unresolvedWindowIdentity} decisions lack a stable window ID and ` +
+    `${trace.missingAXJudgmentTimestamps} lack an AX judgment timestamp. ` +
+    `Assessment-time sources: ${assessmentTimeSources}.\n\n` +
     `## Candidate decisions\n\n| Reason | Events |\n| --- | ---: |\n${gateRows}\n\n` +
     `## Fidelity proxy\n\n` +
     `Captured local-OCR fingerprint changes are treated as visual checkpoints. A checkpoint is covered when ` +
-    `the candidate would trigger a compatible-window capture within ${fidelityProxy.deadlineMilliseconds} ms.\n\n` +
+    `the candidate would take a compatible-window screenshot within ${fidelityProxy.deadlineMilliseconds} ms.\n\n` +
     `- Checkpoints: ${fidelityProxy.meaningfulOCRCheckpoints}\n` +
     `- Covered: ${fidelityProxy.coveredCheckpoints} (${percent(fidelityProxy.coverage)})\n` +
     `- Delay: p50 ${milliseconds(fidelityProxy.p50DelayMilliseconds)}, p95 ${milliseconds(fidelityProxy.p95DelayMilliseconds)}\n` +
@@ -574,6 +687,11 @@ export async function run(argv = process.argv.slice(2)) {
   const coverageMilliseconds = positiveInteger(args.get("coverage-ms"), 15_000, "coverage-ms");
   const limits = {
     ...visualCaptureLimits,
+    settleMilliseconds: positiveInteger(
+      args.get("settle-ms"),
+      visualCaptureLimits.settleMilliseconds,
+      "settle-ms",
+    ),
     windowCooldownMilliseconds: positiveInteger(
       args.get("window-cooldown-ms"),
       visualCaptureLimits.windowCooldownMilliseconds,
@@ -594,7 +712,7 @@ export async function run(argv = process.argv.slice(2)) {
   );
   const replay = replayVisualPolicy(records, { coverageMilliseconds, limits });
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     input: {
       root: inputRoot,

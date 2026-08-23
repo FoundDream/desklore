@@ -31,10 +31,12 @@ import { MemoryRepository } from "./memory.js";
 import type {
   HistorySearchResponse,
   MemoryRollupRecord,
+  AXSufficiencyEvidence,
   HistoryEvent,
   ObservationPolicy,
   TimelineDocumentRecord,
   TimelineLLMSettings,
+  VisualEvidence,
   VisualSettings,
   EventEvidenceEnrichment,
 } from "./types.js";
@@ -52,6 +54,7 @@ import {
   VisualUnderstandingCache,
   visualPayloadSignature,
   visualWindowKey,
+  visualCaptureLimits,
 } from "./visual-scheduler.js";
 
 const unsupportedContinuationPattern =
@@ -69,6 +72,28 @@ function publicContinuationHint(value: string | undefined): string | undefined {
     return undefined;
   }
   return normalized;
+}
+
+interface VisualEvaluation {
+  axSufficiency: AXSufficiencyEvidence;
+  runtime?: LLMRuntime;
+}
+
+interface VisualCaptureResponse {
+  requestID: string;
+  payload: VisualCapturePayload;
+}
+
+type VisualCandidateOutcome =
+  | { kind: "candidate"; capture: VisualCaptureResponse }
+  | { kind: "coalesced" }
+  | { kind: "decision_cancelled" };
+
+interface PendingVisualIntent {
+  timer: NodeJS.Timeout;
+  settled: boolean;
+  decision?: AXSufficiencyEvidence;
+  resolve: (outcome: VisualCandidateOutcome) => void;
 }
 
 export class HistoryService extends EventEmitter {
@@ -96,6 +121,10 @@ export class HistoryService extends EventEmitter {
   private captureWork: Promise<unknown> = Promise.resolve();
   private timelineWork: Promise<unknown> = Promise.resolve();
   private visualWork: Promise<unknown> = Promise.resolve();
+  private visualDecisionWork: Promise<unknown> = Promise.resolve();
+  private visualCaptureWork: Promise<unknown> = Promise.resolve();
+  private visualUnderstandingWork: Promise<unknown> = Promise.resolve();
+  private readonly pendingVisualIntents = new Map<string, PendingVisualIntent>();
   private readonly visualCaptureScheduler = new VisualCaptureScheduler();
   private readonly visualUnderstandingCache = new VisualUnderstandingCache();
   private flushTimer?: NodeJS.Timeout;
@@ -119,6 +148,9 @@ export class HistoryService extends EventEmitter {
     uncertainCount: 0,
     captureRequestedCount: 0,
     captureSucceededCount: 0,
+    captureCandidateCount: 0,
+    captureDiscardedCount: 0,
+    captureCoalescedCount: 0,
     captureBlockedCount: 0,
     captureFailedCount: 0,
     captureCooldownCount: 0,
@@ -229,6 +261,7 @@ export class HistoryService extends EventEmitter {
   }
 
   terminate(): void {
+    this.cancelAllPendingVisualIntents();
     this.stopTimers();
     this.collector.terminate();
   }
@@ -321,6 +354,7 @@ export class HistoryService extends EventEmitter {
       ["off", "fallback"].includes(input.captureMode) &&
       ["off", "ocr", "luna"].includes(input.understandingMode);
     if (!valid) throw new Error("Invalid visual configuration");
+    if (input.captureMode === "off") this.cancelAllPendingVisualIntents();
     await this.settingsStore.saveVisualSettings(input);
     this.visualSettings = { ...input };
     if (input.captureMode === "off" || input.understandingMode !== "luna") {
@@ -546,104 +580,261 @@ export class HistoryService extends EventEmitter {
       return;
     }
     const ruleDecision = evaluateAXByRules(event);
-    void this.enqueueVisual(async () =>
-      this.enrichVisualEvidence(event, settings, ruleDecision),
-    ).catch((error) => this.captureError(error));
+    const assessmentStartedAt = new Date().toISOString();
+    const intentKey = visualWindowKey(event);
+    this.cancelPendingVisualIntent(intentKey);
+    const evaluation = this.evaluateVisualEvidence(event, settings, ruleDecision);
+    const shouldCreateIntent =
+      settings.captureMode === "fallback" &&
+      (ruleDecision.decision === "needs_visual" ||
+        (ruleDecision.decision === "uncertain" && settings.axJudge === "luna"));
+    const task = shouldCreateIntent
+      ? this.runVisualIntent(event, settings, intentKey, assessmentStartedAt, evaluation)
+      : evaluation.then((result) =>
+          this.completeVisualEvidence(
+            event,
+            settings,
+            result,
+            {
+              kind: "decision_cancelled",
+            },
+            assessmentStartedAt,
+          ),
+        );
+    void this.trackVisual(task).catch((error) => this.captureError(error));
   }
 
-  private async enrichVisualEvidence(
+  private evaluateVisualEvidence(
     event: HistoryEvent,
     settings: VisualSettings,
     ruleDecision: ReturnType<typeof evaluateAXByRules>,
-  ): Promise<void> {
+  ): Promise<VisualEvaluation> {
     const runtime =
       settings.axJudge === "luna" || settings.understandingMode === "luna"
-        ? await this.configuredLLMRuntime()
-        : undefined;
-    const axSufficiency =
-      settings.axJudge === "luna" && runtime
-        ? await judgeAXWithLuna(event, runtime)
-        : settings.axJudge === "luna"
-          ? {
-              ...ruleDecision,
-              source: "luna_fallback" as const,
-              reasons: [...ruleDecision.reasons, "luna_unavailable"],
-            }
-          : ruleDecision;
+        ? this.configuredLLMRuntime()
+        : Promise.resolve(undefined);
+    const decision =
+      settings.axJudge === "luna" && ruleDecision.decision === "uncertain"
+        ? this.enqueueVisualDecision(async () => {
+            const configuredRuntime = await runtime;
+            return configuredRuntime
+              ? judgeAXWithLuna(event, configuredRuntime)
+              : {
+                  ...ruleDecision,
+                  source: "luna_fallback" as const,
+                  reasons: [...ruleDecision.reasons, "luna_unavailable"],
+                };
+          })
+        : Promise.resolve(ruleDecision);
+    return Promise.all([runtime, decision]).then(([configuredRuntime, axSufficiency]) => ({
+      runtime: configuredRuntime,
+      axSufficiency,
+    }));
+  }
+
+  private runVisualIntent(
+    event: HistoryEvent,
+    settings: VisualSettings,
+    intentKey: string,
+    assessmentStartedAt: string,
+    evaluation: Promise<VisualEvaluation>,
+  ): Promise<void> {
+    let pending!: PendingVisualIntent;
+    const candidate = new Promise<VisualCandidateOutcome>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.settled = true;
+        if (this.pendingVisualIntents.get(intentKey) === pending) {
+          this.pendingVisualIntents.delete(intentKey);
+        }
+        if (pending.decision && pending.decision.decision !== "needs_visual") {
+          resolve({ kind: "decision_cancelled" });
+          return;
+        }
+        this.visualHealth.captureCandidateCount += 1;
+        void this.enqueueVisualCapture(() =>
+          this.captureVisualEvidence(event, settings.understandingMode),
+        ).then((capture) => resolve({ kind: "candidate", capture }), reject);
+      }, visualCaptureLimits.settleMilliseconds);
+      pending = {
+        timer,
+        settled: false,
+        resolve,
+      };
+      this.pendingVisualIntents.set(intentKey, pending);
+    });
+    void evaluation
+      .then(({ axSufficiency }) => {
+        pending.decision = axSufficiency;
+        if (!pending.settled && axSufficiency.decision !== "needs_visual") {
+          pending.settled = true;
+          clearTimeout(pending.timer);
+          if (this.pendingVisualIntents.get(intentKey) === pending) {
+            this.pendingVisualIntents.delete(intentKey);
+          }
+          pending.resolve({ kind: "decision_cancelled" });
+        }
+      })
+      .catch(() => undefined);
+    return Promise.all([evaluation, candidate]).then(([result, outcome]) =>
+      this.completeVisualEvidence(event, settings, result, outcome, assessmentStartedAt),
+    );
+  }
+
+  private cancelPendingVisualIntent(
+    intentKey: string,
+    outcome: "coalesced" | "decision_cancelled" = "coalesced",
+  ): void {
+    const pending = this.pendingVisualIntents.get(intentKey);
+    if (!pending || pending.settled) return;
+    pending.settled = true;
+    clearTimeout(pending.timer);
+    this.pendingVisualIntents.delete(intentKey);
+    if (outcome === "coalesced") this.visualHealth.captureCoalescedCount += 1;
+    pending.resolve({ kind: outcome });
+  }
+
+  private cancelAllPendingVisualIntents(): void {
+    for (const intentKey of this.pendingVisualIntents.keys()) {
+      this.cancelPendingVisualIntent(intentKey, "decision_cancelled");
+    }
+  }
+
+  private async completeVisualEvidence(
+    event: HistoryEvent,
+    settings: VisualSettings,
+    evaluation: VisualEvaluation,
+    outcome: VisualCandidateOutcome,
+    assessmentStartedAt: string,
+  ): Promise<void> {
+    const { axSufficiency, runtime } = evaluation;
 
     this.visualHealth.judgedEventCount += 1;
     if (axSufficiency.decision === "needs_visual") this.visualHealth.needsVisualCount += 1;
     if (axSufficiency.decision === "uncertain") this.visualHealth.uncertainCount += 1;
     this.visualHealth.lastDecisionReason = axSufficiency.reasons.join(",").slice(0, 240);
 
+    let visual: VisualEvidence | undefined;
+    const capture = outcome.kind === "candidate" ? outcome.capture : undefined;
+    if (capture) this.observeVisualCapture(capture.payload);
+    if (settings.captureMode === "fallback" && axSufficiency.decision === "needs_visual") {
+      if (capture) {
+        visual = await this.processVisualCandidate(event, settings, runtime, capture);
+      } else if (outcome.kind === "coalesced") {
+        visual = {
+          requestID: randomUUID().toLowerCase(),
+          status: "blocked",
+          provider: this.visualCaptureProvider?.id ?? "none",
+          reason: "visual_intent_coalesced",
+          privacy: "not_captured",
+        };
+        this.visualHealth.lastCaptureDecisionReason = "visual_intent_coalesced";
+      }
+    } else if (settings.captureMode === "fallback" && axSufficiency.decision === "uncertain") {
+      this.visualHealth.visualGapCount += 1;
+      if (capture?.payload.status === "captured") {
+        visual = this.discardVisualCandidate(capture, "candidate_discarded_ax_uncertain");
+      } else if (outcome.kind === "coalesced") {
+        visual = {
+          requestID: randomUUID().toLowerCase(),
+          status: "blocked",
+          provider: this.visualCaptureProvider?.id ?? "none",
+          reason: "visual_intent_coalesced",
+          privacy: "not_captured",
+        };
+      } else {
+        visual = {
+          requestID: capture?.requestID ?? randomUUID().toLowerCase(),
+          status: "unavailable",
+          provider: capture?.payload.provider ?? this.visualCaptureProvider?.id ?? "none",
+          reason: "ax_judge_uncertain",
+          privacy: "not_captured",
+        };
+      }
+      this.visualHealth.lastCaptureDecisionReason = visual.reason;
+    } else if (axSufficiency.decision === "enough" && capture?.payload.status === "captured") {
+      visual = this.discardVisualCandidate(capture, "candidate_discarded_ax_enough");
+    }
+
     const enrichment: EventEvidenceEnrichment = {
       schemaVersion: 1,
       eventID: event.id,
       eventTimestamp: event.timestamp,
+      assessmentStartedAt,
       createdAt: new Date().toISOString(),
       axSufficiency,
+      visual,
     };
-
-    if (settings.captureMode === "fallback" && axSufficiency.decision === "needs_visual") {
-      const capture = await this.captureVisualEvidence(event, settings.understandingMode);
-      const visual = visualEvidenceFromCapture(capture.requestID, capture.payload);
-      if (capture.payload.status === "captured") {
-        this.visualHealth.captureSucceededCount += 1;
-        if (settings.understandingMode === "off") visual.ocrText = undefined;
-        if (settings.understandingMode === "luna" && runtime && capture.payload.imageBase64) {
-          const signature = visualPayloadSignature(capture.payload);
-          const windowKey = visualWindowKey(event, capture.payload.windowRuntimeIdentifier);
-          const cached = signature
-            ? this.visualUnderstandingCache.get(windowKey, signature)
-            : undefined;
-          if (cached) {
-            visual.understanding = cached.understanding;
-            visual.confidence = cached.confidence;
-            visual.privacy = "redacted_remote";
-            visual.reason = "visual_reused";
-            this.visualHealth.visualUnchangedCount += 1;
-            this.visualHealth.visualReusedCount += 1;
-            this.visualHealth.lastCaptureDecisionReason = "visual_reused";
-          } else {
-            try {
-              this.visualHealth.visionCalledCount += 1;
-              const result = await understandVisualWithLuna(event, capture.payload, runtime);
-              visual.understanding = result.understanding;
-              visual.confidence = result.confidence;
-              visual.privacy = "redacted_remote";
-              this.visualHealth.lastCaptureDecisionReason = "vision_called";
-              if (signature) {
-                this.visualUnderstandingCache.set(windowKey, signature, {
-                  ...result,
-                  createdAtMilliseconds: Date.now(),
-                });
-              }
-            } catch (error) {
-              visual.reason = `visual_model_${error instanceof Error ? error.message : "failed"}`;
-              this.visualHealth.lastCaptureDecisionReason = visual.reason;
-            }
-          }
-        }
-      } else if (capture.payload.status === "blocked") {
-        this.visualHealth.captureBlockedCount += 1;
-      } else {
-        this.visualHealth.captureFailedCount += 1;
-      }
-      enrichment.visual = visual;
-    } else if (settings.captureMode === "fallback" && axSufficiency.decision === "uncertain") {
-      this.visualHealth.visualGapCount += 1;
-      this.visualHealth.lastCaptureDecisionReason = "ax_judge_uncertain";
-      enrichment.visual = {
-        requestID: randomUUID().toLowerCase(),
-        status: "unavailable",
-        provider: this.visualCaptureProvider?.id ?? "none",
-        reason: "ax_judge_uncertain",
-        privacy: "not_captured",
-      };
-    }
-
     await this.segments.appendEvidence(enrichment);
     this.emitSnapshot();
+  }
+
+  private observeVisualCapture(payload: VisualCapturePayload): void {
+    if (payload.status === "captured") this.visualHealth.captureSucceededCount += 1;
+    else if (payload.status === "blocked") this.visualHealth.captureBlockedCount += 1;
+    else this.visualHealth.captureFailedCount += 1;
+  }
+
+  private discardVisualCandidate(capture: VisualCaptureResponse, reason: string): VisualEvidence {
+    this.visualHealth.captureDiscardedCount += 1;
+    this.visualHealth.lastCaptureDecisionReason = reason;
+    return {
+      requestID: capture.requestID,
+      status: "discarded",
+      provider: capture.payload.provider,
+      reason,
+      capturedAt: capture.payload.capturedAt,
+      windowRuntimeIdentifier: capture.payload.windowRuntimeIdentifier,
+      width: capture.payload.width,
+      height: capture.payload.height,
+      privacy: "not_captured",
+    };
+  }
+
+  private async processVisualCandidate(
+    event: HistoryEvent,
+    settings: VisualSettings,
+    runtime: LLMRuntime | undefined,
+    capture: VisualCaptureResponse,
+  ): Promise<VisualEvidence> {
+    const visual = visualEvidenceFromCapture(capture.requestID, capture.payload);
+    if (capture.payload.status !== "captured") return visual;
+    if (settings.understandingMode === "off") visual.ocrText = undefined;
+    if (settings.understandingMode !== "luna" || !runtime || !capture.payload.imageBase64) {
+      return visual;
+    }
+    const signature = visualPayloadSignature(capture.payload);
+    const windowKey = visualWindowKey(event, capture.payload.windowRuntimeIdentifier);
+    const cached = signature ? this.visualUnderstandingCache.get(windowKey, signature) : undefined;
+    if (cached) {
+      visual.understanding = cached.understanding;
+      visual.confidence = cached.confidence;
+      visual.privacy = "redacted_remote";
+      visual.reason = "visual_reused";
+      this.visualHealth.visualUnchangedCount += 1;
+      this.visualHealth.visualReusedCount += 1;
+      this.visualHealth.lastCaptureDecisionReason = "visual_reused";
+      return visual;
+    }
+    try {
+      this.visualHealth.visionCalledCount += 1;
+      const result = await this.enqueueVisualUnderstanding(() =>
+        understandVisualWithLuna(event, capture.payload, runtime),
+      );
+      visual.understanding = result.understanding;
+      visual.confidence = result.confidence;
+      visual.privacy = "redacted_remote";
+      this.visualHealth.lastCaptureDecisionReason = "vision_called";
+      if (signature) {
+        this.visualUnderstandingCache.set(windowKey, signature, {
+          ...result,
+          createdAtMilliseconds: Date.now(),
+        });
+      }
+    } catch (error) {
+      visual.reason = `visual_model_${error instanceof Error ? error.message : "failed"}`;
+      this.visualHealth.lastCaptureDecisionReason = visual.reason;
+    }
+    return visual;
   }
 
   private async captureVisualEvidence(
@@ -725,7 +916,12 @@ export class HistoryService extends EventEmitter {
       if (payload.status === "captured") {
         this.visualCaptureScheduler.recordProviderSuccess();
         this.visualHealth.lastCaptureDecisionReason = "captured";
-      } else if (payload.status === "failed" || payload.status === "unavailable") {
+      } else if (
+        payload.status === "failed" ||
+        (payload.status === "unavailable" &&
+          payload.reason !== "request_expired" &&
+          payload.reason !== "target_window_unavailable")
+      ) {
         this.visualCaptureScheduler.recordProviderFailure(nowMilliseconds);
         this.visualHealth.lastCaptureDecisionReason = payload.reason ?? payload.status;
       } else {
@@ -786,10 +982,28 @@ export class HistoryService extends EventEmitter {
     return next;
   }
 
-  private enqueueVisual<T>(operation: () => Promise<T>): Promise<T> {
-    const next = this.visualWork.then(operation, operation);
-    this.visualWork = next.catch(() => undefined);
+  private enqueueVisualDecision<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.visualDecisionWork.then(operation, operation);
+    this.visualDecisionWork = next.catch(() => undefined);
     return next;
+  }
+
+  private enqueueVisualCapture<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.visualCaptureWork.then(operation, operation);
+    this.visualCaptureWork = next.catch(() => undefined);
+    return next;
+  }
+
+  private enqueueVisualUnderstanding<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.visualUnderstandingWork.then(operation, operation);
+    this.visualUnderstandingWork = next.catch(() => undefined);
+    return next;
+  }
+
+  private trackVisual<T>(task: Promise<T>): Promise<T> {
+    const observed = task.catch(() => undefined);
+    this.visualWork = Promise.all([this.visualWork, observed]).then(() => undefined);
+    return task;
   }
 
   private captureError(error: unknown): void {

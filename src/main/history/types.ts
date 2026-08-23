@@ -75,7 +75,7 @@ export interface AXSufficiencyEvidence {
   judgedAt: string;
 }
 
-export type VisualEvidenceStatus = "captured" | "unavailable" | "blocked" | "failed";
+export type VisualEvidenceStatus = "captured" | "discarded" | "unavailable" | "blocked" | "failed";
 
 export interface VisualEvidence {
   requestID: string;
@@ -101,6 +101,7 @@ export interface EventEvidenceEnrichment extends EventEvidence {
   schemaVersion: 1;
   eventID: string;
   eventTimestamp: string;
+  assessmentStartedAt?: string;
   createdAt: string;
 }
 
@@ -335,7 +336,10 @@ export function normalizeEventEvidence(value: unknown): EventEvidence | undefine
       judgedAt: string(ax.judgedAt ?? ax.judged_at) ?? "",
     };
   }
-  if (visual && ["captured", "unavailable", "blocked", "failed"].includes(visualStatus ?? "")) {
+  if (
+    visual &&
+    ["captured", "discarded", "unavailable", "blocked", "failed"].includes(visualStatus ?? "")
+  ) {
     normalized.visual = {
       requestID: string(visual.requestID ?? visual.request_id) ?? "",
       status: visualStatus!,
@@ -363,6 +367,7 @@ export function normalizeEventEvidenceEnrichment(value: unknown): EventEvidenceE
   const source = record(value);
   const eventID = string(source?.eventID ?? source?.event_id);
   const eventTimestamp = string(source?.eventTimestamp ?? source?.event_timestamp);
+  const assessmentStartedAt = string(source?.assessmentStartedAt ?? source?.assessment_started_at);
   const createdAt = string(source?.createdAt ?? source?.created_at);
   if (!eventID || !eventTimestamp || !createdAt) {
     throw new Error("Invalid event evidence enrichment");
@@ -371,6 +376,7 @@ export function normalizeEventEvidenceEnrichment(value: unknown): EventEvidenceE
     schemaVersion: 1,
     eventID: eventID.toLowerCase(),
     eventTimestamp,
+    assessmentStartedAt,
     createdAt,
     ...normalizeEventEvidence(source),
   };
@@ -381,6 +387,7 @@ export function evidenceEnrichmentForDisk(enrichment: EventEvidenceEnrichment): 
     schema_version: 1,
     event_id: enrichment.eventID,
     event_timestamp: enrichment.eventTimestamp,
+    assessment_started_at: enrichment.assessmentStartedAt,
     created_at: enrichment.createdAt,
     ax_sufficiency: enrichment.axSufficiency
       ? compact({

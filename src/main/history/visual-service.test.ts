@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -51,9 +51,11 @@ afterEach(async () => {
 });
 
 describe("visual evidence service", () => {
-  it("waits for the gray-zone model decision before invoking the screenshot provider", async () => {
+  it("captures a settled gray-zone candidate without waiting for the model decision", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-"));
     temporaryDirectories.push(root);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-23T02:30:00.000Z"));
     let resolveModel!: (response: Response) => void;
     const fetchMock = vi.fn(
       () =>
@@ -89,8 +91,11 @@ describe("visual evidence service", () => {
     });
 
     internal.scheduleVisualEnrichment(uncertainEvent());
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(capture).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(capture).toHaveBeenCalledOnce();
     resolveModel(
       modelResponse({
         decision: "needs_visual",
@@ -165,6 +170,83 @@ describe("visual evidence service", () => {
     });
   });
 
+  it("discards a transient candidate when Luna later decides AX is enough", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-"));
+    temporaryDirectories.push(root);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-23T02:30:00.000Z"));
+    vi.stubEnv("OPENAI_API_KEY", "configured-for-test");
+    let resolveModel!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveModel = resolve;
+          }),
+      ),
+    );
+    const capture = vi.fn().mockResolvedValue({
+      status: "captured",
+      provider: "test-provider",
+      capturedAt: "2026-08-23T02:30:00.500Z",
+      ocrText: "Transient local text",
+    });
+    const provider: VisualCaptureProvider = {
+      id: "test-provider",
+      status: () => "ready",
+      requestPermission: vi.fn(),
+      capture,
+    };
+    const service = new HistoryService(collector(), root, provider);
+    const internal = service as unknown as {
+      initialize(): Promise<void>;
+      scheduleVisualEnrichment(event: HistoryEvent): void;
+      visualWork: Promise<unknown>;
+      visualHealth: { captureDiscardedCount: number; visionCalledCount: number };
+    };
+    await internal.initialize();
+    await service.configureVisual({
+      axJudge: "luna",
+      captureMode: "fallback",
+      understandingMode: "ocr",
+    });
+
+    const source = uncertainEvent();
+    internal.scheduleVisualEnrichment(source);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(capture).toHaveBeenCalledOnce();
+    resolveModel(
+      modelResponse({
+        decision: "enough",
+        confidence: 0.9,
+        reasons: ["visible_content_covered"],
+        missing_evidence: [],
+      }),
+    );
+    await internal.visualWork;
+
+    const evidence = (
+      await readFile(path.join(root, "segments", "2026-08-23T02-30-00Z", "evidence.jsonl"), "utf8")
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(evidence.at(-1)).toMatchObject({
+      assessment_started_at: "2026-08-23T02:30:00.000Z",
+      visual: {
+        status: "discarded",
+        reason: "candidate_discarded_ax_enough",
+        privacy: "not_captured",
+      },
+    });
+    expect(JSON.stringify(evidence.at(-1))).not.toContain("Transient local text");
+    expect(internal.visualHealth).toMatchObject({
+      captureDiscardedCount: 1,
+      visionCalledCount: 0,
+    });
+  });
+
   it("reuses Luna understanding for an unchanged window image", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-"));
     temporaryDirectories.push(root);
@@ -214,6 +296,7 @@ describe("visual evidence service", () => {
       accessibility: undefined,
     };
     internal.scheduleVisualEnrichment(first);
+    await vi.advanceTimersByTimeAsync(500);
     await internal.visualWork;
 
     vi.setSystemTime(startedAt + 13_000);
@@ -222,6 +305,7 @@ describe("visual evidence service", () => {
       id: "00000000-0000-4000-8000-000000000102",
       timestamp: new Date(startedAt + 13_000).toISOString(),
     });
+    await vi.advanceTimersByTimeAsync(500);
     await internal.visualWork;
 
     expect(capture).toHaveBeenCalledTimes(2);
@@ -231,5 +315,140 @@ describe("visual evidence service", () => {
       visualReusedCount: 1,
       visionCalledCount: 1,
     });
+  });
+
+  it("coalesces pending intents per window before taking a candidate screenshot", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-"));
+    temporaryDirectories.push(root);
+    vi.useFakeTimers();
+    const startedAt = Date.parse("2026-08-23T02:30:00.000Z");
+    vi.setSystemTime(startedAt);
+    vi.stubEnv("OPENAI_API_KEY", "configured-for-test");
+    const capture = vi.fn().mockResolvedValue({
+      status: "captured",
+      provider: "test-provider",
+      capturedAt: new Date(startedAt).toISOString(),
+      ocrText: "Visible content",
+    });
+    const provider: VisualCaptureProvider = {
+      id: "test-provider",
+      status: () => "ready",
+      requestPermission: vi.fn(),
+      capture,
+    };
+    const service = new HistoryService(collector(), root, provider);
+    const internal = service as unknown as {
+      initialize(): Promise<void>;
+      scheduleVisualEnrichment(event: HistoryEvent): void;
+      visualWork: Promise<unknown>;
+      visualHealth: { captureCoalescedCount: number };
+    };
+    await internal.initialize();
+    await service.configureVisual({
+      axJudge: "rules",
+      captureMode: "fallback",
+      understandingMode: "ocr",
+    });
+    const first = {
+      ...uncertainEvent(),
+      id: "00000000-0000-4000-8000-000000000201",
+      timestamp: new Date(startedAt).toISOString(),
+      accessibility: undefined,
+    };
+    const second = {
+      ...first,
+      id: "00000000-0000-4000-8000-000000000202",
+      timestamp: new Date(startedAt + 250).toISOString(),
+    };
+
+    internal.scheduleVisualEnrichment(first);
+    await vi.advanceTimersByTimeAsync(250);
+    internal.scheduleVisualEnrichment(second);
+    await vi.advanceTimersByTimeAsync(500);
+    await internal.visualWork;
+
+    expect(capture).toHaveBeenCalledOnce();
+    expect(capture.mock.calls[0]?.[0]).toMatchObject({ eventID: second.id });
+    expect(internal.visualHealth.captureCoalescedCount).toBe(1);
+  });
+
+  it("cancels pending screenshot intents when the optional provider is disabled", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-"));
+    temporaryDirectories.push(root);
+    vi.useFakeTimers();
+    vi.stubEnv("OPENAI_API_KEY", "configured-for-test");
+    const capture = vi.fn();
+    const provider: VisualCaptureProvider = {
+      id: "test-provider",
+      status: () => "ready",
+      requestPermission: vi.fn(),
+      capture,
+    };
+    const service = new HistoryService(collector(), root, provider);
+    const internal = service as unknown as {
+      initialize(): Promise<void>;
+      scheduleVisualEnrichment(event: HistoryEvent): void;
+      visualWork: Promise<unknown>;
+    };
+    await internal.initialize();
+    await service.configureVisual({
+      axJudge: "rules",
+      captureMode: "fallback",
+      understandingMode: "ocr",
+    });
+
+    internal.scheduleVisualEnrichment({ ...uncertainEvent(), accessibility: undefined });
+    await vi.advanceTimersByTimeAsync(250);
+    await service.configureVisual({
+      axJudge: "rules",
+      captureMode: "off",
+      understandingMode: "ocr",
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await internal.visualWork;
+
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("does not turn an expired capture into provider-wide backoff", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-"));
+    temporaryDirectories.push(root);
+    const capture = vi.fn().mockResolvedValue({
+      status: "unavailable",
+      reason: "request_expired",
+      provider: "test-provider",
+    });
+    const provider: VisualCaptureProvider = {
+      id: "test-provider",
+      status: () => "ready",
+      requestPermission: vi.fn(),
+      capture,
+    };
+    const service = new HistoryService(collector(), root, provider);
+    const internal = service as unknown as {
+      captureVisualEvidence(
+        event: HistoryEvent,
+        mode: "ocr",
+        now: number,
+      ): Promise<{
+        payload: { status: string; reason?: string };
+      }>;
+    };
+    const first = uncertainEvent();
+    const second = {
+      ...first,
+      id: "00000000-0000-4000-8000-000000000302",
+      window: { ...first.window!, runtimeIdentifier: 84 },
+    };
+
+    await expect(internal.captureVisualEvidence(first, "ocr", Date.now())).resolves.toMatchObject({
+      payload: { status: "unavailable", reason: "request_expired" },
+    });
+    await expect(
+      internal.captureVisualEvidence(second, "ocr", Date.now() + 1),
+    ).resolves.toMatchObject({
+      payload: { status: "unavailable", reason: "request_expired" },
+    });
+    expect(capture).toHaveBeenCalledTimes(2);
   });
 });

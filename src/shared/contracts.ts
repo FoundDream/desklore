@@ -95,6 +95,9 @@ export interface VisualHealth {
   uncertainCount: number;
   captureRequestedCount: number;
   captureSucceededCount: number;
+  captureCandidateCount: number;
+  captureDiscardedCount: number;
+  captureCoalescedCount: number;
   captureBlockedCount: number;
   captureFailedCount: number;
   captureCooldownCount: number;
