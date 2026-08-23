@@ -1,13 +1,14 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentClient } from "../agent-client.js";
 import { HistoryService } from "./service.js";
 import { HistorySettingsStore } from "./settings.js";
+import { defaultObservationPolicy } from "./policy.js";
 import { ensureStorage, makeStorageLayout } from "./storage.js";
-import type { TimelineDocumentRecord } from "./types.js";
+import type { HistoryEvent, TimelineDocumentRecord } from "./types.js";
 
 vi.mock("electron", () => ({
   safeStorage: {
@@ -77,11 +78,13 @@ describe("History settings", () => {
     temporaryDirectories.push(root);
     const start = vi.fn(async () => ({ connectionState: "stopped" as const }));
     const stop = vi.fn(async () => ({ connectionState: "stopped" as const }));
+    const request = vi.fn(async () => ({ connectionState: "stopped" as const }));
     const terminate = vi.fn();
     const collector = Object.assign(new EventEmitter(), {
       current: () => ({ connectionState: "stopped" as const }),
       start,
       stop,
+      request,
       terminate,
     }) as unknown as AgentClient;
     const service = new HistoryService(collector, root);
@@ -96,6 +99,10 @@ describe("History settings", () => {
       recordingConsentGranted: true,
     });
     expect(start).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenNthCalledWith(1, "configureObservationPolicy", {
+      observationPolicy: defaultObservationPolicy,
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "start");
     await service.stop();
     expect(stop).toHaveBeenCalledOnce();
     service.terminate();
@@ -112,6 +119,118 @@ describe("History settings", () => {
     await expect(settingsStore.hasRecordingConsent()).resolves.toBe(false);
     await settingsStore.grantRecordingConsent(new Date("2026-08-23T00:00:00.000Z"));
     await expect(settingsStore.hasRecordingConsent()).resolves.toBe(true);
+  });
+
+  it("migrates observation policy v1 and persists title exclusions in v2", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-policy-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const policyPath = path.join(layout.state, "observation-policy.json");
+    await writeFile(
+      policyPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        defaultApplicationBehavior: "observe",
+        defaultURLBehavior: "observe",
+        allowedBundleIdentifiers: [],
+        blockedBundleIdentifiers: ["com.example.private"],
+        allowedDomains: [],
+        blockedDomains: ["secret.example.com"],
+      }),
+    );
+    const settingsStore = new HistorySettingsStore(layout);
+
+    await expect(settingsStore.loadPolicy()).resolves.toMatchObject({
+      blockedBundleIdentifiers: ["com.example.private"],
+      blockedDomains: ["secret.example.com"],
+      blockedWindowTitles: [],
+    });
+    expect(JSON.parse(await readFile(policyPath, "utf8"))).toMatchObject({
+      schemaVersion: 2,
+      blockedWindowTitles: [],
+    });
+
+    await settingsStore.savePolicy({
+      ...structuredClone(defaultObservationPolicy),
+      blockedWindowTitles: [{ id: "private-window", pattern: "Payroll", match: "contains" }],
+    });
+    await expect(settingsStore.loadPolicy()).resolves.toMatchObject({
+      blockedWindowTitles: [{ id: "private-window", pattern: "Payroll", match: "contains" }],
+    });
+  });
+
+  it("never appends an event excluded by observation policy", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-policy-persist-"));
+    temporaryDirectories.push(root);
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "stopped" as const }),
+    }) as unknown as AgentClient;
+    const service = new HistoryService(collector, root);
+    const internals = service as unknown as {
+      policy: typeof defaultObservationPolicy;
+      segments: {
+        append(event: HistoryEvent): Promise<undefined>;
+        recordMetric(timestamp: string, metric: string): Promise<undefined>;
+        recordSuppressed(timestamp: string): Promise<undefined>;
+      };
+      processEvent(event: HistoryEvent): Promise<void>;
+    };
+    internals.policy = {
+      ...structuredClone(defaultObservationPolicy),
+      blockedBundleIdentifiers: ["com.example.private"],
+    };
+    const append = vi.spyOn(internals.segments, "append").mockResolvedValue(undefined);
+    const recordMetric = vi.spyOn(internals.segments, "recordMetric").mockResolvedValue(undefined);
+    const recordSuppressed = vi
+      .spyOn(internals.segments, "recordSuppressed")
+      .mockResolvedValue(undefined);
+    const input: HistoryEvent = {
+      id: "00000000-0000-4000-8000-000000000001",
+      timestamp: "2026-08-24T00:00:00.000Z",
+      kind: "window.changed",
+      application: { bundleIdentifier: "com.example.private", name: "Private" },
+      window: { title: "Sensitive work", isPrivateBrowsing: false },
+    };
+
+    await internals.processEvent(input);
+
+    expect(recordMetric).toHaveBeenCalledWith(input.timestamp, "captured");
+    expect(recordSuppressed).toHaveBeenCalledWith(input.timestamp);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("pauses capture when a live policy update cannot reach the collector", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-policy-sync-"));
+    temporaryDirectories.push(root);
+    const request = vi.fn(async (command: string) => {
+      if (command === "configureObservationPolicy") throw new Error("collector unavailable");
+      return { connectionState: "connected" as const };
+    });
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "connected" as const }),
+      request,
+    }) as unknown as AgentClient;
+    const service = new HistoryService(collector, root);
+
+    await expect(
+      service.updateObservationPolicy({
+        ...structuredClone(defaultObservationPolicy),
+        blockedDomains: ["private.example.com"],
+      }),
+    ).rejects.toThrow("collector unavailable");
+
+    expect(request).toHaveBeenNthCalledWith(1, "configureObservationPolicy", {
+      observationPolicy: {
+        ...defaultObservationPolicy,
+        blockedDomains: ["private.example.com"],
+      },
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "pause");
+    expect(service.current()).toMatchObject({
+      observationPolicy: { blockedDomains: ["private.example.com"] },
+      connectionError: undefined,
+    });
   });
 
   it("defaults the interface to English and persists an explicit language choice", async () => {

@@ -13,9 +13,13 @@ struct VisualCaptureIntent: Sendable {
     let bundleIdentifier: String
     let windowRuntimeIdentifier: UInt32?
     let windowTitle: String?
+    let url: String?
+    let isPrivateBrowsing: Bool
     let expiresAt: Date
     let includeImage: Bool
 }
+
+typealias VisualCapturePolicyCheck = @MainActor @Sendable (String?) -> Bool
 
 struct VisualCaptureResult: Encodable, Sendable {
     enum Status: String, Encodable, Sendable {
@@ -54,8 +58,14 @@ final class VisualCaptureProvider: @unchecked Sendable {
         CGRequestScreenCaptureAccess()
     }
 
-    func capture(_ intent: VisualCaptureIntent) async -> VisualCaptureResult {
+    func capture(
+        _ intent: VisualCaptureIntent,
+        policyCheck: VisualCapturePolicyCheck
+    ) async -> VisualCaptureResult {
         guard !blockedBundleIdentifiers.contains(intent.bundleIdentifier) else {
+            return result(.blocked, reason: "policy_excluded")
+        }
+        guard await policyCheck(intent.windowTitle) else {
             return result(.blocked, reason: "policy_excluded")
         }
         guard Date() <= intent.expiresAt else {
@@ -71,6 +81,9 @@ final class VisualCaptureProvider: @unchecked Sendable {
             )
             guard let window = matchingWindow(in: content.windows, intent: intent) else {
                 return result(.unavailable, reason: "target_window_unavailable")
+            }
+            guard await policyCheck(window.title) else {
+                return result(.blocked, reason: "policy_excluded")
             }
             guard Date() <= intent.expiresAt else {
                 return result(.unavailable, reason: "request_expired")

@@ -71,6 +71,11 @@ struct AXCaptureResult: Sendable {
     let snapshotWasTruncated: Bool
 }
 
+enum AXCaptureOutcome: Sendable {
+    case captured(AXCaptureResult)
+    case suppressed(activeDomain: String?)
+}
+
 actor AXCaptureCoordinator {
     private let reader = AXContextReader()
 
@@ -80,14 +85,16 @@ actor AXCaptureCoordinator {
         captureReason: HistoryEvent.CaptureReason,
         interaction: InteractionCapture?,
         includeRichSnapshot: Bool,
+        observationPolicy: ObservationPolicy,
         timestamp: Date
-    ) -> AXCaptureResult {
+    ) -> AXCaptureOutcome {
         reader.event(
             for: application,
             kind: kind,
             captureReason: captureReason,
             interaction: interaction,
             includeRichSnapshot: includeRichSnapshot,
+            observationPolicy: observationPolicy,
             at: timestamp
         )
     }
@@ -134,8 +141,9 @@ final class AXContextReader {
         captureReason: HistoryEvent.CaptureReason = .windowFocus,
         interaction capture: InteractionCapture? = nil,
         includeRichSnapshot: Bool = true,
+        observationPolicy: ObservationPolicy,
         at timestamp: Date = Date()
-    ) -> AXCaptureResult {
+    ) -> AXCaptureOutcome {
         let captureStartedAt = ProcessInfo.processInfo.systemUptime
         let appElement = AXUIElementCreateApplication(application.processIdentifier)
         _ = AXUIElementSetMessagingTimeout(appElement, 0.25)
@@ -143,15 +151,29 @@ final class AXContextReader {
             attribute: kAXFocusedWindowAttribute as CFString,
             from: appElement
         )
+        let windowTitle = windowElement.flatMap {
+            string(attribute: kAXTitleAttribute as CFString, from: $0)
+        }
+        let url = windowElement.flatMap(urlString(from:))
+        let privateBrowsing = isPrivateBrowsing(
+            bundleIdentifier: application.bundleIdentifier,
+            windowTitle: windowTitle
+        )
+        let decision = observationPolicy.decision(
+            bundleIdentifier: application.bundleIdentifier,
+            windowTitle: windowTitle,
+            url: url,
+            isPrivateBrowsing: privateBrowsing
+        )
+        guard decision.allowed else {
+            return .suppressed(activeDomain: ObservationPolicy.domain(from: url))
+        }
+
         let focusedElement = element(
             attribute: kAXFocusedUIElementAttribute as CFString,
             from: appElement
         )
         let targetElement = capture?.screenLocation.flatMap(element(at:)) ?? focusedElement
-
-        let windowTitle = windowElement.flatMap {
-            string(attribute: kAXTitleAttribute as CFString, from: $0)
-        }
         let windowRuntimeIdentifier = includeRichSnapshot ? windowElement.flatMap {
             windowIdentifier(
                 for: $0,
@@ -159,7 +181,6 @@ final class AXContextReader {
                 title: windowTitle
             )
         } : nil
-        let url = windowElement.flatMap(urlString(from:))
         let target = capture?.semanticTarget ?? targetElement.map(targetContext(from:))
         let selectedText = capture == nil
             ? targetElement.flatMap {
@@ -195,24 +216,23 @@ final class AXContextReader {
             window: .init(
                 title: windowTitle,
                 url: url,
-                isPrivateBrowsing: isPrivateBrowsing(
-                    bundleIdentifier: application.bundleIdentifier,
-                    windowTitle: windowTitle
-                ),
+                isPrivateBrowsing: privateBrowsing,
                 runtimeIdentifier: windowRuntimeIdentifier
             ),
             target: target,
             interaction: interaction,
             accessibility: accessibilityCapture?.context
         )
-        return AXCaptureResult(
-            event: event,
-            durationMilliseconds: (
-                ProcessInfo.processInfo.systemUptime - captureStartedAt
-            ) * 1_000,
-            snapshotNodeCount: accessibilityCapture?.snapshot.nodes.count ?? 0,
-            visitedNodeCount: accessibilityCapture?.snapshot.visitedNodeCount ?? 0,
-            snapshotWasTruncated: accessibilityCapture?.snapshot.wasTruncated ?? false
+        return .captured(
+            AXCaptureResult(
+                event: event,
+                durationMilliseconds: (
+                    ProcessInfo.processInfo.systemUptime - captureStartedAt
+                ) * 1_000,
+                snapshotNodeCount: accessibilityCapture?.snapshot.nodes.count ?? 0,
+                visitedNodeCount: accessibilityCapture?.snapshot.visitedNodeCount ?? 0,
+                snapshotWasTruncated: accessibilityCapture?.snapshot.wasTruncated ?? false
+            )
         )
     }
 

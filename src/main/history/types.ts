@@ -197,14 +197,7 @@ export interface HistorySearchResponse {
   matches: HistorySearchMatch[];
 }
 
-export interface ObservationPolicy {
-  defaultApplicationBehavior: "observe" | "do_not_observe";
-  defaultURLBehavior: "observe" | "do_not_observe";
-  allowedBundleIdentifiers: string[];
-  blockedBundleIdentifiers: string[];
-  allowedDomains: string[];
-  blockedDomains: string[];
-}
+export type { ObservationPolicy, WindowTitleExclusionRule } from "../../shared/contracts.js";
 
 export interface TimelineLLMSettings {
   enabled: boolean;

@@ -1544,6 +1544,222 @@ button.text-danger:hover {
   background: var(--accent);
 }
 
+.settings-empty-state {
+  padding: 19px 0 14px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.settings-application-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-application-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.settings-application-toolbar button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  background: var(--surface);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.settings-application-toolbar button:hover {
+  background: var(--accent);
+}
+
+.settings-application-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.settings-application-search {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-application-search > span {
+  color: #3f3f46;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.settings-application-search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  color: var(--foreground);
+  background: var(--surface);
+  font-size: 10px;
+}
+
+.settings-application-search input:focus-visible {
+  border-color: #a1a1aa;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.settings-application-list {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.settings-application-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 11px;
+  min-height: 52px;
+  padding: 7px 11px;
+  cursor: pointer;
+}
+
+.settings-application-row + .settings-application-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.settings-application-row:hover {
+  background: #fafafa;
+}
+
+.settings-application-row.selected {
+  background: var(--accent);
+}
+
+.settings-application-row:has(input:focus-visible) {
+  background: var(--accent-strong);
+}
+
+.settings-application-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+}
+
+.settings-application-icon.fallback {
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.settings-application-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.settings-application-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-application-copy strong,
+.settings-application-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-application-copy strong {
+  font-size: 10px;
+  font-weight: 610;
+}
+
+.settings-application-copy small {
+  color: var(--muted);
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  font-size: 8px;
+}
+
+.settings-application-row input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.settings-application-empty {
+  display: grid;
+  min-height: 112px;
+  padding: 20px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.settings-application-error {
+  color: var(--warning);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.settings-manual-application .settings-rule-form {
+  margin-bottom: 4px;
+}
+
+.settings-rule-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 14px 0 4px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.settings-rule-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-rule-form label > span {
+  color: #3f3f46;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.settings-rule-form input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  color: var(--foreground);
+  background: var(--surface);
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  font-size: 10px;
+}
+
+.settings-rule-form input:focus-visible {
+  border-color: #a1a1aa;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.settings-window-rule-form {
+  border-top: 1px solid var(--border-soft);
+}
+
 .setting-select {
   width: 170px;
 }

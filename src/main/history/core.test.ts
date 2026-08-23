@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyKeyboardEvent, EventBurstCoalescer, EventCoalescer } from "./coalescer.js";
 import { sampleTimelineEvents } from "./lifecycle.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
-import { applyObservationPolicy, defaultObservationPolicy, sanitizeEvent } from "./policy.js";
+import {
+  applyObservationPolicy,
+  defaultObservationPolicy,
+  normalizeObservationPolicy,
+  observationDecision,
+  sanitizeEvent,
+} from "./policy.js";
 import { makeStorageLayout, SegmentStore, segmentIdentifier } from "./storage.js";
 import {
   prepareTimelineEventsForModel,
@@ -110,6 +116,102 @@ describe("TypeScript history core", () => {
         }),
       ),
     ).toBeUndefined();
+  });
+
+  it("gives app and domain exclusions precedence over allow rules", () => {
+    const policy = normalizeObservationPolicy({
+      ...structuredClone(defaultObservationPolicy),
+      defaultApplicationBehavior: "do_not_observe",
+      defaultURLBehavior: "do_not_observe",
+      allowedBundleIdentifiers: ["com.example.browser"],
+      blockedBundleIdentifiers: ["com.example.browser"],
+      allowedDomains: ["example.com"],
+      blockedDomains: ["private.example.com"],
+    });
+    const input = event({
+      application: { bundleIdentifier: "com.example.browser", name: "Browser" },
+      window: {
+        title: "Public document",
+        url: "https://private.example.com/document",
+        isPrivateBrowsing: false,
+      },
+    });
+
+    expect(observationDecision(policy, input)).toEqual({
+      allowed: false,
+      reason: "application_excluded",
+    });
+
+    policy.blockedBundleIdentifiers = [];
+    expect(observationDecision(policy, input)).toEqual({
+      allowed: false,
+      reason: "domain_excluded",
+    });
+  });
+
+  it("matches normalized window-title exclusions with optional app scope", () => {
+    const policy = normalizeObservationPolicy({
+      ...structuredClone(defaultObservationPolicy),
+      blockedWindowTitles: [
+        {
+          id: "finance-sheet",
+          pattern: "Q3　Payroll",
+          match: "contains",
+          bundleIdentifier: "com.example.editor",
+        },
+        { id: "exact-login", pattern: "Sign in", match: "exact" },
+      ],
+    });
+
+    expect(
+      observationDecision(
+        policy,
+        event({ window: { title: "ACME — q3 payroll", isPrivateBrowsing: false } }),
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: "window_title_excluded",
+      ruleID: "finance-sheet",
+    });
+    expect(
+      observationDecision(
+        policy,
+        event({
+          application: { bundleIdentifier: "com.example.browser", name: "Browser" },
+          window: { title: "ACME — Q3 Payroll", isPrivateBrowsing: false },
+        }),
+      ),
+    ).toEqual({ allowed: true, reason: "allowed" });
+    expect(
+      observationDecision(
+        policy,
+        event({ window: { title: "Sign in to continue", isPrivateBrowsing: false } }),
+      ),
+    ).toEqual({ allowed: true, reason: "allowed" });
+  });
+
+  it("rejects malformed observation rules at the IPC trust boundary", () => {
+    expect(() =>
+      normalizeObservationPolicy({
+        ...structuredClone(defaultObservationPolicy),
+        blockedDomains: ["https://example.com/private"],
+      }),
+    ).toThrow("Invalid observation domain");
+    expect(() =>
+      normalizeObservationPolicy({
+        ...structuredClone(defaultObservationPolicy),
+        blockedWindowTitles: [
+          { id: "short", pattern: "ab", match: "contains" },
+          { id: "short", pattern: "valid title", match: "exact" },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      normalizeObservationPolicy({
+        ...structuredClone(defaultObservationPolicy),
+        blockedWindowTitles: [{ id: "missing-pattern" } as never],
+      }),
+    ).toThrow("Invalid window title exclusion rule");
   });
 
   it("coalesces text deltas and short click bursts", () => {

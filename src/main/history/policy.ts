@@ -1,4 +1,4 @@
-import type { HistoryEvent, ObservationPolicy } from "./types.js";
+import type { HistoryEvent, ObservationPolicy, WindowTitleExclusionRule } from "./types.js";
 
 const sensitiveLabels = [
   "password",
@@ -26,6 +26,30 @@ const alwaysBlockedBundleIdentifiers = new Set([
   "com.apple.ScreenSaver.Engine",
 ]);
 
+export type ObservationDecisionReason =
+  | "allowed"
+  | "protected_surface"
+  | "private_browsing"
+  | "sensitive_target"
+  | "application_excluded"
+  | "domain_excluded"
+  | "window_title_excluded";
+
+export interface ObservationDecision {
+  allowed: boolean;
+  reason: ObservationDecisionReason;
+  ruleID?: string;
+}
+
+export const observationPolicyLimits = {
+  maximumBundleIdentifierLength: 512,
+  maximumDomainLength: 253,
+  maximumWindowTitleRules: 50,
+  minimumWindowTitlePatternLength: 3,
+  maximumWindowTitlePatternLength: 128,
+  maximumWindowTitleMatchLength: 1_024,
+} as const;
+
 export const defaultObservationPolicy: ObservationPolicy = {
   defaultApplicationBehavior: "observe",
   defaultURLBehavior: "observe",
@@ -33,7 +57,125 @@ export const defaultObservationPolicy: ObservationPolicy = {
   blockedBundleIdentifiers: [],
   allowedDomains: [],
   blockedDomains: [],
+  blockedWindowTitles: [],
 };
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+export function normalizeBundleIdentifier(value: string): string {
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    normalized.length > observationPolicyLimits.maximumBundleIdentifierLength ||
+    !/^[A-Za-z0-9.-]+$/.test(normalized)
+  ) {
+    throw new Error("Invalid application bundle identifier");
+  }
+  return normalized;
+}
+
+export function normalizeDomainRule(value: string): string {
+  const raw = value.trim().toLowerCase().replace(/\.$/, "");
+  if (
+    !raw ||
+    raw.length > observationPolicyLimits.maximumDomainLength ||
+    raw.includes("://") ||
+    /[/?#@]/.test(raw)
+  ) {
+    throw new Error("Invalid observation domain");
+  }
+  try {
+    const parsed = new URL(`https://${raw}`);
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+    if (!hostname || parsed.port || hostname.length > observationPolicyLimits.maximumDomainLength) {
+      throw new Error("Invalid observation domain");
+    }
+    return hostname;
+  } catch {
+    throw new Error("Invalid observation domain");
+  }
+}
+
+function normalizeWindowTitlePattern(value: string): string {
+  const normalized = value.normalize("NFKC").trim();
+  if (
+    normalized.length < observationPolicyLimits.minimumWindowTitlePatternLength ||
+    normalized.length > observationPolicyLimits.maximumWindowTitlePatternLength
+  ) {
+    throw new Error("Invalid window title exclusion pattern");
+  }
+  return normalized;
+}
+
+export function normalizeWindowTitleRule(value: unknown): WindowTitleExclusionRule {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid window title exclusion rule");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.pattern !== "string" ||
+    (candidate.match !== "contains" && candidate.match !== "exact") ||
+    (candidate.bundleIdentifier !== undefined && typeof candidate.bundleIdentifier !== "string")
+  ) {
+    throw new Error("Invalid window title exclusion rule");
+  }
+  const id = candidate.id.trim();
+  if (!id || id.length > 128 || !/^[A-Za-z0-9-]+$/.test(id)) {
+    throw new Error("Invalid window title exclusion rule ID");
+  }
+  return {
+    id,
+    pattern: normalizeWindowTitlePattern(candidate.pattern),
+    match: candidate.match,
+    bundleIdentifier: candidate.bundleIdentifier
+      ? normalizeBundleIdentifier(candidate.bundleIdentifier)
+      : undefined,
+  };
+}
+
+export function normalizeObservationPolicy(policy: ObservationPolicy): ObservationPolicy {
+  if (!policy || typeof policy !== "object") throw new Error("Invalid observation policy");
+  if (!(["observe", "do_not_observe"] as const).includes(policy.defaultApplicationBehavior)) {
+    throw new Error("Invalid default application behavior");
+  }
+  if (!(["observe", "do_not_observe"] as const).includes(policy.defaultURLBehavior)) {
+    throw new Error("Invalid default URL behavior");
+  }
+  const stringList = (value: unknown, normalize: (item: string) => string): string[] => {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+      throw new Error("Invalid observation policy rule list");
+    }
+    return unique(value.map(normalize));
+  };
+  if (
+    !Array.isArray(policy.blockedWindowTitles) ||
+    policy.blockedWindowTitles.length > observationPolicyLimits.maximumWindowTitleRules
+  ) {
+    throw new Error("Invalid window title exclusion rules");
+  }
+  const blockedWindowTitles = policy.blockedWindowTitles.map(normalizeWindowTitleRule);
+  if (new Set(blockedWindowTitles.map((rule) => rule.id)).size !== blockedWindowTitles.length) {
+    throw new Error("Duplicate window title exclusion rule ID");
+  }
+  return {
+    defaultApplicationBehavior: policy.defaultApplicationBehavior,
+    defaultURLBehavior: policy.defaultURLBehavior,
+    allowedBundleIdentifiers: stringList(
+      policy.allowedBundleIdentifiers,
+      normalizeBundleIdentifier,
+    ),
+    blockedBundleIdentifiers: stringList(
+      policy.blockedBundleIdentifiers,
+      normalizeBundleIdentifier,
+    ),
+    allowedDomains: stringList(policy.allowedDomains, normalizeDomainRule),
+    blockedDomains: stringList(policy.blockedDomains, normalizeDomainRule),
+    blockedWindowTitles,
+  };
+}
 
 export function cleanText(value: string | undefined, limit: number): string | undefined {
   if (!value) return value;
@@ -149,6 +291,29 @@ function domainMatches(domain: string, rules: string[]): boolean {
   return rules.some((rule) => normalized === rule || normalized.endsWith(`.${rule}`));
 }
 
+function normalizedWindowTitle(value: string): string {
+  return value
+    .slice(0, observationPolicyLimits.maximumWindowTitleMatchLength)
+    .normalize("NFKC")
+    .toLowerCase();
+}
+
+export function matchingWindowTitleRule(
+  policy: ObservationPolicy,
+  event: HistoryEvent,
+): WindowTitleExclusionRule | undefined {
+  const title = event.window?.title;
+  if (!title) return undefined;
+  const normalizedTitle = normalizedWindowTitle(title);
+  return policy.blockedWindowTitles.find((rule) => {
+    if (rule.bundleIdentifier && rule.bundleIdentifier !== event.application.bundleIdentifier) {
+      return false;
+    }
+    const pattern = normalizedWindowTitle(rule.pattern);
+    return rule.match === "exact" ? normalizedTitle === pattern : normalizedTitle.includes(pattern);
+  });
+}
+
 export function allowsApplication(policy: ObservationPolicy, bundleIdentifier: string): boolean {
   if (
     !bundleIdentifier ||
@@ -172,16 +337,35 @@ export function applyObservationPolicy(
   policy: ObservationPolicy,
   event: HistoryEvent,
 ): HistoryEvent | undefined {
-  if (!allowsApplication(policy, event.application.bundleIdentifier)) return undefined;
+  return observationDecision(policy, event).allowed ? sanitizeEvent(event) : undefined;
+}
+
+export function observationDecision(
+  policy: ObservationPolicy,
+  event: HistoryEvent,
+): ObservationDecision {
   if (
     event.application.bundleIdentifier === "com.desklore.desktop" ||
     (event.application.bundleIdentifier === "com.github.Electron" &&
       event.window?.title === "DeskLore")
   ) {
-    return undefined;
+    return { allowed: false, reason: "protected_surface" };
   }
-  if (event.window?.isPrivateBrowsing || isSensitiveTarget(event.target)) return undefined;
+  if (alwaysBlockedBundleIdentifiers.has(event.application.bundleIdentifier)) {
+    return { allowed: false, reason: "protected_surface" };
+  }
+  if (event.window?.isPrivateBrowsing) return { allowed: false, reason: "private_browsing" };
+  if (isSensitiveTarget(event.target)) return { allowed: false, reason: "sensitive_target" };
+  if (!allowsApplication(policy, event.application.bundleIdentifier)) {
+    return { allowed: false, reason: "application_excluded" };
+  }
   const domain = domainFromURL(event.window?.url);
-  if (domain && !allowsDomain(policy, domain)) return undefined;
-  return sanitizeEvent(event);
+  if (domain && !allowsDomain(policy, domain)) {
+    return { allowed: false, reason: "domain_excluded" };
+  }
+  const titleRule = matchingWindowTitleRule(policy, event);
+  if (titleRule) {
+    return { allowed: false, reason: "window_title_excluded", ruleID: titleRule.id };
+  }
+  return { allowed: true, reason: "allowed" };
 }

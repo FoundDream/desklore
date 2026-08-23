@@ -44,8 +44,10 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var started = false
     private var nextCaptureSequence = 0
     private var nextCaptureResultSequence = 0
-    private var pendingCaptureResults: [Int: AXCaptureResult] = [:]
+    private var pendingCaptureResults: [Int: AXCaptureOutcome] = [:]
     private var lastNativeWindowCaptureByStream: [String: Date] = [:]
+    private var observationPolicy: ObservationPolicy?
+    private var activeContextAllowed = false
     private let hostBundleIdentifier = ProcessInfo.processInfo.environment[
         "DESKLORE_HOST_BUNDLE_ID"
     ]
@@ -56,6 +58,10 @@ final class HistoryEngine: NSObject, ObservableObject {
     ]
 
     func start() {
+        guard observationPolicy != nil else {
+            lastError = "Observation policy must be configured before capture starts"
+            return
+        }
         guard !started else {
             if state == .stopped { resume() }
             return
@@ -98,10 +104,20 @@ final class HistoryEngine: NSObject, ObservableObject {
         interactionMonitorActive = interactionMonitor.isActive
 
         workspaceMonitor.onApplicationActivated = { [weak self] application in
-            self?.activeApplication = Self.application(from: application)
-            self?.axNotificationMonitor.observe(application)
-            self?.refreshSemanticListenerHealth()
-            self?.capture(
+            guard let self else { return }
+            self.activeApplication = Self.application(from: application)
+            self.activeDomain = nil
+            self.activeContextAllowed = false
+            if self.allowsApplication(application) {
+                self.axNotificationMonitor.observe(
+                    application,
+                    semanticCaptureEnabled: false
+                )
+            } else {
+                self.axNotificationMonitor.stop()
+            }
+            self.refreshSemanticListenerHealth()
+            self.capture(
                 application,
                 kind: .windowChanged,
                 reason: .applicationActivation
@@ -118,15 +134,53 @@ final class HistoryEngine: NSObject, ObservableObject {
         )
     }
 
+    func configureObservationPolicy(_ policy: ObservationPolicy) throws {
+        observationPolicy = try policy.validated()
+        lastError = nil
+        activeContextAllowed = false
+        axNotificationMonitor.setSemanticCaptureEnabled(false)
+        if state == .running {
+            pollFrontmostApplication()
+            captureFrontmostApplication(kind: .windowChanged, reason: .poll)
+        }
+    }
+
     func pause() {
         guard state == .running else { return }
         state = .paused
+        activeContextAllowed = false
+        axNotificationMonitor.setSemanticCaptureEnabled(false)
+        refreshSemanticListenerHealth()
     }
 
     func resume() {
         guard state != .running else { return }
         state = .running
+        activeContextAllowed = false
         pollFrontmostApplication()
+        captureFrontmostApplication(kind: .windowChanged, reason: .poll)
+    }
+
+    func allowsVisualCapture(
+        _ intent: VisualCaptureIntent,
+        currentWindowTitle: String?
+    ) -> Bool {
+        guard state == .running,
+              let observationPolicy,
+              let frontmostApplication = NSWorkspace.shared.frontmostApplication,
+              Self.application(from: frontmostApplication).bundleIdentifier
+                == intent.bundleIdentifier else {
+            return false
+        }
+        let currentURL = activeApplication?.bundleIdentifier == intent.bundleIdentifier
+            ? activeDomain ?? intent.url
+            : intent.url
+        return observationPolicy.decision(
+            bundleIdentifier: intent.bundleIdentifier,
+            windowTitle: currentWindowTitle ?? intent.windowTitle,
+            url: currentURL,
+            isPrivateBrowsing: intent.isPrivateBrowsing
+        ).allowed
     }
 
     func requestAccessibilityPermission() {
@@ -150,8 +204,21 @@ final class HistoryEngine: NSObject, ObservableObject {
               let application = NSWorkspace.shared.frontmostApplication else {
             return
         }
-        activeApplication = Self.application(from: application)
-        axNotificationMonitor.observe(application)
+        let nextApplication = Self.application(from: application)
+        if activeApplication?.bundleIdentifier != nextApplication.bundleIdentifier {
+            activeDomain = nil
+            activeContextAllowed = false
+        }
+        activeApplication = nextApplication
+        if allowsApplication(application) {
+            axNotificationMonitor.observe(
+                application,
+                semanticCaptureEnabled: activeContextAllowed
+            )
+        } else {
+            activeContextAllowed = false
+            axNotificationMonitor.stop()
+        }
         refreshSemanticListenerHealth()
     }
 
@@ -174,10 +241,14 @@ final class HistoryEngine: NSObject, ObservableObject {
         interaction: InteractionCapture? = nil,
         includeRichSnapshot: Bool = true
     ) {
-        guard state == .running,
+        guard let observationPolicy,
+              state == .running,
               application.bundleIdentifier != hostBundleIdentifier,
               !blockedSystemBundleIdentifiers.contains(
                   application.bundleIdentifier ?? ""
+              ),
+              observationPolicy.allowsApplication(
+                  Self.application(from: application).bundleIdentifier
               ) else {
             return
         }
@@ -203,6 +274,7 @@ final class HistoryEngine: NSObject, ObservableObject {
                 interaction: interaction,
                 includeRichSnapshot: includeRichSnapshot
                     && Self.requiresRichSnapshot(for: kind),
+                observationPolicy: observationPolicy,
                 timestamp: timestamp
             )
             self?.receiveCaptureResult(result, sequence: sequence)
@@ -241,15 +313,52 @@ final class HistoryEngine: NSObject, ObservableObject {
         }
     }
 
-    private func receiveCaptureResult(_ result: AXCaptureResult, sequence: Int) {
+    private func receiveCaptureResult(_ result: AXCaptureOutcome, sequence: Int) {
         pendingCaptureResults[sequence] = result
         while let ready = pendingCaptureResults.removeValue(
             forKey: nextCaptureResultSequence
         ) {
-            processCapturedEvent(ready)
+            processCaptureOutcome(
+                ready,
+                mayEnableSemanticCapture:
+                    nextCaptureResultSequence == nextCaptureSequence - 1
+            )
             nextCaptureResultSequence += 1
         }
         axCaptureBacklog = nextCaptureSequence - nextCaptureResultSequence
+    }
+
+    private func processCaptureOutcome(
+        _ outcome: AXCaptureOutcome,
+        mayEnableSemanticCapture: Bool
+    ) {
+        switch outcome {
+        case let .captured(result):
+            let decision = observationPolicy?.decision(
+                bundleIdentifier: result.event.application.bundleIdentifier,
+                windowTitle: result.event.window?.title,
+                url: result.event.window?.url,
+                isPrivateBrowsing: result.event.window?.isPrivateBrowsing == true
+            )
+            guard decision?.allowed == true else {
+                activeContextAllowed = false
+                axNotificationMonitor.setSemanticCaptureEnabled(false)
+                refreshSemanticListenerHealth()
+                return
+            }
+            if mayEnableSemanticCapture,
+               activeApplication?.bundleIdentifier
+                == result.event.application.bundleIdentifier {
+                activeContextAllowed = true
+                axNotificationMonitor.setSemanticCaptureEnabled(true)
+            }
+            processCapturedEvent(result)
+        case let .suppressed(activeDomain):
+            self.activeDomain = activeDomain
+            activeContextAllowed = false
+            axNotificationMonitor.setSemanticCaptureEnabled(false)
+            refreshSemanticListenerHealth()
+        }
     }
 
     private func processCapturedEvent(_ result: AXCaptureResult) {
@@ -300,6 +409,14 @@ final class HistoryEngine: NSObject, ObservableObject {
                 ?? "pid.\(application.processIdentifier)",
             name: application.localizedName ?? "Unknown application"
         )
+    }
+
+    private func allowsApplication(_ application: NSRunningApplication) -> Bool {
+        guard let observationPolicy else { return false }
+        let bundleIdentifier = Self.application(from: application).bundleIdentifier
+        return bundleIdentifier != hostBundleIdentifier
+            && !blockedSystemBundleIdentifiers.contains(bundleIdentifier)
+            && observationPolicy.allowsApplication(bundleIdentifier)
     }
 
     private static func domain(from value: String) -> String? {

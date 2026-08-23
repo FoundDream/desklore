@@ -7,16 +7,18 @@ import {
   Tray,
   type IpcMainInvokeEvent,
 } from "electron";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   DesktopSnapshot,
+  InstalledApplication,
   LLMConfigurationInput,
+  ObservationPolicy,
   VisualConfigurationInput,
 } from "../shared/contracts.js";
 import type { AppLocale } from "../shared/i18n.js";
 import { isAppLocale, translate } from "../shared/i18n.js";
 import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
+import { discoverInstalledApplications, readICNSIconDataURL } from "./applications.js";
 import { NativeAgentVisualCaptureProvider } from "./history/native-visual-provider.js";
 import { HistoryService } from "./history/service.js";
 
@@ -38,19 +40,6 @@ const history = new HistoryService(
   new NativeAgentVisualCaptureProvider(collector),
 );
 const applicationIconCache = new Map<string, Promise<string | undefined>>();
-const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const preferredICNSImageTypes = [
-  "icp6",
-  "ic12",
-  "ic07",
-  "ic13",
-  "ic08",
-  "ic09",
-  "ic10",
-  "icp5",
-  "ic11",
-  "icp4",
-];
 
 function assertRenderer(event: IpcMainInvokeEvent): void {
   if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
@@ -101,28 +90,6 @@ function validatedApplicationIconPath(value: unknown): string {
   return normalized;
 }
 
-async function readICNSIconDataURL(iconPath: string): Promise<string | undefined> {
-  const data = await readFile(iconPath);
-  if (data.length < 8 || data.toString("ascii", 0, 4) !== "icns") return undefined;
-
-  const images = new Map<string, Buffer>();
-  let offset = 8;
-  while (offset + 8 <= data.length) {
-    const type = data.toString("ascii", offset, offset + 4);
-    const length = data.readUInt32BE(offset + 4);
-    if (length < 8 || offset + length > data.length) break;
-    const payload = data.subarray(offset + 8, offset + length);
-    const signatureOffset = payload.indexOf(pngSignature);
-    if (signatureOffset >= 0) images.set(type, payload.subarray(signatureOffset));
-    offset += length;
-  }
-
-  const image = preferredICNSImageTypes
-    .map((type) => images.get(type))
-    .find((candidate) => candidate !== undefined);
-  return image ? `data:image/png;base64,${image.toString("base64")}` : undefined;
-}
-
 function applicationIconDataURL(iconPath: string): Promise<string | undefined> {
   const cached = applicationIconCache.get(iconPath);
   if (cached) return cached;
@@ -130,6 +97,19 @@ function applicationIconDataURL(iconPath: string): Promise<string | undefined> {
   const request = readICNSIconDataURL(iconPath).catch(() => undefined);
   applicationIconCache.set(iconPath, request);
   return request;
+}
+
+async function installedApplications(): Promise<InstalledApplication[]> {
+  const applications = await discoverInstalledApplications();
+  return Promise.all(
+    applications.map(async (application) => ({
+      bundleIdentifier: application.bundleIdentifier,
+      name: application.name,
+      iconDataURL: application.iconPath
+        ? await applicationIconDataURL(application.iconPath)
+        : undefined,
+    })),
+  );
 }
 
 function showWindow(): void {
@@ -219,6 +199,10 @@ function registerIPC(): void {
     assertRenderer(event);
     return history.current();
   });
+  ipcMain.handle("history:list-installed-applications", async (event) => {
+    assertRenderer(event);
+    return installedApplications();
+  });
   ipcMain.handle("history:set-locale", async (event, locale: AppLocale) => {
     assertRenderer(event);
     if (!isAppLocale(locale)) throw new Error("Invalid interface language");
@@ -275,6 +259,10 @@ function registerIPC(): void {
   ipcMain.handle("history:block-active-domain", async (event) => {
     assertRenderer(event);
     return history.setActiveDomainAllowed(false);
+  });
+  ipcMain.handle("history:update-observation-policy", async (event, input: ObservationPolicy) => {
+    assertRenderer(event);
+    return history.updateObservationPolicy(input);
   });
   ipcMain.handle("history:remove-llm-key", async (event) => {
     assertRenderer(event);

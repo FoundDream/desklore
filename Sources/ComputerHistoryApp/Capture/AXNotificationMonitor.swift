@@ -39,6 +39,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
     private var hasPendingTitleChange = false
     private var lastTypingActivityAt: Date?
     private var semanticEventGate = SemanticEventGate()
+    private var semanticCaptureEnabled = false
 
     private static let selectionNotifications: [CFString] = [
         kAXSelectedTextChangedNotification as CFString,
@@ -74,8 +75,14 @@ final class AXNotificationMonitor: @unchecked Sendable {
     private(set) var selectionNotificationTargetCount = 0
     var isObservingApplication: Bool { observer != nil }
 
-    func observe(_ application: NSRunningApplication) {
-        guard processIdentifier != application.processIdentifier else { return }
+    func observe(
+        _ application: NSRunningApplication,
+        semanticCaptureEnabled: Bool = true
+    ) {
+        guard processIdentifier != application.processIdentifier else {
+            setSemanticCaptureEnabled(semanticCaptureEnabled)
+            return
+        }
         stop()
 
         var createdObserver: AXObserver?
@@ -114,12 +121,40 @@ final class AXNotificationMonitor: @unchecked Sendable {
         observer = createdObserver
         self.applicationElement = applicationElement
         processIdentifier = application.processIdentifier
-        refreshFocusedElementSubscriptions()
-        fallbackTimer = Timer.scheduledTimer(
-            withTimeInterval: 1,
-            repeats: true
-        ) { [weak self] _ in
-            self?.pollFocusedSemantics()
+        setSemanticCaptureEnabled(semanticCaptureEnabled)
+    }
+
+    func setSemanticCaptureEnabled(_ enabled: Bool) {
+        guard semanticCaptureEnabled != enabled else { return }
+        semanticCaptureEnabled = enabled
+        if enabled {
+            refreshFocusedElementSubscriptions()
+            fallbackTimer?.invalidate()
+            fallbackTimer = Timer.scheduledTimer(
+                withTimeInterval: 1,
+                repeats: true
+            ) { [weak self] _ in
+                self?.pollFocusedSemantics()
+            }
+        } else {
+            pendingTextChange?.cancel()
+            pendingTextChange = nil
+            pendingTextCapture = nil
+            pendingTextStartedAt = nil
+            hasPendingTextChange = false
+            pendingSelectionChange?.cancel()
+            pendingSelectionChange = nil
+            pendingSelectionCapture = nil
+            pendingSelectionStartedAt = nil
+            hasPendingSelectionChange = false
+            fallbackTimer?.invalidate()
+            fallbackTimer = nil
+            removeFocusedElementSubscriptions()
+            focusedElement = nil
+            lastFocusedValue = nil
+            lastSelectedText = nil
+            lastTypingActivityAt = nil
+            semanticEventGate.reset()
         }
     }
 
@@ -159,10 +194,12 @@ final class AXNotificationMonitor: @unchecked Sendable {
         lastFocusedValue = nil
         lastSelectedText = nil
         lastTypingActivityAt = nil
+        semanticCaptureEnabled = false
         semanticEventGate.reset()
     }
 
     func noteTypingActivity() {
+        guard semanticCaptureEnabled else { return }
         lastTypingActivityAt = Date()
         if valueSubscriptions.isEmpty {
             refreshFocusedElementSubscriptions()
@@ -171,7 +208,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
 
     private func refreshFocusedElementSubscriptions() {
         removeFocusedElementSubscriptions()
-        guard let observer, let applicationElement else { return }
+        guard semanticCaptureEnabled, let observer, let applicationElement else { return }
 
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -349,12 +386,14 @@ final class AXNotificationMonitor: @unchecked Sendable {
     private func handle(element: AXUIElement, notification: CFString) {
         let name = notification as String
         if name == kAXFocusedUIElementChangedNotification as String {
+            guard semanticCaptureEnabled else { return }
             flushPendingChanges()
             refreshFocusedElementSubscriptions()
             return
         }
 
         if Self.selectionNotifications.contains(where: { ($0 as String) == name }) {
+            guard semanticCaptureEnabled else { return }
             let semanticElement = normalizedSemanticElement(element)
             let selection = selectedText(from: semanticElement)
             if let focusedElement, CFEqual(semanticElement, focusedElement) {
@@ -370,6 +409,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
             ) else { return }
             debounceSelectionChange(capture: capture)
         } else if name == kAXValueChangedNotification as String {
+            guard semanticCaptureEnabled else { return }
             let semanticElement = normalizedSemanticElement(element)
             guard isEditableTextElement(semanticElement), hasRecentTypingActivity else { return }
             let value = safeValue(from: semanticElement)
@@ -498,7 +538,7 @@ final class AXNotificationMonitor: @unchecked Sendable {
     }
 
     private func pollFocusedSemantics() {
-        guard let focusedElement else { return }
+        guard semanticCaptureEnabled, let focusedElement else { return }
         let value = isEditableTextElement(focusedElement) && hasRecentTypingActivity
             ? safeValue(from: focusedElement)
             : nil

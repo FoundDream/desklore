@@ -21,7 +21,6 @@ private final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         bridge = AgentBridge(engine: engine)
         bridge?.start()
-        engine.start()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

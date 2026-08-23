@@ -10,6 +10,12 @@ export interface TimelineApplication {
   iconPath?: string;
 }
 
+export interface InstalledApplication {
+  bundleIdentifier: string;
+  name: string;
+  iconDataURL?: string;
+}
+
 export interface TimelineDocument {
   id: string;
   startedAt: string;
@@ -90,6 +96,23 @@ export interface VisualSettings {
   understandingMode: "off" | "ocr" | "luna";
 }
 
+export interface WindowTitleExclusionRule {
+  id: string;
+  pattern: string;
+  match: "contains" | "exact";
+  bundleIdentifier?: string;
+}
+
+export interface ObservationPolicy {
+  defaultApplicationBehavior: "observe" | "do_not_observe";
+  defaultURLBehavior: "observe" | "do_not_observe";
+  allowedBundleIdentifiers: string[];
+  blockedBundleIdentifiers: string[];
+  allowedDomains: string[];
+  blockedDomains: string[];
+  blockedWindowTitles: WindowTitleExclusionRule[];
+}
+
 export interface VisualHealth {
   providerStatus: "disabled" | "permission_required" | "ready" | "unhealthy" | "unavailable";
   judgedEventCount: number;
@@ -138,6 +161,7 @@ export interface DesktopSnapshot {
   locale: AppLocale;
   connectionState: AgentConnectionState;
   recordingConsentGranted: boolean;
+  observationPolicy: ObservationPolicy;
   agent?: AgentSnapshot;
   connectionError?: string;
   historyRecovery?: HistoryRecovery;
@@ -155,6 +179,7 @@ export type VisualConfigurationInput = VisualSettings;
 
 export interface ComputerHistoryAPI {
   getSnapshot(): Promise<DesktopSnapshot>;
+  listInstalledApplications(): Promise<InstalledApplication[]>;
   setLocale(locale: AppLocale): Promise<DesktopSnapshot>;
   grantRecordingConsent(): Promise<DesktopSnapshot>;
   startAgent(): Promise<DesktopSnapshot>;
@@ -167,6 +192,7 @@ export interface ComputerHistoryAPI {
   blockActiveApplication(): Promise<DesktopSnapshot>;
   allowActiveDomain(): Promise<DesktopSnapshot>;
   blockActiveDomain(): Promise<DesktopSnapshot>;
+  updateObservationPolicy(input: ObservationPolicy): Promise<DesktopSnapshot>;
   configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot>;
   setLLMEnabled(enabled: boolean): Promise<DesktopSnapshot>;
   setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot>;

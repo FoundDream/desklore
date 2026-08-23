@@ -3,7 +3,7 @@ import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
 import { isAppLocale, translate } from "../../shared/i18n.js";
-import { defaultObservationPolicy } from "./policy.js";
+import { defaultObservationPolicy, normalizeObservationPolicy } from "./policy.js";
 import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "./types.js";
 import type { StorageLayout } from "./storage.js";
 
@@ -84,32 +84,41 @@ export class HistorySettingsStore {
     const blockedBundleIdentifiers = stringArray(stored.blockedBundleIdentifiers);
     const allowedDomains = stringArray(stored.allowedDomains);
     const blockedDomains = stringArray(stored.blockedDomains);
+    const blockedWindowTitles = Array.isArray(stored.blockedWindowTitles)
+      ? stored.blockedWindowTitles
+      : stored.schemaVersion === 1
+        ? []
+        : undefined;
     if (
-      stored.schemaVersion !== 1 ||
+      ![1, 2].includes(stored.schemaVersion as number) ||
       !["observe", "do_not_observe"].includes(stored.defaultApplicationBehavior ?? "") ||
       !["observe", "do_not_observe"].includes(stored.defaultURLBehavior ?? "") ||
       !allowedBundleIdentifiers ||
       !blockedBundleIdentifiers ||
       !allowedDomains ||
-      !blockedDomains
+      !blockedDomains ||
+      !blockedWindowTitles
     ) {
       throw new Error("Unsupported observation policy schema");
     }
-    const policy: ObservationPolicy = {
+    const policy = normalizeObservationPolicy({
       defaultApplicationBehavior: stored.defaultApplicationBehavior!,
       defaultURLBehavior: stored.defaultURLBehavior!,
       allowedBundleIdentifiers,
       blockedBundleIdentifiers,
-      allowedDomains: allowedDomains.map((value) => value.toLowerCase()),
-      blockedDomains: blockedDomains.map((value) => value.toLowerCase()),
-    };
+      allowedDomains,
+      blockedDomains,
+      blockedWindowTitles: blockedWindowTitles as ObservationPolicy["blockedWindowTitles"],
+    });
+    if (stored.schemaVersion === 1) await this.savePolicy(policy);
     return policy;
   }
 
   async savePolicy(policy: ObservationPolicy): Promise<void> {
+    const normalized = normalizeObservationPolicy(policy);
     await atomicWrite(
       this.policyPath,
-      `${JSON.stringify({ schemaVersion: 1, ...policy }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 2, ...normalized }, null, 2)}\n`,
     );
   }
 

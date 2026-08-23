@@ -7,6 +7,7 @@ import type {
   HistoryRecovery,
   LLMConfigurationInput,
   MemoryRollup,
+  ObservationPolicy,
   TimelineApplication,
   TimelineDocument,
 } from "../../shared/contracts.js";
@@ -19,7 +20,8 @@ import {
   allowsDomain,
   applyObservationPolicy,
   defaultObservationPolicy,
-  domainFromURL,
+  normalizeObservationPolicy,
+  observationDecision,
 } from "./policy.js";
 import { defaultVisualSettings, HistorySettingsStore, validateLLMSettings } from "./settings.js";
 import {
@@ -40,7 +42,6 @@ import type {
   MemoryRollupRecord,
   AXSufficiencyEvidence,
   HistoryEvent,
-  ObservationPolicy,
   TimelineDocumentRecord,
   TimelineLLMSettings,
   VisualEvidence,
@@ -242,6 +243,7 @@ export class HistoryService extends EventEmitter {
       locale: this.locale,
       connectionState: native.connectionState,
       recordingConsentGranted: this.recordingConsentGranted,
+      observationPolicy: structuredClone(this.policy),
       agent: snapshot,
       connectionError: native.connectionError,
       historyRecovery: this.historyRecovery,
@@ -254,6 +256,8 @@ export class HistoryService extends EventEmitter {
     const recovered = await this.segments.recoverExpiredSegments();
     const completed = await this.segments.pendingClosedSegments();
     await this.collector.start();
+    await this.syncObservationPolicyToCollector();
+    await this.collector.request("start");
     this.startTimers();
     await this.refreshDocuments();
     void this.enqueueTimeline(async () => {
@@ -332,27 +336,53 @@ export class HistoryService extends EventEmitter {
   async setActiveApplicationAllowed(allowed: boolean): Promise<DesktopSnapshot> {
     const application = this.collector.current().agent?.activeApplication;
     if (!application) return this.current();
-    this.policy.allowedBundleIdentifiers = this.policy.allowedBundleIdentifiers.filter(
+    const next = structuredClone(this.policy);
+    next.allowedBundleIdentifiers = next.allowedBundleIdentifiers.filter(
       (id) => id !== application.bundleIdentifier,
     );
-    this.policy.blockedBundleIdentifiers = this.policy.blockedBundleIdentifiers.filter(
+    next.blockedBundleIdentifiers = next.blockedBundleIdentifiers.filter(
       (id) => id !== application.bundleIdentifier,
     );
-    (allowed ? this.policy.allowedBundleIdentifiers : this.policy.blockedBundleIdentifiers).push(
-      application.bundleIdentifier,
-    );
-    await this.settingsStore.savePolicy(this.policy);
-    this.emitSnapshot();
-    return this.current();
+    if (allowed && next.defaultApplicationBehavior === "do_not_observe") {
+      next.allowedBundleIdentifiers.push(application.bundleIdentifier);
+    } else if (!allowed) {
+      next.blockedBundleIdentifiers.push(application.bundleIdentifier);
+    }
+    return this.updateObservationPolicy(next);
   }
 
   async setActiveDomainAllowed(allowed: boolean): Promise<DesktopSnapshot> {
     const domain = this.collector.current().agent?.activeDomain;
     if (!domain) return this.current();
-    this.policy.allowedDomains = this.policy.allowedDomains.filter((value) => value !== domain);
-    this.policy.blockedDomains = this.policy.blockedDomains.filter((value) => value !== domain);
-    (allowed ? this.policy.allowedDomains : this.policy.blockedDomains).push(domain);
-    await this.settingsStore.savePolicy(this.policy);
+    const next = structuredClone(this.policy);
+    next.allowedDomains = next.allowedDomains.filter((value) => value !== domain);
+    next.blockedDomains = next.blockedDomains.filter((value) => value !== domain);
+    if (allowed && next.defaultURLBehavior === "do_not_observe") {
+      next.allowedDomains.push(domain);
+    } else if (!allowed) {
+      next.blockedDomains.push(domain);
+    }
+    return this.updateObservationPolicy(next);
+  }
+
+  async updateObservationPolicy(policy: ObservationPolicy): Promise<DesktopSnapshot> {
+    await this.initialize();
+    const next = normalizeObservationPolicy(policy);
+    await this.settingsStore.savePolicy(next);
+    this.policy = next;
+    this.cancelAllPendingVisualIntents();
+    if (this.collector.current().connectionState === "connected") {
+      try {
+        await this.syncObservationPolicyToCollector();
+      } catch (error) {
+        await this.collector.request("pause").catch(() => undefined);
+        this.lastError =
+          error instanceof Error ? error.message : "Failed to update observation policy";
+        this.emitSnapshot();
+        throw error;
+      }
+    }
+    this.lastError = undefined;
     this.emitSnapshot();
     return this.current();
   }
@@ -575,16 +605,16 @@ export class HistoryService extends EventEmitter {
     }
     this.currentCaptureSegmentID = eventSegmentID;
     this.semanticHealth.capturedEventCount += 1;
+    const sanitized = applyObservationPolicy(this.policy, event);
     const capturedClosed = await this.segments.recordMetric(event.timestamp, "captured");
     if (capturedClosed) this.scheduleTimeline(capturedClosed);
-    const sanitized = applyObservationPolicy(this.policy, classifyKeyboardEvent(event));
     if (!sanitized) {
       this.semanticHealth.policyBlockedEventCount += 1;
       const closed = await this.segments.recordSuppressed(event.timestamp);
       if (closed) this.scheduleTimeline(closed);
       return;
     }
-    const normalized = this.coalescer.process(sanitized);
+    const normalized = this.coalescer.process(classifyKeyboardEvent(sanitized));
     if (!normalized) {
       this.semanticHealth.deduplicatedEventCount += 1;
       const closed = await this.segments.recordMetric(event.timestamp, "deduplicated");
@@ -986,11 +1016,7 @@ export class HistoryService extends EventEmitter {
     nowMilliseconds = Date.now(),
   ): Promise<{ requestID: string; payload: VisualCapturePayload }> {
     const requestID = randomUUID().toLowerCase();
-    const domain = domainFromURL(event.window?.url);
-    if (
-      !allowsApplication(this.policy, event.application.bundleIdentifier) ||
-      (domain !== undefined && !allowsDomain(this.policy, domain))
-    ) {
+    if (!observationDecision(this.policy, event).allowed) {
       return {
         requestID,
         payload: {
@@ -1053,6 +1079,8 @@ export class HistoryService extends EventEmitter {
         bundleIdentifier: event.application.bundleIdentifier,
         windowRuntimeIdentifier: event.window?.runtimeIdentifier,
         windowTitle: event.window?.title,
+        url: event.window?.url,
+        isPrivateBrowsing: event.window?.isPrivateBrowsing === true,
         expiresAt: new Date(eventExpiresAt).toISOString(),
         includeImage: understandingMode === "luna",
       });
@@ -1087,6 +1115,12 @@ export class HistoryService extends EventEmitter {
         },
       };
     }
+  }
+
+  private async syncObservationPolicyToCollector(): Promise<void> {
+    await this.collector.request("configureObservationPolicy", {
+      observationPolicy: this.policy,
+    });
   }
 
   private startTimers(): void {

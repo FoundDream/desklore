@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { DesktopSnapshot } from "../../shared/contracts.js";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import type {
+  DesktopSnapshot,
+  InstalledApplication,
+  ObservationPolicy,
+} from "../../shared/contracts.js";
 import appIcon from "./assets/app-icon.png";
 import { useI18n } from "./i18n.js";
 
@@ -72,6 +84,23 @@ function StatusPill({
   tone?: "neutral" | "success" | "warning";
 }) {
   return <span className={`setting-status setting-status-${tone}`}>{children}</span>;
+}
+
+function InstalledApplicationIcon({ application }: { application: InstalledApplication }) {
+  const source = application.iconDataURL;
+  return (
+    <span className={`settings-application-icon${source ? "" : " fallback"}`} aria-hidden="true">
+      {source ? <img src={source} alt="" /> : application.name.trim().slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+function applicationIsExcluded(policy: ObservationPolicy, bundleIdentifier: string): boolean {
+  if (policy.blockedBundleIdentifiers.includes(bundleIdentifier)) return true;
+  return (
+    policy.defaultApplicationBehavior === "do_not_observe" &&
+    !policy.allowedBundleIdentifiers.includes(bundleIdentifier)
+  );
 }
 
 function SettingsDisclosure({ title, children }: { title: string; children: ReactNode }) {
@@ -153,6 +182,15 @@ export function SettingsView({
   const [model, setModel] = useState(agent?.llm.model ?? "gpt-5.6-luna");
   const [endpoint, setEndpoint] = useState(agent?.llm.endpoint ?? defaultResponsesEndpoint);
   const [apiKey, setAPIKey] = useState("");
+  const [applicationExclusion, setApplicationExclusion] = useState("");
+  const [installedApplications, setInstalledApplications] = useState<InstalledApplication[]>();
+  const [installedApplicationsLoading, setInstalledApplicationsLoading] = useState(false);
+  const [installedApplicationsError, setInstalledApplicationsError] = useState<string>();
+  const [applicationSearch, setApplicationSearch] = useState("");
+  const [domainExclusion, setDomainExclusion] = useState("");
+  const [windowTitlePattern, setWindowTitlePattern] = useState("");
+  const [windowTitleMatch, setWindowTitleMatch] = useState<"contains" | "exact">("contains");
+  const [windowTitleApplication, setWindowTitleApplication] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(
     Boolean(agent?.llm.endpoint && agent.llm.endpoint !== defaultResponsesEndpoint),
   );
@@ -169,6 +207,27 @@ export function SettingsView({
       setAdvancedOpen(true);
     }
   }, [agent?.llm.endpoint]);
+
+  const loadInstalledApplications = useCallback(async (): Promise<void> => {
+    setInstalledApplicationsLoading(true);
+    setInstalledApplicationsError(undefined);
+    try {
+      setInstalledApplications(await window.computerHistory.listInstalledApplications());
+    } catch (loadError) {
+      setInstalledApplications([]);
+      setInstalledApplicationsError(
+        loadError instanceof Error ? loadError.message : "Unable to read installed applications",
+      );
+    } finally {
+      setInstalledApplicationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "privacy" && installedApplications === undefined && !installedApplicationsLoading) {
+      void loadInstalledApplications();
+    }
+  }, [installedApplications, installedApplicationsLoading, loadInstalledApplications, tab]);
 
   const tabs: Array<{ id: SettingsTab; label: string }> = [
     { id: "general", label: t("settings.tabGeneral") },
@@ -276,6 +335,119 @@ export function SettingsView({
       }),
     );
   };
+
+  const updateObservationPolicy = async (
+    update: (draft: ObservationPolicy) => void,
+  ): Promise<boolean> => {
+    const next = structuredClone(desktop.observationPolicy);
+    update(next);
+    return run(() => window.computerHistory.updateObservationPolicy(next));
+  };
+
+  const addApplicationExclusion = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    const bundleIdentifier = applicationExclusion.trim();
+    if (!bundleIdentifier) return;
+    const saved = await updateObservationPolicy((draft) => {
+      draft.allowedBundleIdentifiers = draft.allowedBundleIdentifiers.filter(
+        (value) => value !== bundleIdentifier,
+      );
+      if (!draft.blockedBundleIdentifiers.includes(bundleIdentifier)) {
+        draft.blockedBundleIdentifiers.push(bundleIdentifier);
+      }
+    });
+    if (saved) setApplicationExclusion("");
+  };
+
+  const addDomainExclusion = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    const domain = domainExclusion.trim();
+    if (!domain) return;
+    const saved = await updateObservationPolicy((draft) => {
+      draft.allowedDomains = draft.allowedDomains.filter((value) => value !== domain);
+      if (!draft.blockedDomains.includes(domain)) draft.blockedDomains.push(domain);
+    });
+    if (saved) setDomainExclusion("");
+  };
+
+  const addWindowTitleExclusion = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    const pattern = windowTitlePattern.trim();
+    const bundleIdentifier = windowTitleApplication.trim();
+    if (pattern.length < 3) return;
+    const saved = await updateObservationPolicy((draft) => {
+      draft.blockedWindowTitles.push({
+        id: crypto.randomUUID(),
+        pattern,
+        match: windowTitleMatch,
+        bundleIdentifier: bundleIdentifier || undefined,
+      });
+    });
+    if (saved) {
+      setWindowTitlePattern("");
+      setWindowTitleApplication("");
+    }
+  };
+
+  const applicationPickerItems = useMemo(() => {
+    const byBundleIdentifier = new Map(
+      (installedApplications ?? []).map((application) => [
+        application.bundleIdentifier,
+        { ...application, installed: true },
+      ]),
+    );
+    for (const bundleIdentifier of desktop.observationPolicy.blockedBundleIdentifiers) {
+      if (!byBundleIdentifier.has(bundleIdentifier)) {
+        byBundleIdentifier.set(bundleIdentifier, {
+          bundleIdentifier,
+          name: bundleIdentifier,
+          installed: false,
+        });
+      }
+    }
+    const query = applicationSearch.normalize("NFKC").trim().toLowerCase();
+    return [...byBundleIdentifier.values()]
+      .filter(
+        (application) =>
+          !query ||
+          application.name.normalize("NFKC").toLowerCase().includes(query) ||
+          application.bundleIdentifier.toLowerCase().includes(query),
+      )
+      .sort(
+        (lhs, rhs) =>
+          lhs.name.localeCompare(rhs.name, locale, { sensitivity: "base" }) ||
+          lhs.bundleIdentifier.localeCompare(rhs.bundleIdentifier),
+      );
+  }, [applicationSearch, desktop.observationPolicy, installedApplications, locale]);
+
+  const excludedApplicationCount = useMemo(() => {
+    const excluded = new Set(desktop.observationPolicy.blockedBundleIdentifiers);
+    if (desktop.observationPolicy.defaultApplicationBehavior === "do_not_observe") {
+      for (const application of installedApplications ?? []) {
+        if (
+          !desktop.observationPolicy.allowedBundleIdentifiers.includes(application.bundleIdentifier)
+        ) {
+          excluded.add(application.bundleIdentifier);
+        }
+      }
+    }
+    return excluded.size;
+  }, [desktop.observationPolicy, installedApplications]);
+
+  const setApplicationExcluded = (bundleIdentifier: string, excluded: boolean): Promise<boolean> =>
+    updateObservationPolicy((draft) => {
+      draft.allowedBundleIdentifiers = draft.allowedBundleIdentifiers.filter(
+        (value) => value !== bundleIdentifier,
+      );
+      draft.blockedBundleIdentifiers = draft.blockedBundleIdentifiers.filter(
+        (value) => value !== bundleIdentifier,
+      );
+      if (excluded) {
+        draft.blockedBundleIdentifiers.push(bundleIdentifier);
+      } else if (draft.defaultApplicationBehavior === "do_not_observe") {
+        draft.allowedBundleIdentifiers.push(bundleIdentifier);
+      }
+    });
 
   return (
     <div className={`settings-shell ${busy ? "busy" : ""}`}>
@@ -710,6 +882,259 @@ export function SettingsView({
                     </>
                   )}
                 </SettingRow>
+              </SettingsSection>
+              <SettingsSection title={t("settings.excludedApplications")}>
+                <div className="setting-group-intro">
+                  {t("settings.excludedApplicationsDetail")}
+                </div>
+                <div className="settings-application-picker">
+                  <div className="settings-application-toolbar">
+                    <span>
+                      {t("settings.applicationExclusionCount", {
+                        count: excludedApplicationCount,
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={installedApplicationsLoading}
+                      onClick={() => void loadInstalledApplications()}
+                    >
+                      {t("settings.reloadApplications")}
+                    </button>
+                  </div>
+                  <label className="settings-application-search">
+                    <span>{t("settings.searchApplications")}</span>
+                    <input
+                      type="search"
+                      value={applicationSearch}
+                      placeholder={t("settings.searchApplicationsPlaceholder")}
+                      spellCheck={false}
+                      onChange={(event) => setApplicationSearch(event.target.value)}
+                    />
+                  </label>
+                  <div
+                    className="settings-application-list"
+                    aria-busy={installedApplicationsLoading}
+                  >
+                    {installedApplicationsLoading && installedApplications === undefined ? (
+                      <div className="settings-application-empty">
+                        {t("settings.readingApplications")}
+                      </div>
+                    ) : applicationPickerItems.length === 0 ? (
+                      <div className="settings-application-empty">
+                        {t("settings.noMatchingApplications")}
+                      </div>
+                    ) : (
+                      applicationPickerItems.map((application) => {
+                        const excluded = applicationIsExcluded(
+                          desktop.observationPolicy,
+                          application.bundleIdentifier,
+                        );
+                        return (
+                          <label
+                            key={application.bundleIdentifier}
+                            className={
+                              excluded
+                                ? "settings-application-row selected"
+                                : "settings-application-row"
+                            }
+                          >
+                            <InstalledApplicationIcon application={application} />
+                            <span className="settings-application-copy">
+                              <strong>{application.name}</strong>
+                              <small>
+                                {application.bundleIdentifier}
+                                {!application.installed && (
+                                  <>
+                                    {" · "}
+                                    {t("settings.applicationNotFound")}
+                                  </>
+                                )}
+                              </small>
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={excluded}
+                              disabled={busy}
+                              aria-label={t("settings.excludeNamedApplication", {
+                                name: application.name,
+                              })}
+                              onChange={(event) =>
+                                void setApplicationExcluded(
+                                  application.bundleIdentifier,
+                                  event.target.checked,
+                                )
+                              }
+                            />
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                  {installedApplicationsError && (
+                    <div className="settings-application-error" role="status">
+                      {t("settings.applicationListUnavailable")}
+                    </div>
+                  )}
+                </div>
+                <details className="settings-advanced settings-manual-application">
+                  <summary>{t("settings.manualApplicationRule")}</summary>
+                  <p>{t("settings.manualApplicationRuleDetail")}</p>
+                  <form className="settings-rule-form" onSubmit={addApplicationExclusion}>
+                    <label>
+                      <span>{t("settings.bundleIdentifier")}</span>
+                      <input
+                        value={applicationExclusion}
+                        disabled={busy}
+                        placeholder={t("settings.bundleIdentifierPlaceholder")}
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        onChange={(event) => setApplicationExclusion(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="primary"
+                      disabled={busy || !applicationExclusion.trim()}
+                      type="submit"
+                    >
+                      {t("settings.addApplicationExclusion")}
+                    </button>
+                  </form>
+                </details>
+              </SettingsSection>
+              <SettingsSection title={t("settings.excludedDomains")}>
+                <div className="setting-group-intro">{t("settings.excludedDomainsDetail")}</div>
+                {desktop.observationPolicy.blockedDomains.length === 0 ? (
+                  <div className="settings-empty-state">{t("settings.noDomainExclusions")}</div>
+                ) : (
+                  desktop.observationPolicy.blockedDomains.map((domain) => (
+                    <SettingRow key={domain} title={domain}>
+                      <button
+                        disabled={busy}
+                        aria-label={`${t("settings.removeDomainExclusion")}: ${domain}`}
+                        onClick={() =>
+                          void updateObservationPolicy((draft) => {
+                            draft.blockedDomains = draft.blockedDomains.filter(
+                              (value) => value !== domain,
+                            );
+                          })
+                        }
+                      >
+                        {t("common.delete")}
+                      </button>
+                    </SettingRow>
+                  ))
+                )}
+                <form className="settings-rule-form" onSubmit={addDomainExclusion}>
+                  <label>
+                    <span>{t("settings.domain")}</span>
+                    <input
+                      value={domainExclusion}
+                      disabled={busy}
+                      placeholder={t("settings.domainPlaceholder")}
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      onChange={(event) => setDomainExclusion(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="primary"
+                    disabled={busy || !domainExclusion.trim()}
+                    type="submit"
+                  >
+                    {t("settings.addDomainExclusion")}
+                  </button>
+                </form>
+              </SettingsSection>
+              <SettingsSection title={t("settings.excludedWindowTitles")}>
+                <div className="setting-group-intro">
+                  {t("settings.excludedWindowTitlesDetail")}
+                </div>
+                {desktop.observationPolicy.blockedWindowTitles.length === 0 ? (
+                  <div className="settings-empty-state">
+                    {t("settings.noWindowTitleExclusions")}
+                  </div>
+                ) : (
+                  desktop.observationPolicy.blockedWindowTitles.map((rule) => (
+                    <SettingRow
+                      key={rule.id}
+                      title={`${rule.match === "exact" ? t("settings.matchExact") : t("settings.matchContains")}: “${rule.pattern}”`}
+                      description={
+                        rule.bundleIdentifier
+                          ? t("settings.windowTitleOneApplication", {
+                              bundle: rule.bundleIdentifier,
+                            })
+                          : t("settings.windowTitleEveryApplication")
+                      }
+                    >
+                      <button
+                        disabled={busy}
+                        aria-label={`${t("settings.removeWindowTitleExclusion")}: ${rule.pattern}`}
+                        onClick={() =>
+                          void updateObservationPolicy((draft) => {
+                            draft.blockedWindowTitles = draft.blockedWindowTitles.filter(
+                              (value) => value.id !== rule.id,
+                            );
+                          })
+                        }
+                      >
+                        {t("common.delete")}
+                      </button>
+                    </SettingRow>
+                  ))
+                )}
+                <form
+                  className="settings-form-block settings-window-rule-form"
+                  onSubmit={addWindowTitleExclusion}
+                >
+                  <div className="settings-form-grid">
+                    <label className="wide">
+                      <span>{t("settings.windowTitlePattern")}</span>
+                      <input
+                        value={windowTitlePattern}
+                        disabled={busy}
+                        minLength={3}
+                        maxLength={128}
+                        placeholder={t("settings.windowTitlePlaceholder")}
+                        onChange={(event) => setWindowTitlePattern(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <span>{t("settings.matchMode")}</span>
+                      <select
+                        value={windowTitleMatch}
+                        disabled={busy}
+                        onChange={(event) =>
+                          setWindowTitleMatch(event.target.value as "contains" | "exact")
+                        }
+                      >
+                        <option value="contains">{t("settings.matchContains")}</option>
+                        <option value="exact">{t("settings.matchExact")}</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{t("settings.applicationScope")}</span>
+                      <input
+                        value={windowTitleApplication}
+                        disabled={busy}
+                        placeholder={t("settings.applicationScopePlaceholder")}
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        onChange={(event) => setWindowTitleApplication(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="settings-form-actions">
+                    <span className="settings-save-state" />
+                    <button
+                      className="primary"
+                      disabled={busy || windowTitlePattern.trim().length < 3}
+                      type="submit"
+                    >
+                      {t("settings.addWindowTitleExclusion")}
+                    </button>
+                  </div>
+                </form>
               </SettingsSection>
               <SettingsDisclosure title={t("settings.exclusionPriority")}>
                 {t("settings.exclusionPriorityDetail")}

@@ -11,6 +11,7 @@ const invoke = (channel: string): Promise<DesktopSnapshot> => ipcRenderer.invoke
 
 const api: ComputerHistoryAPI = {
   getSnapshot: () => invoke("history:get-snapshot"),
+  listInstalledApplications: () => ipcRenderer.invoke("history:list-installed-applications"),
   setLocale: (locale: AppLocale) => ipcRenderer.invoke("history:set-locale", locale),
   grantRecordingConsent: () => invoke("history:grant-recording-consent"),
   startAgent: () => invoke("history:start-agent"),
@@ -23,6 +24,8 @@ const api: ComputerHistoryAPI = {
   blockActiveApplication: () => invoke("history:block-active-application"),
   allowActiveDomain: () => invoke("history:allow-active-domain"),
   blockActiveDomain: () => invoke("history:block-active-domain"),
+  updateObservationPolicy: (input) =>
+    ipcRenderer.invoke("history:update-observation-policy", input),
   configureLLM: (input: LLMConfigurationInput) =>
     ipcRenderer.invoke("history:configure-llm", input),
   setLLMEnabled: (enabled: boolean) => ipcRenderer.invoke("history:set-llm-enabled", enabled),

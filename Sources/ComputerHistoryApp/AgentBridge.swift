@@ -8,6 +8,7 @@ private struct AgentCommand: Decodable {
     let command: String
     let bundleIdentifiers: [String]?
     let visualRequest: AgentVisualCaptureRequest?
+    let observationPolicy: ObservationPolicy?
 }
 
 private struct AgentVisualCaptureRequest: Decodable {
@@ -16,6 +17,8 @@ private struct AgentVisualCaptureRequest: Decodable {
     let bundleIdentifier: String
     let windowRuntimeIdentifier: UInt32?
     let windowTitle: String?
+    let url: String?
+    let isPrivateBrowsing: Bool
     let expiresAt: String
     let includeImage: Bool
 }
@@ -185,6 +188,19 @@ final class AgentBridge {
         switch command.command {
         case "snapshot":
             break
+        case "configureObservationPolicy":
+            guard let policy = command.observationPolicy else {
+                sendError("Invalid observation policy", requestID: command.id)
+                return
+            }
+            do {
+                try engine.configureObservationPolicy(policy)
+            } catch {
+                sendError("Invalid observation policy", requestID: command.id)
+                return
+            }
+        case "start":
+            engine.start()
         case "pause":
             engine.pause()
         case "resume":
@@ -210,12 +226,20 @@ final class AgentBridge {
                 bundleIdentifier: request.bundleIdentifier,
                 windowRuntimeIdentifier: request.windowRuntimeIdentifier,
                 windowTitle: request.windowTitle,
+                url: request.url,
+                isPrivateBrowsing: request.isPrivateBrowsing,
                 expiresAt: expiresAt,
                 includeImage: request.includeImage
             )
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let result = await visualCaptureProvider.capture(intent)
+                let result = await visualCaptureProvider.capture(intent) {
+                    [weak self] windowTitle in
+                    self?.engine.allowsVisualCapture(
+                        intent,
+                        currentWindowTitle: windowTitle
+                    ) ?? false
+                }
                 write(
                     AgentVisualCaptureResponse(
                         requestID: command.id,

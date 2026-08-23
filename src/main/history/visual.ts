@@ -59,6 +59,8 @@ export interface VisualCaptureIntent {
   bundleIdentifier: string;
   windowRuntimeIdentifier?: number;
   windowTitle?: string;
+  url?: string;
+  isPrivateBrowsing: boolean;
   expiresAt: string;
   includeImage: boolean;
 }
