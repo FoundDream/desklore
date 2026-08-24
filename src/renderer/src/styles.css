@@ -61,13 +61,13 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-svg {
+.ui-icon {
   width: 17px;
   height: 17px;
   flex: none;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.7;
+  stroke-width: 1.25;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -360,10 +360,9 @@ nav button.active {
   box-shadow: none;
 }
 
-nav button svg {
+nav button .ui-icon {
   width: 18px;
   height: 18px;
-  stroke-width: 1.6;
 }
 
 nav button span {
@@ -900,7 +899,7 @@ button.primary:hover {
   border-radius: 4px;
 }
 
-.day-switcher svg {
+.day-switcher .ui-icon {
   width: 14px;
   height: 14px;
 }
@@ -1374,7 +1373,7 @@ button.text-danger:hover {
   background: var(--accent);
 }
 
-.settings-back svg {
+.settings-back .ui-icon {
   width: 14px;
   height: 14px;
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import appIcon from "./assets/app-icon.png";
+import { Icon } from "./Icon.js";
 import { I18nProvider, useI18n } from "./i18n.js";
 import { SettingsView as SettingsPage } from "./SettingsView.js";
 import type {
@@ -145,41 +146,6 @@ function ContinuationHint({ item }: { item?: string }) {
   );
 }
 
-function Icon({ name }: { name: "timeline" | "memory" | "settings" | "folder" }) {
-  const paths = {
-    timeline: (
-      <>
-        <circle cx="6" cy="5" r="1.5" />
-        <circle cx="6" cy="12" r="1.5" />
-        <path d="M9.5 5H18M9.5 12H18M6 6.5v4" />
-      </>
-    ),
-    memory: (
-      <>
-        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22z" />
-        <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5a2.5 2.5 0 0 1 2.5 2z" />
-      </>
-    ),
-    settings: (
-      <>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1" />
-      </>
-    ),
-    folder: (
-      <>
-        <path d="M3 7h7l2-2h9v14H3z" />
-        <path d="M3 9h18" />
-      </>
-    ),
-  };
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      {paths[name]}
-    </svg>
-  );
-}
-
 function PageHeader({
   eyebrow,
   title,
@@ -235,14 +201,6 @@ function durationLabel(document: TimelineDocument, t: Translate): string {
     Math.round((Date.parse(document.endedAt) - Date.parse(document.startedAt)) / 60_000),
   );
   return t("common.minutes", { count: minutes });
-}
-
-function Chevron({ direction }: { direction: "left" | "right" }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
-    </svg>
-  );
 }
 
 function ConnectionNotice({
@@ -574,7 +532,7 @@ function DaySwitcher({
         aria-label={t("timeline.olderDate")}
         title={t("timeline.olderDate")}
       >
-        <Chevron direction="left" />
+        <Icon name="chevron-left" />
       </button>
       <div className="day-switcher-current">
         <select
@@ -596,7 +554,7 @@ function DaySwitcher({
         aria-label={t("timeline.newerDate")}
         title={t("timeline.newerDate")}
       >
-        <Chevron direction="right" />
+        <Icon name="chevron-right" />
       </button>
     </div>
   );

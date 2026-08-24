@@ -14,6 +14,7 @@ import type {
 } from "../../shared/contracts.js";
 import { defaultModelEndpoints, type ModelProtocol } from "../../shared/model.js";
 import appIcon from "./assets/app-icon.png";
+import { Icon } from "./Icon.js";
 import { useI18n } from "./i18n.js";
 
 type SettingsTab = "general" | "ai" | "visual" | "privacy" | "data";
@@ -28,14 +29,6 @@ interface SettingsViewProps {
   onDismissError: () => void;
   onBack: () => void;
   onOpenDiagnostics: () => void;
-}
-
-function BackIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
 }
 
 function SettingsSection({
@@ -461,7 +454,7 @@ export function SettingsView({
       <aside className="settings-navigation">
         <div className="settings-window-drag" />
         <button className="settings-back" onClick={() => requestExit()}>
-          <BackIcon />
+          <Icon name="arrow-left" />
           <span>{t("settings.backToDeskLore")}</span>
         </button>
         <div className="settings-brand">
