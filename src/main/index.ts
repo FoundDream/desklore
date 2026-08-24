@@ -21,6 +21,7 @@ import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
 import { discoverInstalledApplications, readICNSIconDataURL } from "./applications.js";
 import { NativeAgentVisualCaptureProvider } from "./history/native-visual-provider.js";
 import { HistoryService } from "./history/service.js";
+import { TimelineAgentUtilityProcessClient } from "./history/timeline-agent-worker-client.js";
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -34,10 +35,12 @@ const collector = new AgentClient(
   agentExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
   app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
 );
+const timelineAgentWorker = new TimelineAgentUtilityProcessClient();
 const history = new HistoryService(
   collector,
   path.join(app.getPath("userData"), "history"),
   new NativeAgentVisualCaptureProvider(collector),
+  timelineAgentWorker,
 );
 const applicationIconCache = new Map<string, Promise<string | undefined>>();
 

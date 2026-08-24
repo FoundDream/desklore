@@ -1,17 +1,26 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
 import { translate } from "../../shared/i18n.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
 import type { ModelRuntime } from "./model-client.js";
+import { sanitizeEvent } from "./policy.js";
 import { segmentDurationMilliseconds, type SegmentStore, type StorageLayout } from "./storage.js";
 import {
   TimelineAgentDiagnosticsRepository,
   timelineAgentProvider,
   type TimelineAgentRunRecord,
 } from "./timeline-diagnostics.js";
-import { runTimelineAgent, TimelineAgentError } from "./timeline-agent.js";
+import { TimelineAgentError } from "./timeline-agent.js";
+import { TimelineAgentJobRepository, type TimelineAgentJob } from "./timeline-agent-jobs.js";
+import {
+  InProcessTimelineAgentSessionFactory,
+  validWorkerResult,
+  type TimelineAgentRuntimeSession,
+  type TimelineAgentStepMetrics,
+  type TimelineAgentSessionFactory,
+} from "./timeline-agent-runtime.js";
 import type {
   ClosedSegment,
   HistoryApplication,
@@ -241,6 +250,43 @@ interface TimelineRunMetrics {
   evidenceBytes: number;
   inputTokens: number;
   outputTokens: number;
+  estimatedInputTokens: number;
+  submissionAttempts: number;
+  normalizedDuplicateCount: number;
+  uninspectedEvidenceCount: number;
+}
+
+function emptyTimelineRunMetrics(): TimelineRunMetrics {
+  return {
+    turns: 0,
+    toolCalls: {},
+    inspectedEventCount: 0,
+    evidenceBytes: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedInputTokens: 0,
+    submissionAttempts: 0,
+    normalizedDuplicateCount: 0,
+    uninspectedEvidenceCount: 0,
+  };
+}
+
+function mergeTimelineRunMetrics(
+  target: TimelineRunMetrics,
+  delta: TimelineAgentStepMetrics,
+): void {
+  target.turns += delta.turns;
+  target.inputTokens += delta.inputTokens;
+  target.outputTokens += delta.outputTokens;
+  target.estimatedInputTokens += delta.estimatedInputTokens;
+  target.submissionAttempts += delta.submissionAttempts;
+  target.normalizedDuplicateCount += delta.normalizedDuplicateCount;
+  target.uninspectedEvidenceCount += delta.uninspectedEvidenceCount;
+  target.inspectedEventCount = Math.max(target.inspectedEventCount, delta.inspectedEventCount);
+  target.evidenceBytes = Math.max(target.evidenceBytes, delta.evidenceBytes);
+  for (const [name, count] of Object.entries(delta.toolCalls)) {
+    target.toolCalls[name] = (target.toolCalls[name] ?? 0) + count;
+  }
 }
 
 function runRecord(
@@ -255,7 +301,7 @@ function runRecord(
 ): TimelineAgentRunRecord {
   const finishedAt = new Date();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     sourceSegmentID: segment.metadata.id,
     startedAt: startedAt.toISOString(),
@@ -271,144 +317,6 @@ function runRecord(
   };
 }
 
-async function modelSummary(
-  segment: ClosedSegment,
-  events: HistoryEvent[],
-  context: TimelineContext,
-  runtime: LLMRuntime,
-  locale: AppLocale,
-  diagnostics: TimelineAgentDiagnosticsRepository,
-  retry: boolean,
-): Promise<TimelineDocumentRecord> {
-  const runID = randomUUID().toLowerCase();
-  const startedAt = new Date();
-  const metrics: TimelineRunMetrics = {
-    turns: 0,
-    toolCalls: {},
-    inspectedEventCount: 0,
-    evidenceBytes: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-  };
-  try {
-    const draft = await runTimelineAgent(events, context.priorSummaries, runtime, locale, {
-      onModelTurn: (usage) => {
-        metrics.turns += 1;
-        metrics.inputTokens += usage.inputTokens;
-        metrics.outputTokens += usage.outputTokens;
-      },
-      onToolCall: ({ name }) => {
-        metrics.toolCalls[name] = (metrics.toolCalls[name] ?? 0) + 1;
-      },
-      onEvidence: (usage) => {
-        metrics.inspectedEventCount = usage.inspectedEventCount;
-        metrics.evidenceBytes = usage.evidenceBytes;
-      },
-    });
-    await diagnostics
-      .append(runRecord(segment, runtime, retry, runID, startedAt, metrics, "succeeded"))
-      .catch(() => undefined);
-    return {
-      schemaVersion: 4,
-      id: randomUUID().toLowerCase(),
-      sourceSegmentID: segment.metadata.id,
-      startedAt: segment.metadata.startedAt,
-      endedAt:
-        segment.metadata.endedAt ??
-        new Date(
-          Date.parse(segment.metadata.startedAt) + segmentDurationMilliseconds,
-        ).toISOString(),
-      title: draft.title,
-      description: draft.description,
-      continuationHint: draft.continuationHint,
-      claims: draft.claims,
-      applications: orderedApplications(events),
-      evidenceEventIDs: draft.evidenceEventIDs,
-      generator: { type: "agent", version: 1, model: runtime.settings.model },
-      createdAt: new Date().toISOString(),
-      body: semanticBody(draft, locale),
-    };
-  } catch (error) {
-    const normalized = normalizedTimelineError(error);
-    await diagnostics
-      .append(
-        runRecord(
-          segment,
-          runtime,
-          retry,
-          runID,
-          startedAt,
-          metrics,
-          "fallback",
-          normalized.reason,
-        ),
-      )
-      .catch(() => undefined);
-    throw normalized;
-  }
-}
-
-async function summarizeWithFallback(
-  segment: ClosedSegment,
-  events: HistoryEvent[],
-  context: TimelineContext,
-  runtime: LLMRuntime | LLMUnavailable | undefined,
-  locale: AppLocale,
-  diagnostics: TimelineAgentDiagnosticsRepository,
-  retry = false,
-): Promise<TimelineDocumentRecord> {
-  if (!runtime) return rawActivityRecord(segment, events, locale);
-  if ("failureReason" in runtime) {
-    const now = new Date();
-    await diagnostics
-      .append({
-        schemaVersion: 1,
-        id: randomUUID().toLowerCase(),
-        sourceSegmentID: segment.metadata.id,
-        startedAt: now.toISOString(),
-        finishedAt: now.toISOString(),
-        model: runtime.settings.model,
-        provider: "unavailable",
-        protocol: runtime.settings.protocol,
-        retry,
-        turns: 0,
-        toolCalls: {},
-        inspectedEventCount: 0,
-        evidenceBytes: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        latencyMilliseconds: 0,
-        terminalState: "fallback",
-        failureReason: runtime.failureReason,
-      })
-      .catch(() => undefined);
-    const fallback = rawActivityRecord(segment, events, locale);
-    return {
-      ...fallback,
-      generator: {
-        type: "raw-fallback",
-        version: 1,
-        model: runtime.settings.model,
-        failureReason: runtime.failureReason,
-      },
-    };
-  }
-  try {
-    return await modelSummary(segment, events, context, runtime, locale, diagnostics, retry);
-  } catch (error) {
-    const fallback = rawActivityRecord(segment, events, locale);
-    return {
-      ...fallback,
-      generator: {
-        type: "raw-fallback",
-        version: 1,
-        model: runtime.settings.model,
-        failureReason: error instanceof TimelineLLMError ? error.reason : "unexpected_error",
-      },
-    };
-  }
-}
-
 async function atomicWrite(filePath: string, contents: string): Promise<void> {
   const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
@@ -416,18 +324,70 @@ async function atomicWrite(filePath: string, contents: string): Promise<void> {
   await chmod(filePath, 0o600);
 }
 
+const timelineAgentRuntimeVersion = 2;
+
+function runtimeFingerprint(
+  segment: ClosedSegment,
+  runtime: LLMRuntime | LLMUnavailable | undefined,
+  locale: AppLocale,
+): string {
+  const settings = runtime?.settings;
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        sourceSegmentID: segment.metadata.id,
+        runtimeVersion: timelineAgentRuntimeVersion,
+        model: settings?.model ?? "disabled",
+        protocol: settings?.protocol ?? "responses",
+        endpoint: settings?.endpoint ?? "",
+        locale,
+        availability: runtime
+          ? "failureReason" in runtime
+            ? runtime.failureReason
+            : "ready"
+          : "disabled",
+      }),
+    )
+    .digest("hex");
+}
+
+function retryDate(job: TimelineAgentJob, date: Date): string {
+  const exponent = Math.min(10, Math.max(0, job.totalProviderRequests - 1));
+  const base = Math.min(6 * 60 * 60 * 1_000, 30_000 * 2 ** exponent);
+  const jitter = Number.parseInt(job.id.slice(0, 4), 16) % Math.max(1, Math.floor(base / 5));
+  return new Date(date.getTime() + base + jitter).toISOString();
+}
+
+function eligible(job: TimelineAgentJob, date: Date): boolean {
+  if (["succeeded", "cancelled", "source_unavailable"].includes(job.status)) return false;
+  return !job.nextEligibleAt || Date.parse(job.nextEligibleAt) <= date.getTime();
+}
+
 export class TimelineRepository {
   private readonly generationInFlight = new Set<string>();
-  private readonly fallbackRetryDates = new Map<string, number>();
   private readonly diagnostics: TimelineAgentDiagnosticsRepository;
+  private readonly jobs: TimelineAgentJobRepository;
+  private readonly activeSessions = new Map<
+    string,
+    {
+      session: TimelineAgentRuntimeSession;
+      runID: string;
+      startedAt: Date;
+      retry: boolean;
+      metrics: TimelineRunMetrics;
+    }
+  >();
+  private lastScheduledSegmentID?: string;
 
   constructor(
     private readonly layout: StorageLayout,
     private readonly segments: SegmentStore,
     private readonly llmRuntime: LLMRuntimeProvider,
     private readonly locale: () => AppLocale = () => "en",
+    private readonly sessionFactory: TimelineAgentSessionFactory = new InProcessTimelineAgentSessionFactory(),
   ) {
     this.diagnostics = new TimelineAgentDiagnosticsRepository(layout);
+    this.jobs = new TimelineAgentJobRepository(layout);
   }
 
   async generateIfNeeded(segment: ClosedSegment): Promise<TimelineDocumentRecord | undefined> {
@@ -435,27 +395,34 @@ export class TimelineRepository {
     this.generationInFlight.add(segment.metadata.id);
     try {
       const existing = await this.loadDocuments();
-      if (existing.some((document) => document.sourceSegmentID === segment.metadata.id)) {
+      const current = existing.find((document) => document.sourceSegmentID === segment.metadata.id);
+      if (current) {
+        if (this.isRawDocument(current)) await this.ensureJob(segment, current);
         return undefined;
       }
       const events = (await this.segments.readEvents(segment)).filter(
         (event) => !isExcludedEvent(event),
       );
       if (!events.length) return undefined;
-      const context = this.context(existing, segment.metadata.startedAt);
-      const document = await summarizeWithFallback(
-        segment,
-        events,
-        context,
-        await this.llmRuntime(),
-        this.locale(),
-        this.diagnostics,
-      );
+      const runtime = await this.llmRuntime();
+      const baseline = rawActivityRecord(segment, events, this.locale());
+      const document: TimelineDocumentRecord = {
+        ...baseline,
+        generator: {
+          type: "raw-baseline",
+          version: 1,
+          ...(runtime && "failureReason" in runtime
+            ? { model: runtime.settings.model, failureReason: runtime.failureReason }
+            : {}),
+        },
+      };
       const refreshed = await this.loadDocuments();
       if (refreshed.some((item) => item.sourceSegmentID === segment.metadata.id)) return undefined;
       const destination = path.join(this.layout.timeline, this.filename(document));
       await atomicWrite(destination, encodeTimelineMarkdown(document));
-      return { ...document, filePath: destination };
+      const saved = { ...document, filePath: destination };
+      await this.ensureJob(segment, saved, runtime);
+      return saved;
     } finally {
       this.generationInFlight.delete(segment.metadata.id);
     }
@@ -470,78 +437,344 @@ export class TimelineRepository {
     return generated;
   }
 
+  async advanceNextAgentJob(
+    segments: ClosedSegment[],
+    date = new Date(),
+  ): Promise<{ processed: boolean; upgraded: boolean; pending: boolean; nextWakeAt?: string }> {
+    const runtime = await this.llmRuntime();
+    const documents = await this.loadDocuments();
+    const documentsBySegment = new Map(
+      documents.map((document) => [document.sourceSegmentID, document]),
+    );
+    const segmentsByID = new Map(segments.map((segment) => [segment.metadata.id, segment]));
+    for (const segment of segments) {
+      const document = documentsBySegment.get(segment.metadata.id);
+      if (document && this.isRawDocument(document))
+        await this.ensureJob(segment, document, runtime);
+    }
+    const jobs = await this.jobs.load();
+    const pendingJobs = jobs.filter(
+      (job) => !["succeeded", "cancelled", "source_unavailable"].includes(job.status),
+    );
+    const nextWakeAt = pendingJobs
+      .map((job) => job.nextEligibleAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0];
+    const runnable = pendingJobs.filter((job) => {
+      const segment = segmentsByID.get(job.sourceSegmentID);
+      if (!segment) return false;
+      const fingerprint = runtimeFingerprint(segment, runtime, this.locale());
+      if (job.fingerprint !== fingerprint) return true;
+      if (job.status === "waiting_configuration" && job.fingerprint === fingerprint) return false;
+      if (job.status === "stalled" && !job.nextEligibleAt && job.fingerprint === fingerprint) {
+        return false;
+      }
+      return eligible(job, date);
+    });
+    if (!runnable.length) {
+      for (const job of pendingJobs) {
+        if (!segmentsByID.has(job.sourceSegmentID)) {
+          this.activeSessions.get(job.sourceSegmentID)?.session.abort();
+          this.activeSessions.delete(job.sourceSegmentID);
+          await this.jobs.update(job.id, { status: "source_unavailable" }, date);
+        }
+      }
+      return { processed: false, upgraded: false, pending: pendingJobs.length > 0, nextWakeAt };
+    }
+    const previousIndex = runnable.findIndex(
+      (job) => job.sourceSegmentID === this.lastScheduledSegmentID,
+    );
+    const job = runnable[(previousIndex + 1) % runnable.length]!;
+    this.lastScheduledSegmentID = job.sourceSegmentID;
+    const segment = segmentsByID.get(job.sourceSegmentID)!;
+    const document = documentsBySegment.get(job.sourceSegmentID);
+    if (!document?.filePath || !this.isRawDocument(document)) {
+      await this.jobs.update(job.id, { status: "succeeded", nextEligibleAt: undefined }, date);
+      return { processed: true, upgraded: false, pending: runnable.length > 1, nextWakeAt };
+    }
+    const fingerprint = runtimeFingerprint(segment, runtime, this.locale());
+    if (!runtime || "failureReason" in runtime) {
+      this.activeSessions.get(job.sourceSegmentID)?.session.abort();
+      this.activeSessions.delete(job.sourceSegmentID);
+      await this.jobs.update(
+        job.id,
+        {
+          fingerprint,
+          status: "waiting_configuration",
+          failureClass:
+            runtime && "failureReason" in runtime ? runtime.failureReason : "llm_disabled",
+          failureSignature:
+            runtime && "failureReason" in runtime ? runtime.failureReason : "llm_disabled",
+          nextEligibleAt: undefined,
+        },
+        date,
+      );
+      return { processed: true, upgraded: false, pending: true, nextWakeAt };
+    }
+    if (job.fingerprint !== fingerprint) {
+      this.activeSessions.get(job.sourceSegmentID)?.session.abort();
+      this.activeSessions.delete(job.sourceSegmentID);
+      await this.jobs.update(
+        job.id,
+        {
+          fingerprint,
+          status: "queued",
+          wakeReason: "runtime_changed",
+          failureClass: undefined,
+          failureSignature: undefined,
+          noProgressStreak: 0,
+          nextEligibleAt: undefined,
+        },
+        date,
+      );
+    }
+    const events = (await this.segments.readEvents(segment)).filter(
+      (event) => !isExcludedEvent(event),
+    );
+    if (!events.length) {
+      await this.jobs.update(job.id, { status: "source_unavailable" }, date);
+      return { processed: true, upgraded: false, pending: runnable.length > 1, nextWakeAt };
+    }
+    let active = this.activeSessions.get(job.sourceSegmentID);
+    const metrics = active?.metrics ?? emptyTimelineRunMetrics();
+    const runID = active?.runID ?? randomUUID().toLowerCase();
+    const startedAt = active?.startedAt ?? date;
+    const retry = active?.retry ?? job.totalProviderRequests > 0;
+    let lastStepMetrics: TimelineAgentStepMetrics | undefined;
+    await this.jobs.update(job.id, { status: "running", wakeReason: "scheduler" }, date);
+    try {
+      if (!active) {
+        active = {
+          session: await this.sessionFactory.create({
+            events: events.map((event) => sanitizeEvent(event)),
+            priorSummaries: this.context(
+              documents.filter((item) => item.id !== document.id),
+              segment.metadata.startedAt,
+            ).priorSummaries,
+            runtime,
+            locale: this.locale(),
+          }),
+          runID,
+          startedAt,
+          retry,
+          metrics,
+        };
+        this.activeSessions.set(job.sourceSegmentID, active);
+      }
+      const runtimeStep = await active.session.step();
+      lastStepMetrics = runtimeStep.metrics;
+      mergeTimelineRunMetrics(active.metrics, runtimeStep.metrics);
+      const { step } = runtimeStep;
+      const turnDelta = runtimeStep.metrics.turns;
+      const toolDelta = Object.values(runtimeStep.metrics.toolCalls).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+      const submissionDelta = runtimeStep.metrics.submissionAttempts;
+      const totals = {
+        totalTurns: job.totalTurns + turnDelta,
+        totalProviderRequests: job.totalProviderRequests + turnDelta,
+        totalToolCalls: job.totalToolCalls + toolDelta,
+        totalSubmissions: job.totalSubmissions + submissionDelta,
+      };
+      if (step.state === "succeeded") {
+        const sourceEventIDs = new Set(events.map((event) => event.id.toLowerCase()));
+        if (!validWorkerResult(step.result, runtimeStep.inspectedEventIDs, sourceEventIDs)) {
+          throw new TimelineAgentError("agent_worker_invalid_evidence", false);
+        }
+        const upgraded: TimelineDocumentRecord = {
+          ...document,
+          title: step.result.title,
+          description: step.result.description,
+          continuationHint: step.result.continuationHint,
+          claims: step.result.claims,
+          evidenceEventIDs: step.result.evidenceEventIDs,
+          generator: {
+            type: "agent",
+            version: timelineAgentRuntimeVersion,
+            model: runtime.settings.model,
+          },
+          body: semanticBody(step.result, this.locale()),
+        };
+        await atomicWrite(document.filePath, encodeTimelineMarkdown(upgraded));
+        await this.jobs.update(
+          job.id,
+          {
+            ...totals,
+            status: "succeeded",
+            failureClass: undefined,
+            failureSignature: undefined,
+            noProgressStreak: 0,
+            nextEligibleAt: undefined,
+          },
+          date,
+        );
+        await this.diagnostics
+          .append(runRecord(segment, runtime, retry, runID, startedAt, active.metrics, "succeeded"))
+          .catch(() => undefined);
+        active.session.dispose();
+        this.activeSessions.delete(job.sourceSegmentID);
+        return { processed: true, upgraded: true, pending: runnable.length > 1, nextWakeAt };
+      }
+      if (step.state === "stalled") {
+        const updated = { ...job, ...totals };
+        await this.jobs.update(
+          job.id,
+          {
+            ...totals,
+            status: "stalled",
+            failureClass: "agent_stalled",
+            failureSignature: "no_progress",
+            noProgressStreak: step.noProgressStreak,
+            nextEligibleAt: retryDate(updated, date),
+          },
+          date,
+        );
+        await this.diagnostics
+          .append(
+            runRecord(
+              segment,
+              runtime,
+              retry,
+              runID,
+              startedAt,
+              active.metrics,
+              "fallback",
+              "agent_stalled",
+            ),
+          )
+          .catch(() => undefined);
+        active.session.dispose();
+        this.activeSessions.delete(job.sourceSegmentID);
+        return { processed: true, upgraded: false, pending: true, nextWakeAt };
+      }
+      await this.jobs.update(
+        job.id,
+        {
+          ...totals,
+          status: "queued",
+          failureClass: undefined,
+          failureSignature: undefined,
+          noProgressStreak: step.noProgressStreak,
+          nextEligibleAt: undefined,
+        },
+        date,
+      );
+      return { processed: true, upgraded: false, pending: true, nextWakeAt };
+    } catch (error) {
+      const normalized = normalizedTimelineError(error);
+      const turnDelta = lastStepMetrics?.turns ?? 0;
+      const toolDelta = Object.values(lastStepMetrics?.toolCalls ?? {}).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+      const submissionDelta = lastStepMetrics?.submissionAttempts ?? 0;
+      const updated = {
+        ...job,
+        totalTurns: job.totalTurns + turnDelta,
+        totalProviderRequests: job.totalProviderRequests + Math.max(1, turnDelta),
+        totalToolCalls: job.totalToolCalls + toolDelta,
+        totalSubmissions: job.totalSubmissions + submissionDelta,
+      };
+      await this.jobs.update(
+        job.id,
+        {
+          totalTurns: updated.totalTurns,
+          totalProviderRequests: updated.totalProviderRequests,
+          totalToolCalls: updated.totalToolCalls,
+          totalSubmissions: updated.totalSubmissions,
+          status: normalized.retryable ? "waiting_provider" : "stalled",
+          failureClass: normalized.reason,
+          failureSignature: normalized.reason,
+          nextEligibleAt: normalized.retryable ? retryDate(updated, date) : undefined,
+        },
+        date,
+      );
+      await this.diagnostics
+        .append(
+          runRecord(
+            segment,
+            runtime,
+            retry,
+            runID,
+            startedAt,
+            metrics,
+            "fallback",
+            normalized.reason,
+          ),
+        )
+        .catch(() => undefined);
+      active?.session.dispose();
+      this.activeSessions.delete(job.sourceSegmentID);
+      return { processed: true, upgraded: false, pending: true, nextWakeAt };
+    }
+  }
+
+  abortAgentJobs(): void {
+    for (const active of this.activeSessions.values()) active.session.abort();
+    this.activeSessions.clear();
+  }
+
+  async pauseAgentJobs(date = new Date()): Promise<void> {
+    this.abortAgentJobs();
+    const jobs = await this.jobs.load();
+    for (const job of jobs) {
+      if (
+        ![
+          "baseline_ready",
+          "queued",
+          "running",
+          "waiting_provider",
+          "waiting_configuration",
+          "paused",
+        ].includes(job.status)
+      ) {
+        continue;
+      }
+      await this.jobs.update(job.id, { status: "paused", wakeReason: "app_stopped" }, date);
+    }
+  }
+
+  async wakeAgentJobs(reason: string, date = new Date()): Promise<void> {
+    this.abortAgentJobs();
+    const jobs = await this.jobs.load();
+    for (const job of jobs) {
+      if (["succeeded", "cancelled", "source_unavailable"].includes(job.status)) continue;
+      await this.jobs.update(
+        job.id,
+        {
+          status: "queued",
+          wakeReason: reason,
+          failureClass: undefined,
+          failureSignature: undefined,
+          noProgressStreak: 0,
+          nextEligibleAt: undefined,
+        },
+        date,
+      );
+    }
+  }
+
+  disposeAgentRuntime(): void {
+    this.abortAgentJobs();
+    this.sessionFactory.dispose?.();
+  }
+
+  async deleteAgentJob(sourceSegmentID: string): Promise<void> {
+    this.activeSessions.get(sourceSegmentID)?.session.abort();
+    this.activeSessions.delete(sourceSegmentID);
+    await this.jobs.deleteBySegment(sourceSegmentID);
+  }
+
+  /** Compatibility shim for callers migrating to the turn-based scheduler. */
   async retryFallbackDocuments(
     segments: ClosedSegment[],
     date = new Date(),
-    cooldownMilliseconds = 15 * 60 * 1_000,
-    maximumDocuments = 2,
+    _cooldownMilliseconds?: number,
+    _maximumDocuments?: number,
   ): Promise<number> {
-    const runtime = await this.llmRuntime();
-    if (!runtime || "failureReason" in runtime) return 0;
-    const documents = await this.loadDocuments();
-    const segmentsByID = new Map(segments.map((segment) => [segment.metadata.id, segment]));
-    let upgraded = 0;
-    let attempted = 0;
-    for (const document of documents) {
-      if (attempted >= maximumDocuments) break;
-      if (!this.isRawDocument(document) || !document.filePath) continue;
-      const segment = segmentsByID.get(document.sourceSegmentID);
-      if (!segment || this.generationInFlight.has(segment.metadata.id)) continue;
-      const lastAttempt = this.fallbackRetryDates.get(segment.metadata.id);
-      if (lastAttempt && date.getTime() - lastAttempt < cooldownMilliseconds) continue;
-      attempted += 1;
-      this.fallbackRetryDates.set(segment.metadata.id, date.getTime());
-      this.generationInFlight.add(segment.metadata.id);
-      try {
-        const events = (await this.segments.readEvents(segment)).filter(
-          (event) => !isExcludedEvent(event),
-        );
-        if (!events.length) continue;
-        const raw = await summarizeWithFallback(
-          segment,
-          events,
-          this.context(
-            documents.filter((item) => item.id !== document.id),
-            segment.metadata.startedAt,
-          ),
-          runtime,
-          this.locale(),
-          this.diagnostics,
-          true,
-        );
-        if (raw.generator.type !== "agent") {
-          await atomicWrite(
-            document.filePath,
-            encodeTimelineMarkdown({
-              ...raw,
-              id: document.id,
-              sourceSegmentID: document.sourceSegmentID,
-              startedAt: document.startedAt,
-              endedAt: document.endedAt,
-              createdAt: document.createdAt,
-              filePath: document.filePath,
-            }),
-          );
-          continue;
-        }
-        await atomicWrite(
-          document.filePath,
-          encodeTimelineMarkdown({
-            ...raw,
-            id: document.id,
-            sourceSegmentID: document.sourceSegmentID,
-            startedAt: document.startedAt,
-            endedAt: document.endedAt,
-            createdAt: document.createdAt,
-            filePath: document.filePath,
-          }),
-        );
-        upgraded += 1;
-      } finally {
-        this.generationInFlight.delete(segment.metadata.id);
-      }
-    }
-    return upgraded;
+    const outcome = await this.advanceNextAgentJob(segments, date);
+    return outcome.upgraded ? 1 : 0;
   }
 
   async loadDocuments(): Promise<TimelineDocumentRecord[]> {
@@ -582,6 +815,7 @@ export class TimelineRepository {
     ) {
       throw new Error("Timeline document is outside the storage directory");
     }
+    await this.deleteAgentJob(document.sourceSegmentID);
     await rm(document.filePath);
   }
 
@@ -603,6 +837,55 @@ export class TimelineRepository {
       document.generator.type.startsWith("raw-") ||
       document.generator.type.startsWith("rules-")
     );
+  }
+
+  private async ensureJob(
+    segment: ClosedSegment,
+    document: TimelineDocumentRecord,
+    providedRuntime?: LLMRuntime | LLMUnavailable,
+  ): Promise<TimelineAgentJob> {
+    const runtime = providedRuntime ?? (await this.llmRuntime());
+    const fingerprint = runtimeFingerprint(segment, runtime, this.locale());
+    const existing = (await this.jobs.load()).find(
+      (job) => job.sourceSegmentID === segment.metadata.id,
+    );
+    if (!existing) {
+      const created = await this.jobs.create(segment.metadata.id, document.id, fingerprint);
+      return (
+        (await this.jobs.update(created.id, {
+          status: !runtime || "failureReason" in runtime ? "waiting_configuration" : "queued",
+          failureClass:
+            runtime && "failureReason" in runtime
+              ? runtime.failureReason
+              : runtime
+                ? undefined
+                : "llm_disabled",
+          failureSignature:
+            runtime && "failureReason" in runtime
+              ? runtime.failureReason
+              : runtime
+                ? undefined
+                : "llm_disabled",
+        })) ?? created
+      );
+    }
+    if (existing.fingerprint !== fingerprint || existing.documentID !== document.id) {
+      this.activeSessions.get(segment.metadata.id)?.session.abort();
+      this.activeSessions.delete(segment.metadata.id);
+      return (
+        (await this.jobs.update(existing.id, {
+          documentID: document.id,
+          fingerprint,
+          status: !runtime || "failureReason" in runtime ? "waiting_configuration" : "queued",
+          wakeReason: "runtime_changed",
+          failureClass: undefined,
+          failureSignature: undefined,
+          noProgressStreak: 0,
+          nextEligibleAt: undefined,
+        })) ?? existing
+      );
+    }
+    return existing;
   }
 
   private context(documents: TimelineDocumentRecord[], before: string): TimelineContext {

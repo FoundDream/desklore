@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyKeyboardEvent, EventBurstCoalescer, EventCoalescer } from "./coalescer.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
@@ -13,12 +14,18 @@ import {
 } from "./policy.js";
 import { makeStorageLayout, SegmentStore, segmentIdentifier } from "./storage.js";
 import {
+  compactTimelineAgentContext,
   runTimelineAgent,
   timelineAgentBaseURL,
   timelineAgentInitialPrompt,
   timelineAgentSystemPrompt,
 } from "./timeline-agent.js";
 import { TimelineAgentDiagnosticsRepository } from "./timeline-diagnostics.js";
+import { TimelineAgentJobRepository } from "./timeline-agent-jobs.js";
+import type {
+  TimelineAgentRuntimeStep,
+  TimelineAgentSessionFactory,
+} from "./timeline-agent-runtime.js";
 import { rawActivityRecord, TimelineRepository } from "./timeline.js";
 import {
   normalizeHistoryEvent,
@@ -148,9 +155,18 @@ function submitTimelineCall(
         evidence_event_ids: eventIDs,
       },
     ],
-    evidence_event_ids: eventIDs,
     ...overrides,
   });
+}
+
+async function advanceAgentTurns(
+  repository: TimelineRepository,
+  segments: NonNullable<Awaited<ReturnType<SegmentStore["closeExpired"]>>>[],
+  turns: number,
+): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) {
+    await repository.advanceNextAgentJob(segments);
+  }
 }
 
 describe("TypeScript history core", () => {
@@ -182,7 +198,6 @@ describe("TypeScript history core", () => {
         description: "The chat-completions provider completed the native tool loop.",
         continuation_hint: "",
         claims: [{ text: "The event was inspected.", evidence_event_ids: [input.id] }],
-        evidence_event_ids: [input.id],
       }),
     ];
     vi.stubGlobal(
@@ -220,6 +235,141 @@ describe("TypeScript history core", () => {
       "https://gateway.example.com/openai/v1/chat/completions",
       "https://gateway.example.com/openai/v1/chat/completions",
     ]);
+  });
+
+  it("continues beyond the former four-turn ceiling", async () => {
+    const input = event({}, 8);
+    const responses = Array.from({ length: 5 }, (_, offset) =>
+      piToolResponse("list_activity_spans", { offset, limit: 1 }),
+    );
+    responses.push(readEventsCall([input.id]), submitTimelineCall([input.id]));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => responses.shift()!),
+    );
+
+    const result = await runTimelineAgent(
+      [input],
+      [],
+      {
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model: "test-model",
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      },
+      "en",
+    );
+
+    expect(result.evidenceEventIDs).toEqual([input.id]);
+    expect(responses).toHaveLength(0);
+  });
+
+  it("inspects evidence beyond the former cumulative byte ceiling", async () => {
+    const inputs = Array.from({ length: 40 }, (_, index) =>
+      event(
+        {
+          accessibility: {
+            mode: "diffFromPrevious",
+            text: `${index}:${"evidence".repeat(750)}`,
+          },
+        },
+        100 + index,
+      ),
+    );
+    const eventIDs = inputs.map((input) => input.id);
+    const cited = eventIDs.at(-1)!;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(readEventsCall(eventIDs))
+        .mockResolvedValueOnce(submitTimelineCall([cited])),
+    );
+
+    const result = await runTimelineAgent(
+      inputs,
+      [],
+      {
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model: "test-model",
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      },
+      "en",
+    );
+
+    expect(result.evidenceEventIDs).toEqual([cited]);
+  });
+
+  it("compacts old tool output while preserving recent turn structure", () => {
+    const messages: AgentMessage[] = Array.from({ length: 13 }, (_, index) => ({
+      role: "toolResult",
+      toolCallId: `call-${index}`,
+      toolName: "read_events",
+      content: [{ type: "text", text: `${index}:${"e".repeat(30_000)}` }],
+      details: { event: index },
+      isError: false,
+      timestamp: index,
+    }));
+
+    const compacted = compactTimelineAgentContext(messages);
+
+    expect(compacted).toHaveLength(messages.length);
+    expect(compacted[0]).toMatchObject({
+      role: "toolResult",
+      toolCallId: "call-0",
+      toolName: "read_events",
+      details: {},
+    });
+    expect(JSON.stringify(compacted[0])).toContain("compacted");
+    expect(compacted.at(-1)).toBe(messages.at(-1));
+  });
+
+  it("normalizes duplicate claim citations and derives the document evidence union", async () => {
+    const input = event({}, 10);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(readEventsCall([input.id]))
+        .mockResolvedValueOnce(
+          submitTimelineCall([input.id, input.id.toUpperCase()], {
+            claims: [
+              {
+                text: "The event was inspected once.",
+                evidence_event_ids: [input.id, input.id.toUpperCase()],
+              },
+            ],
+          }),
+        ),
+    );
+
+    const result = await runTimelineAgent(
+      [input],
+      [],
+      {
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model: "test-model",
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      },
+      "en",
+    );
+
+    expect(result.claims[0]?.evidenceEventIDs).toEqual([input.id]);
+    expect(result.evidenceEventIDs).toEqual([input.id]);
   });
 
   it("rejects pre-DeskLore snake_case event and metadata shapes", () => {
@@ -739,7 +889,7 @@ describe("TypeScript history core", () => {
     expect(decodeTimelineMarkdown(encodeTimelineMarkdown(document))).toEqual(document);
   });
 
-  it("persists an explicit failure reason and later retries the raw activity", async () => {
+  it("persists a baseline immediately and upgrades it after configuration becomes available", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
@@ -762,7 +912,7 @@ describe("TypeScript history core", () => {
     );
     const document = await repository.generateIfNeeded(closed!);
     expect(document?.generator).toMatchObject({
-      type: "raw-fallback",
+      type: "raw-baseline",
       failureReason: "api_key_missing",
     });
     expect(document?.continuationHint).toBeUndefined();
@@ -770,17 +920,11 @@ describe("TypeScript history core", () => {
       'failure_reason: "api_key_missing"',
     );
     const diagnostics = new TimelineAgentDiagnosticsRepository(layout);
-    await expect(diagnostics.load()).resolves.toMatchObject([
-      {
-        sourceSegmentID: closed!.metadata.id,
-        provider: "unavailable",
-        turns: 0,
-        toolCalls: {},
-        inspectedEventCount: 0,
-        terminalState: "fallback",
-        failureReason: "api_key_missing",
-      },
+    const jobs = new TimelineAgentJobRepository(layout);
+    await expect(jobs.load()).resolves.toMatchObject([
+      { sourceSegmentID: closed!.metadata.id, status: "waiting_configuration" },
     ]);
+    await expect(diagnostics.load()).resolves.toEqual([]);
 
     apiKeyConfigured = true;
     vi.stubGlobal(
@@ -791,17 +935,17 @@ describe("TypeScript history core", () => {
         .mockResolvedValueOnce(submitTimelineCall([input.id])),
     );
 
-    await expect(repository.retryFallbackDocuments([closed!], new Date(), 0)).resolves.toBe(1);
+    await advanceAgentTurns(repository, [closed!], 2);
     await expect(repository.loadDocuments()).resolves.toMatchObject([
       {
         generator: { type: "agent" },
       },
     ]);
     const runs = await diagnostics.load();
-    expect(runs).toHaveLength(2);
-    expect(runs[1]).toMatchObject({
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
       provider: "openai",
-      retry: true,
+      retry: false,
       turns: 2,
       toolCalls: { read_events: 1, submit_timeline: 1 },
       inspectedEventCount: 1,
@@ -810,6 +954,201 @@ describe("TypeScript history core", () => {
     const serializedRuns = JSON.stringify(runs);
     expect(serializedRuns).not.toContain("test-key");
     expect(serializedRuns).not.toContain(input.window?.title);
+  });
+
+  it("gives queued timeline jobs one turn each instead of letting one job hold the queue", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const first = event({}, 31);
+    const second = event(
+      {
+        timestamp: "2026-08-20T13:50:01.000Z",
+        window: { title: "Second", isPrivateBrowsing: false },
+      },
+      32,
+    );
+    await store.append(first);
+    const firstClosed = await store.append(second);
+    const secondClosed = await store.closeExpired(new Date("2026-08-20T14:00:00.000Z"));
+    expect(firstClosed).toBeDefined();
+    expect(secondClosed).toBeDefined();
+    const repository = new TimelineRepository(layout, store, async () => ({
+      settings: {
+        enabled: true,
+        memorySynthesisEnabled: false,
+        protocol: "responses",
+        model: "test-model",
+        endpoint: "https://api.openai.com/v1/responses",
+      },
+      apiKey: "test-key",
+    }));
+    await repository.generatePending([firstClosed!, secondClosed!]);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(readEventsCall([first.id]))
+        .mockResolvedValueOnce(readEventsCall([second.id])),
+    );
+
+    await repository.advanceNextAgentJob([firstClosed!, secondClosed!]);
+    await repository.advanceNextAgentJob([firstClosed!, secondClosed!]);
+
+    const jobs = await new TimelineAgentJobRepository(layout).load();
+    expect(jobs).toHaveLength(2);
+    expect(jobs.map((job) => job.totalTurns)).toEqual([1, 1]);
+    expect(jobs.map((job) => job.status)).toEqual(["queued", "queued"]);
+    repository.abortAgentJobs();
+  });
+
+  it("sanitizes utility-process input and rejects uninspected worker citations", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-worker-boundary-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const input = event(
+      {
+        target: { role: "AXSecureTextField", value: "password=private-value" },
+        interaction: { text: "password=private-value" },
+      },
+      41,
+    );
+    await store.append(input);
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    const dispose = vi.fn();
+    const factory: TimelineAgentSessionFactory = {
+      create: vi.fn(async (sessionInput) => {
+        expect(sessionInput.events[0]?.target?.value).toBeUndefined();
+        expect(sessionInput.events[0]?.interaction?.text).toBeUndefined();
+        return {
+          step: async (): Promise<TimelineAgentRuntimeStep> => ({
+            step: {
+              state: "succeeded",
+              result: {
+                title: "Invalid worker result",
+                description: "This result did not inspect its citation.",
+                claims: [{ text: "Unsupported claim.", evidenceEventIDs: [input.id] }],
+                evidenceEventIDs: [input.id],
+              },
+            },
+            metrics: {
+              turns: 1,
+              toolCalls: { submit_timeline: 1 },
+              inspectedEventCount: 0,
+              evidenceBytes: 0,
+              inputTokens: 10,
+              outputTokens: 5,
+              estimatedInputTokens: 12,
+              submissionAttempts: 1,
+              normalizedDuplicateCount: 0,
+              uninspectedEvidenceCount: 0,
+            },
+            inspectedEventIDs: [],
+          }),
+          abort: vi.fn(),
+          dispose,
+        };
+      }),
+    };
+    const repository = new TimelineRepository(
+      layout,
+      store,
+      async () => ({
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model: "test-model",
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      }),
+      () => "en",
+      factory,
+    );
+
+    await repository.generateIfNeeded(closed!);
+    await repository.advanceNextAgentJob([closed!]);
+
+    await expect(repository.loadDocuments()).resolves.toMatchObject([
+      { generator: { type: "raw-baseline" } },
+    ]);
+    await expect(new TimelineAgentJobRepository(layout).load()).resolves.toMatchObject([
+      {
+        status: "stalled",
+        failureClass: "agent_worker_invalid_evidence",
+        totalTurns: 1,
+        totalToolCalls: 1,
+        totalSubmissions: 1,
+      },
+    ]);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("drops an active session when the runtime fingerprint changes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-runtime-change-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const input = event({}, 42);
+    await store.append(input);
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    let model = "first-model";
+    const firstAbort = vi.fn();
+    let sessionCount = 0;
+    const createSession = vi.fn(async () => {
+      sessionCount += 1;
+      return {
+        step: async (): Promise<TimelineAgentRuntimeStep> => ({
+          step: { state: "continue", progressed: true, noProgressStreak: 0 },
+          metrics: {
+            turns: 1,
+            toolCalls: { read_events: 1 },
+            inspectedEventCount: 1,
+            evidenceBytes: 10,
+            inputTokens: 10,
+            outputTokens: 5,
+            estimatedInputTokens: 12,
+            submissionAttempts: 0,
+            normalizedDuplicateCount: 0,
+            uninspectedEvidenceCount: 0,
+          },
+          inspectedEventIDs: [input.id],
+        }),
+        abort: sessionCount === 1 ? firstAbort : vi.fn(),
+        dispose: vi.fn(),
+      };
+    });
+    const factory: TimelineAgentSessionFactory = {
+      create: createSession,
+    };
+    const repository = new TimelineRepository(
+      layout,
+      store,
+      async () => ({
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model,
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      }),
+      () => "en",
+      factory,
+    );
+
+    await repository.generateIfNeeded(closed!);
+    await repository.advanceNextAgentJob([closed!]);
+    model = "second-model";
+    await repository.generateIfNeeded(closed!);
+    expect(firstAbort).toHaveBeenCalledOnce();
+    await repository.advanceNextAgentJob([closed!]);
+    expect(createSession).toHaveBeenCalledTimes(2);
+    repository.abortAgentJobs();
   });
 
   it("accepts a narrative-first summary without forced task metadata", async () => {
@@ -855,13 +1194,16 @@ describe("TypeScript history core", () => {
     }));
 
     const document = await repository.generateIfNeeded(closed!);
+    expect(document?.generator.type).toBe("raw-baseline");
+    await advanceAgentTurns(repository, [closed!], 2);
+    const [upgraded] = await repository.loadDocuments();
 
-    expect(document?.generator.type).toBe("agent");
-    expect(document?.continuationHint).toBeUndefined();
-    expect(document).not.toHaveProperty("task");
-    expect(document).not.toHaveProperty("progression");
-    expect(document).not.toHaveProperty("outcome");
-    expect(document).not.toHaveProperty("openLoops");
+    expect(upgraded?.generator.type).toBe("agent");
+    expect(upgraded?.continuationHint).toBeUndefined();
+    expect(upgraded).not.toHaveProperty("task");
+    expect(upgraded).not.toHaveProperty("progression");
+    expect(upgraded).not.toHaveProperty("outcome");
+    expect(upgraded).not.toHaveProperty("openLoops");
   });
 
   it("lets the timeline agent search the complete segment before reading evidence", async () => {
@@ -924,9 +1266,12 @@ describe("TypeScript history core", () => {
     }));
 
     const document = await repository.generateIfNeeded(closed!);
+    expect(document?.generator.type).toBe("raw-baseline");
+    await advanceAgentTurns(repository, [closed!], 2);
+    const [upgraded] = await repository.loadDocuments();
 
-    expect(document?.generator.type).toBe("agent");
-    expect(document?.evidenceEventIDs).toEqual([target.id]);
+    expect(upgraded?.generator.type).toBe("agent");
+    expect(upgraded?.evidenceEventIDs).toEqual([target.id]);
     expect(requestBodies).toHaveLength(2);
     expect(requestBodies[0]).toContain('\\"eventCount\\":400');
     expect(requestBodies[0]).not.toContain("Build complete. Tests passed.");
@@ -943,7 +1288,7 @@ describe("TypeScript history core", () => {
     ]);
   });
 
-  it("rejects final claims that cite events the agent did not inspect", async () => {
+  it("repairs final claims that cite events the agent did not inspect", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
@@ -958,7 +1303,8 @@ describe("TypeScript history core", () => {
       vi
         .fn()
         .mockResolvedValueOnce(readEventsCall([inspected.id]))
-        .mockResolvedValueOnce(submitTimelineCall([uninspected.id])),
+        .mockResolvedValueOnce(submitTimelineCall([uninspected.id]))
+        .mockResolvedValueOnce(submitTimelineCall([inspected.id])),
     );
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
@@ -972,11 +1318,12 @@ describe("TypeScript history core", () => {
     }));
 
     const document = await repository.generateIfNeeded(closed!);
+    expect(document?.generator.type).toBe("raw-baseline");
+    await advanceAgentTurns(repository, [closed!], 3);
+    const [upgraded] = await repository.loadDocuments();
 
-    expect(document?.generator).toMatchObject({
-      type: "raw-fallback",
-      failureReason: "agent_invalid_evidence_ids",
-    });
+    expect(upgraded?.generator.type).toBe("agent");
+    expect(upgraded?.evidenceEventIDs).toEqual([inspected.id]);
   });
 
   it("keeps the synthetic prompt-injection corpus inside untrusted evidence boundaries", async () => {

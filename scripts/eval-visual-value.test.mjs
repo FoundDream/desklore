@@ -294,7 +294,6 @@ void test("paired model run maps randomized labels back to AX-only and visual ar
         description: hasVisual ? "Included a supported visible fact." : "Used AX events only.",
         continuation_hint: "",
         claims: [{ text: "Supported activity", evidence_event_ids: ["event-private"] }],
-        evidence_event_ids: ["event-private"],
       });
     }
     const visualLabel = blindVisualArm(segmentID);

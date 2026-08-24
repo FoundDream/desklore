@@ -1,6 +1,11 @@
 import type { AppLocale } from "../../shared/i18n.js";
 import { outputLanguageName } from "../../shared/i18n.js";
-import { Agent, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
+import {
+  Agent,
+  type AgentMessage,
+  type AgentTool,
+  type StreamFn,
+} from "@earendil-works/pi-agent-core";
 import { Type, type Model, type Static } from "@earendil-works/pi-ai";
 import { streamSimple as streamOpenAICompletions } from "@earendil-works/pi-ai/api/openai-completions";
 import { streamSimple as streamOpenAIResponses } from "@earendil-works/pi-ai/api/openai-responses";
@@ -8,9 +13,6 @@ import type { ModelRuntime } from "./model-client.js";
 import { sanitizeEvent } from "./policy.js";
 import type { HistoryEvent, HistoryEventKind, TimelineClaim } from "./types.js";
 
-const maximumAgentTurns = 4;
-const maximumInspectionRequestsPerTurn = 3;
-const maximumEvidenceBytes = 120 * 1_024;
 const maximumEventsPerInspection = 40;
 const defaultTextLimit = 2_048;
 const defaultAccessibilityTextLimit = 4_000;
@@ -45,7 +47,6 @@ interface SubmittedTimeline {
   description: string;
   continuationHint: string;
   claims: TimelineClaim[];
-  evidenceEventIDs: string[];
 }
 
 export interface TimelineAgentResult {
@@ -58,16 +59,24 @@ export interface TimelineAgentResult {
 
 export interface TimelineAgentRunObserver {
   onModelTurn?: (usage: { inputTokens: number; outputTokens: number }) => void;
+  onProviderRequest?: (usage: { estimatedInputTokens: number }) => void;
   onToolCall?: (tool: { name: string }) => void;
   onEvidence?: (usage: { inspectedEventCount: number; evidenceBytes: number }) => void;
+  onSubmission?: (result: {
+    accepted: boolean;
+    changed: boolean;
+    reason?: string;
+    normalizedDuplicateCount: number;
+    uninspectedEvidenceCount: number;
+  }) => void;
 }
 
 export class TimelineAgentError extends Error {
   readonly reason: string;
   readonly retryable: boolean;
 
-  constructor(reason: string, retryable: boolean) {
-    super(reason);
+  constructor(reason: string, retryable: boolean, details?: Record<string, unknown>) {
+    super(details ? JSON.stringify({ code: reason, ...details }) : reason);
     this.reason = reason;
     this.retryable = retryable;
   }
@@ -279,7 +288,6 @@ const submitTimelineParameters = Type.Object(
       ),
       { minItems: 1, maxItems: 16 },
     ),
-    evidence_event_ids: Type.Array(Type.String(), { minItems: 1 }),
   },
   { additionalProperties: false },
 );
@@ -289,6 +297,7 @@ class EvidenceSession {
   private readonly spans: ActivitySpan[];
   private readonly byID: Map<string, HistoryEvent>;
   private readonly inspectedEventIDs = new Set<string>();
+  private readonly uniqueInspectionRequests = new Set<string>();
   private evidenceBytes = 0;
 
   constructor(events: HistoryEvent[]) {
@@ -336,12 +345,19 @@ class EvidenceSession {
     };
   }
 
+  progress(): { inspectedEventCount: number; uniqueInspectionRequestCount: number } {
+    return {
+      inspectedEventCount: this.inspectedEventIDs.size,
+      uniqueInspectionRequestCount: this.uniqueInspectionRequests.size,
+    };
+  }
+
   inspect(requests: InspectionRequest[]): Record<string, unknown> {
+    for (const request of requests) this.uniqueInspectionRequests.add(JSON.stringify(request));
     const results = requests.map((request) => this.inspectOne(request));
     return {
       results,
       evidenceBytesUsed: this.evidenceBytes,
-      evidenceBytesRemaining: Math.max(0, maximumEvidenceBytes - this.evidenceBytes),
       inspectedEventCount: this.inspectedEventIDs.size,
     };
   }
@@ -349,7 +365,7 @@ class EvidenceSession {
   private inspectOne(request: InspectionRequest): Record<string, unknown> {
     if (request.kind === "spans") {
       const selected = this.spans.slice(request.offset, request.offset + request.limit);
-      return this.fit({
+      return this.recordResponse({
         kind: request.kind,
         offset: request.offset,
         matchedCount: this.spans.length,
@@ -392,43 +408,20 @@ class EvidenceSession {
     const selected = matches
       .slice(request.offset, request.offset + request.limit)
       .map((event) => compactEvent(event, request.includeAccessibility));
-    const fitted: HistoryEvent[] = [];
-    for (const event of selected) {
-      const next = [...fitted, event];
-      const candidate = {
-        kind: request.kind,
-        offset: request.offset,
-        matchedCount,
-        returnedCount: next.length,
-        hasMore: request.offset + next.length < matchedCount,
-        events: next,
-        budgetExhausted: next.length < selected.length,
-      };
-      const bytes = encodedByteLength(candidate);
-      if (this.evidenceBytes + bytes > maximumEvidenceBytes) break;
-      fitted.push(event);
-    }
-    const result = this.fit({
+    const result = this.recordResponse({
       kind: request.kind,
       offset: request.offset,
       matchedCount,
-      returnedCount: fitted.length,
-      hasMore: request.offset + fitted.length < matchedCount,
-      events: fitted,
-      budgetExhausted: fitted.length < selected.length,
+      returnedCount: selected.length,
+      hasMore: request.offset + selected.length < matchedCount,
+      events: selected,
     });
-    if (!("error" in result)) {
-      fitted.forEach((event) => this.inspectedEventIDs.add(event.id.toLowerCase()));
-    }
+    selected.forEach((event) => this.inspectedEventIDs.add(event.id.toLowerCase()));
     return result;
   }
 
-  private fit(value: Record<string, unknown>): Record<string, unknown> {
-    const bytes = encodedByteLength(value);
-    if (this.evidenceBytes + bytes > maximumEvidenceBytes) {
-      return { error: "evidence_budget_exhausted" };
-    }
-    this.evidenceBytes += bytes;
+  private recordResponse(value: Record<string, unknown>): Record<string, unknown> {
+    this.evidenceBytes += encodedByteLength(value);
     return value;
   }
 }
@@ -436,43 +429,63 @@ class EvidenceSession {
 function validateFinal(
   response: SubmittedTimeline,
   inspectedIDs: Set<string>,
-): TimelineAgentResult {
-  const { title, description, continuationHint, claims, evidenceEventIDs } = response;
-  if (!title || !description || !claims.length || !evidenceEventIDs.length) {
-    throw new TimelineAgentError("agent_empty_fields", true);
+): {
+  result: TimelineAgentResult;
+  normalizedDuplicateCount: number;
+} {
+  const { title, description, continuationHint } = response;
+  if (!title || !description || !response.claims.length) {
+    throw new TimelineAgentError("agent_empty_fields", true, {
+      repair: "Provide a non-empty title, description, and at least one evidence-backed claim.",
+    });
   }
   if (
     title.length > 120 ||
     description.length > 1_800 ||
     continuationHint.length > 300 ||
-    claims.length > 16
+    response.claims.length > 16
   ) {
     throw new TimelineAgentError("agent_content_too_long", true);
   }
-  if (
-    new Set(evidenceEventIDs).size !== evidenceEventIDs.length ||
-    evidenceEventIDs.some((id) => !inspectedIDs.has(id))
-  ) {
-    throw new TimelineAgentError("agent_invalid_evidence_ids", true);
-  }
-  for (const claim of claims) {
-    if (
-      !claim.text ||
-      !claim.evidenceEventIDs.length ||
-      new Set(claim.evidenceEventIDs).size !== claim.evidenceEventIDs.length ||
-      claim.evidenceEventIDs.some((id) => !inspectedIDs.has(id))
-    ) {
-      throw new TimelineAgentError("agent_invalid_claims", true);
+  let normalizedDuplicateCount = 0;
+  const claims = response.claims.map((claim, claimIndex) => {
+    const normalizedIDs = claim.evidenceEventIDs
+      .map((id) => id.trim().toLowerCase())
+      .filter(Boolean);
+    const evidenceEventIDs = [...new Set(normalizedIDs)];
+    normalizedDuplicateCount += normalizedIDs.length - evidenceEventIDs.length;
+    if (!claim.text || !evidenceEventIDs.length) {
+      throw new TimelineAgentError("agent_invalid_claims", true, {
+        claim_indexes: [claimIndex],
+        repair: "Every claim needs text and at least one inspected event ID.",
+      });
     }
+    const uninspectedIDs = evidenceEventIDs.filter((id) => !inspectedIDs.has(id));
+    if (uninspectedIDs.length) {
+      throw new TimelineAgentError("agent_uninspected_evidence", true, {
+        claim_indexes: [claimIndex],
+        invalid_event_ids: uninspectedIDs,
+        invalid_count: uninspectedIDs.length,
+        repair: "Remove or replace these IDs with event IDs returned by inspection tools.",
+      });
+    }
+    return { text: claim.text, evidenceEventIDs };
+  });
+  const evidenceEventIDs = [...new Set(claims.flatMap((claim) => claim.evidenceEventIDs))];
+  if (!evidenceEventIDs.length) {
+    throw new TimelineAgentError("agent_invalid_claims", true, {
+      repair: "Submit at least one claim backed by an inspected event ID.",
+    });
   }
   return {
-    title,
-    description,
-    continuationHint: continuationHint || undefined,
-    claims,
-    evidenceEventIDs: [
-      ...new Set([...evidenceEventIDs, ...claims.flatMap((claim) => claim.evidenceEventIDs)]),
-    ],
+    result: {
+      title,
+      description,
+      continuationHint: continuationHint || undefined,
+      claims,
+      evidenceEventIDs,
+    },
+    normalizedDuplicateCount,
   };
 }
 
@@ -503,6 +516,7 @@ function createTimelineTools(
   observer?: TimelineAgentRunObserver,
 ): AgentTool[] {
   const constrainedSampling = { type: "json_schema", strict: "require" } as const;
+  let previousSubmission = "";
   const observed = async <T>(name: string, operation: () => Promise<T> | T): Promise<T> => {
     observer?.onToolCall?.({ name });
     try {
@@ -638,25 +652,51 @@ function createTimelineTools(
       execute: async (_toolCallID, rawParams) =>
         observed("submit_timeline", () => {
           const params = rawParams as Static<typeof submitTimelineParameters>;
-          let result: TimelineAgentResult;
+          const submission = JSON.stringify(params);
+          const changed = submission !== previousSubmission;
+          previousSubmission = submission;
+          let validated: ReturnType<typeof validateFinal>;
           try {
-            result = validateFinal(
+            validated = validateFinal(
               {
                 title: params.title.trim(),
                 description: params.description.trim(),
                 continuationHint: params.continuation_hint.trim(),
                 claims: params.claims.map((claim) => ({
                   text: claim.text.trim(),
-                  evidenceEventIDs: claim.evidence_event_ids.map((id) => id.toLowerCase()),
+                  evidenceEventIDs: claim.evidence_event_ids,
                 })),
-                evidenceEventIDs: params.evidence_event_ids.map((id) => id.toLowerCase()),
               },
               evidence.inspectedIDs(),
             );
           } catch (error) {
-            if (error instanceof TimelineAgentError) reject(error);
+            if (error instanceof TimelineAgentError) {
+              reject(error);
+              const uninspectedEvidenceCount = (() => {
+                try {
+                  const details = JSON.parse(error.message) as { invalid_count?: unknown };
+                  return typeof details.invalid_count === "number" ? details.invalid_count : 0;
+                } catch {
+                  return 0;
+                }
+              })();
+              observer?.onSubmission?.({
+                accepted: false,
+                changed,
+                reason: error.reason,
+                normalizedDuplicateCount: 0,
+                uninspectedEvidenceCount,
+              });
+            }
             throw error;
           }
+          const { result, normalizedDuplicateCount } = validated;
+          observer?.onSubmission?.({
+            accepted: true,
+            changed,
+            normalizedDuplicateCount,
+            uninspectedEvidenceCount: 0,
+          });
           submit(result);
           return {
             content: [{ type: "text" as const, text: "Timeline accepted." }],
@@ -688,7 +728,7 @@ export function timelineAgentSystemPrompt(locale: AppLocale): string {
 
 You do not receive a preselected event sample. Actively call the provided read-only inspection tools to identify every meaningful activity thread. Use activity spans for navigation, ranges for chronological context, search for specific concepts, and include accessibility only when richer semantic evidence is needed. Inspect actual events before submitting. Represent parallel work in proportion to its observed significance; do not treat coding as inherently more important than communication, planning, research, or operational work. Prefer task intent, transitions, decisions, outcomes, blockers, and useful continuation context over click-by-click narration.
 
-You may make at most ${maximumInspectionRequestsPerTurn} inspection calls in one turn and have at most ${maximumAgentTurns} model turns. When the memory is ready, you must call submit_timeline; never return the final memory as ordinary text. Write all natural-language fields in ${outputLanguageName(locale)}. Set continuation_hint to an empty string unless an unresolved next action is explicitly supported. Every claim and evidence_event_id must cite an event ID returned by an inspection tool. Do not invent facts, expose secrets, quote large observed passages, or put IDs in prose.`;
+You may inspect as many paginated evidence results and take as many model turns as the work requires. When the memory is ready, you must call submit_timeline; never return the final memory as ordinary text. Write all natural-language fields in ${outputLanguageName(locale)}. Set continuation_hint to an empty string unless an unresolved next action is explicitly supported. Every claim must cite event IDs returned by an inspection tool; the document-level evidence list is derived automatically. Do not invent facts, expose secrets, quote large observed passages, or put IDs in prose.`;
 }
 
 export function timelineAgentInitialPrompt(
@@ -734,8 +774,11 @@ function createPiModel(
       };
 }
 
-function createPiStream(runtime: ModelRuntime): StreamFn {
+function createPiStream(runtime: ModelRuntime, observer?: TimelineAgentRunObserver): StreamFn {
   return (model, context, options) => {
+    observer?.onProviderRequest?.({
+      estimatedInputTokens: Math.ceil(JSON.stringify(context).length / 4),
+    });
     const requestOptions = {
       ...options,
       maxTokens: 2_600,
@@ -774,73 +817,148 @@ export async function runTimelineAgent(
   locale: AppLocale,
   observer?: TimelineAgentRunObserver,
 ): Promise<TimelineAgentResult> {
-  if (!events.length) throw new TimelineAgentError("empty_events", false);
-  const evidence = new EvidenceSession(events);
-  let finalResult: TimelineAgentResult | undefined;
-  let submissionError: TimelineAgentError | undefined;
-  let turns = 0;
-  const inspectionCounts = new WeakMap<object, number>();
-  const inspectionToolNames = new Set([
-    "list_activity_spans",
-    "read_event_range",
-    "search_events",
-    "read_events",
-  ]);
-  const tools = createTimelineTools(
-    evidence,
-    (result) => {
-      finalResult = result;
-    },
-    (error) => {
-      submissionError = error;
-    },
-    observer,
-  );
-  const agent = new Agent({
-    initialState: {
-      systemPrompt: timelineAgentSystemPrompt(locale),
-      model: createPiModel(runtime),
-      thinkingLevel: "off",
-      tools,
-    },
-    streamFn: createPiStream(runtime),
-    getApiKey: () => runtime.apiKey,
-    toolExecution: "parallel",
-    beforeToolCall: async ({ assistantMessage, toolCall }) => {
-      if (!tools.some((tool) => tool.name === toolCall.name)) {
-        return { block: true, reason: "Tool is not allowed." };
-      }
-      if (
-        toolCall.name === "submit_timeline" &&
-        assistantMessage.content.filter((item) => item.type === "toolCall").length !== 1
-      ) {
-        return { block: true, reason: "submit_timeline must be the only tool call in its turn." };
-      }
-      if (!inspectionToolNames.has(toolCall.name)) return undefined;
-      const count = inspectionCounts.get(assistantMessage) ?? 0;
-      inspectionCounts.set(assistantMessage, count + 1);
-      return count >= maximumInspectionRequestsPerTurn
-        ? { block: true, reason: "Inspection limit reached for this turn." }
-        : undefined;
-    },
-    shouldStopAfterTurn: async () => {
-      turns += 1;
-      return finalResult !== undefined || turns >= maximumAgentTurns;
-    },
+  const session = new TimelineAgentSession(events, priorSummaries, runtime, locale, observer);
+  for (;;) {
+    const step = await session.step();
+    if (step.state === "succeeded") return step.result;
+    if (step.state === "stalled") {
+      throw new TimelineAgentError("agent_stalled", true, {
+        repair: "Resume the job later or after its runtime fingerprint changes.",
+      });
+    }
+  }
+}
+
+const contextCompactionThresholdCharacters = 360_000;
+const recentMessagesToKeepVerbatim = 12;
+const continuationPrompt =
+  "Continue the evidence-backed timeline job. Inspect new evidence or repair and submit the timeline; do not repeat an unchanged action.";
+
+export function compactTimelineAgentContext(messages: AgentMessage[]): AgentMessage[] {
+  if (JSON.stringify(messages).length <= contextCompactionThresholdCharacters) return messages;
+  const verbatimFrom = Math.max(0, messages.length - recentMessagesToKeepVerbatim);
+  return messages.map((message, index) => {
+    if (index >= verbatimFrom || message.role !== "toolResult") return message;
+    return {
+      ...message,
+      content: [
+        {
+          type: "text" as const,
+          text: "Earlier sanitized inspection output was compacted. Re-read specific event IDs when exact evidence is needed.",
+        },
+      ],
+      details: {},
+    };
   });
-  agent.subscribe((event) => {
-    if (event.type !== "turn_end" || event.message.role !== "assistant") return;
-    observer?.onModelTurn?.({
-      inputTokens: event.message.usage.input,
-      outputTokens: event.message.usage.output,
+}
+
+export type TimelineAgentSessionStep =
+  | { state: "continue"; progressed: boolean; noProgressStreak: number }
+  | { state: "stalled"; progressed: false; noProgressStreak: number }
+  | { state: "succeeded"; result: TimelineAgentResult };
+
+export class TimelineAgentSession {
+  private readonly evidence: EvidenceSession;
+  private readonly agent: Agent;
+  private started = false;
+  private finalResult?: TimelineAgentResult;
+  private submissionRevision = 0;
+  private noProgressStreak = 0;
+
+  constructor(
+    events: HistoryEvent[],
+    priorSummaries: unknown[],
+    runtime: ModelRuntime,
+    locale: AppLocale,
+    observer?: TimelineAgentRunObserver,
+  ) {
+    if (!events.length) throw new TimelineAgentError("empty_events", false);
+    this.evidence = new EvidenceSession(events);
+    const observed: TimelineAgentRunObserver = {
+      onModelTurn: (usage) => observer?.onModelTurn?.(usage),
+      onToolCall: (tool) => observer?.onToolCall?.(tool),
+      onEvidence: (usage) => observer?.onEvidence?.(usage),
+      onSubmission: (result) => {
+        if (result.changed) this.submissionRevision += 1;
+        observer?.onSubmission?.(result);
+      },
+    };
+    const tools = createTimelineTools(
+      this.evidence,
+      (result) => {
+        this.finalResult = result;
+      },
+      () => undefined,
+      observed,
+    );
+    this.agent = new Agent({
+      initialState: {
+        systemPrompt: timelineAgentSystemPrompt(locale),
+        model: createPiModel(runtime),
+        thinkingLevel: "off",
+        tools,
+      },
+      streamFn: createPiStream(runtime, observer),
+      getApiKey: () => runtime.apiKey,
+      transformContext: async (messages) => compactTimelineAgentContext(messages),
+      toolExecution: "parallel",
+      beforeToolCall: async ({ assistantMessage, toolCall }) => {
+        if (!tools.some((tool) => tool.name === toolCall.name)) {
+          return { block: true, reason: "Tool is not allowed." };
+        }
+        if (
+          toolCall.name === "submit_timeline" &&
+          assistantMessage.content.filter((item) => item.type === "toolCall").length !== 1
+        ) {
+          return { block: true, reason: "submit_timeline must be the only tool call in its turn." };
+        }
+        return undefined;
+      },
+      shouldStopAfterTurn: () => true,
     });
-  });
+    this.agent.subscribe((event) => {
+      if (event.type !== "turn_end" || event.message.role !== "assistant") return;
+      observer?.onModelTurn?.({
+        inputTokens: event.message.usage.input,
+        outputTokens: event.message.usage.output,
+      });
+    });
+    this.initialPrompt = timelineAgentInitialPrompt(priorSummaries, this.evidence.overview());
+  }
 
-  await agent.prompt(timelineAgentInitialPrompt(priorSummaries, evidence.overview()));
+  private readonly initialPrompt: string;
 
-  if (finalResult) return finalResult;
-  if (submissionError) throw submissionError;
-  if (agent.state.errorMessage) throw piRequestError(agent.state.errorMessage);
-  if (turns >= maximumAgentTurns) throw new TimelineAgentError("agent_turn_limit", true);
-  throw new TimelineAgentError("agent_missing_final", true);
+  async step(): Promise<TimelineAgentSessionStep> {
+    if (this.finalResult) return { state: "succeeded", result: this.finalResult };
+    const before = this.progressSignature();
+    if (!this.started) {
+      this.started = true;
+      await this.agent.prompt(this.initialPrompt);
+    } else {
+      const last = this.agent.state.messages.at(-1);
+      if (last?.role === "user" || last?.role === "toolResult") await this.agent.continue();
+      else await this.agent.prompt(continuationPrompt);
+    }
+    if (this.finalResult) return { state: "succeeded", result: this.finalResult };
+    if (this.agent.state.errorMessage) throw piRequestError(this.agent.state.errorMessage);
+    const progressed = before !== this.progressSignature();
+    this.noProgressStreak = progressed ? 0 : this.noProgressStreak + 1;
+    if (this.noProgressStreak >= 3) {
+      return { state: "stalled", progressed: false, noProgressStreak: this.noProgressStreak };
+    }
+    return { state: "continue", progressed, noProgressStreak: this.noProgressStreak };
+  }
+
+  abort(): void {
+    this.agent.abort();
+  }
+
+  inspectedEventIDs(): string[] {
+    return [...this.evidence.inspectedIDs()];
+  }
+
+  private progressSignature(): string {
+    const progress = this.evidence.progress();
+    return `${progress.inspectedEventCount}:${progress.uniqueInspectionRequestCount}:${this.submissionRevision}`;
+  }
 }

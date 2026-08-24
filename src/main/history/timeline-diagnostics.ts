@@ -8,7 +8,7 @@ const retentionMilliseconds = 30 * 24 * 60 * 60 * 1_000;
 const maximumRetainedRuns = 2_000;
 
 export interface TimelineAgentRunRecord {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   id: string;
   sourceSegmentID: string;
   startedAt: string;
@@ -23,6 +23,10 @@ export interface TimelineAgentRunRecord {
   evidenceBytes: number;
   inputTokens: number;
   outputTokens: number;
+  estimatedInputTokens?: number;
+  submissionAttempts?: number;
+  normalizedDuplicateCount?: number;
+  uninspectedEvidenceCount?: number;
   latencyMilliseconds: number;
   terminalState: "succeeded" | "fallback";
   failureReason?: string;
@@ -40,7 +44,7 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
   if (!value || typeof value !== "object") return undefined;
   const source = value as Partial<TimelineAgentRunRecord>;
   if (
-    source.schemaVersion !== 1 ||
+    ![1, 2].includes(source.schemaVersion ?? 0) ||
     typeof source.id !== "string" ||
     typeof source.sourceSegmentID !== "string" ||
     typeof source.startedAt !== "string" ||
@@ -61,7 +65,7 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
       .map(([name, value]) => [name, count(value)]),
   );
   return {
-    schemaVersion: 1,
+    schemaVersion: source.schemaVersion as 1 | 2,
     id: bounded(source.id, 80),
     sourceSegmentID: bounded(source.sourceSegmentID, 80),
     startedAt: source.startedAt,
@@ -76,6 +80,10 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
     evidenceBytes: count(source.evidenceBytes ?? 0),
     inputTokens: count(source.inputTokens ?? 0),
     outputTokens: count(source.outputTokens ?? 0),
+    estimatedInputTokens: count(source.estimatedInputTokens ?? 0),
+    submissionAttempts: count(source.submissionAttempts ?? 0),
+    normalizedDuplicateCount: count(source.normalizedDuplicateCount ?? 0),
+    uninspectedEvidenceCount: count(source.uninspectedEvidenceCount ?? 0),
     latencyMilliseconds: count(source.latencyMilliseconds ?? 0),
     terminalState: source.terminalState as TimelineAgentRunRecord["terminalState"],
     failureReason:

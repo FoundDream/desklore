@@ -36,6 +36,7 @@ import {
   segmentIdentifier,
 } from "./storage.js";
 import { TimelineRepository, type LLMRuntime, type LLMUnavailable } from "./timeline.js";
+import type { TimelineAgentSessionFactory } from "./timeline-agent-runtime.js";
 import { MemoryRepository } from "./memory.js";
 import type {
   HistorySearchResponse,
@@ -132,10 +133,13 @@ export class HistoryService extends EventEmitter {
   private initialized = false;
   private captureWork: Promise<unknown> = Promise.resolve();
   private timelineWork: Promise<unknown> = Promise.resolve();
+  private timelineAgentWork: Promise<unknown> = Promise.resolve();
   private visualWork: Promise<unknown> = Promise.resolve();
   private visualDecisionWork: Promise<unknown> = Promise.resolve();
   private visualCaptureWork: Promise<unknown> = Promise.resolve();
   private visualUnderstandingWork: Promise<unknown> = Promise.resolve();
+  private timelineAgentEnabled = false;
+  private timelineAgentTimer?: NodeJS.Timeout;
   private readonly pendingVisualIntents = new Map<string, PendingVisualIntent>();
   private readonly visualCaptureScheduler = new VisualCaptureScheduler();
   private readonly visualUnderstandingCache = new VisualUnderstandingCache();
@@ -179,6 +183,7 @@ export class HistoryService extends EventEmitter {
     private readonly collector: AgentClient,
     storageRoot: string,
     private readonly visualCaptureProvider?: VisualCaptureProvider,
+    timelineAgentSessionFactory?: TimelineAgentSessionFactory,
   ) {
     super();
     this.layout = makeStorageLayout(storageRoot);
@@ -189,6 +194,7 @@ export class HistoryService extends EventEmitter {
       this.segments,
       async () => this.llmRuntime(),
       () => this.locale,
+      timelineAgentSessionFactory,
     );
     this.memory = new MemoryRepository(
       this.layout,
@@ -259,6 +265,7 @@ export class HistoryService extends EventEmitter {
     await this.collector.start();
     await this.syncObservationPolicyToCollector();
     await this.collector.request("start");
+    this.timelineAgentEnabled = true;
     this.startTimers();
     await this.refreshDocuments();
     void this.enqueueTimeline(async () => {
@@ -270,8 +277,8 @@ export class HistoryService extends EventEmitter {
           (lhs, rhs) => Date.parse(lhs.metadata.startedAt) - Date.parse(rhs.metadata.startedAt),
         ),
       );
-      await this.timeline.retryFallbackDocuments([...byID.values()], new Date(), 0);
       await this.refreshDocuments();
+      this.kickTimelineAgent();
     }).catch((error) => this.captureError(error));
     return this.current();
   }
@@ -287,6 +294,10 @@ export class HistoryService extends EventEmitter {
   }
 
   async stop(): Promise<DesktopSnapshot> {
+    this.timelineAgentEnabled = false;
+    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
+    this.timelineAgentTimer = undefined;
+    this.timeline.abortAgentJobs();
     this.stopTimers();
     if (
       this.collector.current().connectionState === "connected" &&
@@ -301,15 +312,22 @@ export class HistoryService extends EventEmitter {
     await this.visualWork;
     await this.collector.stop();
     await this.maintenance();
+    await this.timelineAgentWork;
     await this.timelineWork;
+    await this.timeline.pauseAgentJobs();
     return this.current();
   }
 
   async shutdown(): Promise<void> {
     await this.stop();
+    this.timeline.disposeAgentRuntime();
   }
 
   terminate(): void {
+    this.timelineAgentEnabled = false;
+    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
+    this.timelineAgentTimer = undefined;
+    this.timeline.disposeAgentRuntime();
     this.cancelAllPendingVisualIntents();
     this.stopTimers();
     this.collector.terminate();
@@ -392,6 +410,7 @@ export class HistoryService extends EventEmitter {
     await this.initialize();
     await this.settingsStore.saveLocale(locale);
     this.locale = locale;
+    this.wakeTimelineAgentJobs("locale_changed");
     this.lastError = undefined;
     this.emitSnapshot();
     return this.current();
@@ -416,11 +435,13 @@ export class HistoryService extends EventEmitter {
     this.llmSettings = next;
     this.visualUnderstandingCache.clear();
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
+    this.wakeTimelineAgentJobs("configuration_changed");
     this.lastError = undefined;
     void this.enqueueTimeline(async () => {
       const segments = await this.segments.pendingClosedSegments();
-      await this.timeline.retryFallbackDocuments(segments, new Date(), 0);
+      for (const segment of segments) await this.timeline.generateIfNeeded(segment);
       await this.refreshDocuments();
+      this.kickTimelineAgent();
     }).catch((error) => this.captureError(error));
     return this.current();
   }
@@ -430,6 +451,8 @@ export class HistoryService extends EventEmitter {
     await this.settingsStore.saveLLMSettings(next);
     this.llmSettings = next;
     this.lastError = undefined;
+    if (!enabled) this.timeline.abortAgentJobs();
+    else this.wakeTimelineAgentJobs("model_enabled");
     return this.current();
   }
 
@@ -472,6 +495,7 @@ export class HistoryService extends EventEmitter {
     await this.settingsStore.removeAPIKey();
     this.visualUnderstandingCache.clear();
     this.apiKeyConfigured = Boolean(process.env.OPENAI_API_KEY);
+    this.wakeTimelineAgentJobs("credential_changed");
     this.emitSnapshot();
     return this.current();
   }
@@ -486,9 +510,11 @@ export class HistoryService extends EventEmitter {
   }
 
   async deleteDocument(id: string): Promise<DesktopSnapshot> {
+    const document = this.documents.find((item) => item.id === id);
+    if (!document) throw new Error("Timeline document not found");
+    await this.timeline.deleteAgentJob(document.sourceSegmentID);
+    await this.timelineAgentWork;
     await this.enqueueTimeline(async () => {
-      const document = this.documents.find((item) => item.id === id);
-      if (!document) throw new Error("Timeline document not found");
       await this.segments.deleteSegment(document.sourceSegmentID);
       await this.timeline.delete(document);
       await this.refreshDocuments();
@@ -499,6 +525,10 @@ export class HistoryService extends EventEmitter {
   async clearHistory(): Promise<DesktopSnapshot> {
     await this.initialize();
     this.stopTimers();
+    this.timelineAgentEnabled = false;
+    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
+    this.timelineAgentTimer = undefined;
+    this.timeline.abortAgentJobs();
     if (
       this.collector.current().connectionState === "connected" &&
       this.collector.current().agent?.recorderState === "running"
@@ -511,6 +541,7 @@ export class HistoryService extends EventEmitter {
     await this.captureWork;
     this.cancelAllPendingVisualIntents();
     await this.visualWork;
+    await this.timelineAgentWork;
     await this.timelineWork;
     this.historyRecovery = await clearHistoryData(this.layout, {
       documentCount: this.documents.length,
@@ -526,6 +557,10 @@ export class HistoryService extends EventEmitter {
     this.currentCaptureSegmentID = undefined;
     this.lastError = undefined;
     if (this.collector.current().connectionState === "connected") this.startTimers();
+    if (this.collector.current().connectionState === "connected") {
+      this.timelineAgentEnabled = true;
+      this.kickTimelineAgent();
+    }
     this.emitSnapshot();
     return this.current();
   }
@@ -533,6 +568,10 @@ export class HistoryService extends EventEmitter {
   async restoreHistory(id: string): Promise<DesktopSnapshot> {
     await this.initialize();
     this.stopTimers();
+    this.timelineAgentEnabled = false;
+    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
+    this.timelineAgentTimer = undefined;
+    this.timeline.abortAgentJobs();
     const wasRunning =
       this.collector.current().connectionState === "connected" &&
       this.collector.current().agent?.recorderState === "running";
@@ -544,6 +583,7 @@ export class HistoryService extends EventEmitter {
       await this.captureWork;
       this.cancelAllPendingVisualIntents();
       await this.visualWork;
+      await this.timelineAgentWork;
       await this.timelineWork;
       await restoreHistoryData(this.layout, id);
       this.segments.reset();
@@ -557,10 +597,18 @@ export class HistoryService extends EventEmitter {
       await this.refreshDocuments();
     } catch (error) {
       if (wasRunning) await this.collector.request("resume").catch(() => undefined);
-      if (this.collector.current().connectionState === "connected") this.startTimers();
+      if (this.collector.current().connectionState === "connected") {
+        this.startTimers();
+        this.timelineAgentEnabled = true;
+        this.kickTimelineAgent();
+      }
       throw error;
     }
-    if (this.collector.current().connectionState === "connected") this.startTimers();
+    if (this.collector.current().connectionState === "connected") {
+      this.startTimers();
+      this.timelineAgentEnabled = true;
+      this.kickTimelineAgent();
+    }
     this.emitSnapshot();
     return this.current();
   }
@@ -655,6 +703,7 @@ export class HistoryService extends EventEmitter {
       await pendingVisualWork;
       await this.timeline.generateIfNeeded(segment);
       await this.refreshDocuments();
+      this.kickTimelineAgent();
     }).catch((error) => this.captureError(error));
   }
 
@@ -670,8 +719,9 @@ export class HistoryService extends EventEmitter {
     await pruneHistoryArchives(this.layout, new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000));
     this.historyRecovery = await latestHistoryArchive(this.layout);
     void this.enqueueTimeline(async () => {
-      await this.timeline.retryFallbackDocuments(completed);
+      for (const segment of completed) await this.timeline.generateIfNeeded(segment);
       await this.refreshDocuments();
+      this.kickTimelineAgent();
     }).catch((error) => this.captureError(error));
   }
 
@@ -1125,6 +1175,43 @@ export class HistoryService extends EventEmitter {
     });
   }
 
+  private kickTimelineAgent(delayMilliseconds = 0): void {
+    if (!this.timelineAgentEnabled || this.timelineAgentTimer) return;
+    this.timelineAgentTimer = setTimeout(
+      () => {
+        this.timelineAgentTimer = undefined;
+        if (!this.timelineAgentEnabled) return;
+        void this.enqueueTimelineAgent(async () => {
+          const segments = await this.segments.pendingClosedSegments();
+          const outcome = await this.timeline.advanceNextAgentJob(segments);
+          if (outcome.upgraded) {
+            await this.enqueueTimeline(async () => this.refreshDocuments());
+          }
+          return outcome;
+        })
+          .then((outcome) => {
+            if (!this.timelineAgentEnabled || !outcome.pending) return;
+            if (outcome.processed) {
+              this.kickTimelineAgent();
+              return;
+            }
+            if (outcome.nextWakeAt) {
+              this.kickTimelineAgent(Math.max(1_000, Date.parse(outcome.nextWakeAt) - Date.now()));
+            }
+          })
+          .catch((error) => this.captureError(error));
+      },
+      Math.max(0, delayMilliseconds),
+    );
+  }
+
+  private wakeTimelineAgentJobs(reason: string): void {
+    this.timeline.abortAgentJobs();
+    void this.enqueueTimelineAgent(async () => this.timeline.wakeAgentJobs(reason))
+      .then(() => this.kickTimelineAgent())
+      .catch((error) => this.captureError(error));
+  }
+
   private startTimers(): void {
     if (!this.flushTimer) {
       this.flushTimer = setInterval(() => {
@@ -1158,6 +1245,12 @@ export class HistoryService extends EventEmitter {
   private enqueueTimeline<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.timelineWork.then(operation, operation);
     this.timelineWork = next.catch(() => undefined);
+    return next;
+  }
+
+  private enqueueTimelineAgent<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.timelineAgentWork.then(operation, operation);
+    this.timelineAgentWork = next.catch(() => undefined);
     return next;
   }
 

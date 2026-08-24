@@ -5,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   electron: {
     main: {
-      entry: "src/main/index.ts",
+      entry: {
+        index: "src/main/index.ts",
+        "timeline-agent-worker": "src/main/timeline-agent-worker.ts",
+      },
       ssr: {
         noExternal: [
           "@earendil-works/pi-agent-core",
