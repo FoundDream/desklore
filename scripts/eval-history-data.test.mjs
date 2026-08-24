@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   classifySegment,
   diagnosticSummary,
+  discoverLocalCodexHistoryRoot,
   evaluateEvents,
   normalizedEvent,
   normalizedMetadata,
@@ -95,6 +96,28 @@ void test("normalizes camelCase and snake_case reference metadata", () => {
   );
   assert.equal(snake.endedAt, "2026-08-20T12:10:00Z");
   assert.equal(snake.eventCount, 4);
+});
+
+void test("discovers the read-only local Codex Computer History root without a Team ID", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "desklore-codex-local-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const historyRoot = path.join(
+    root,
+    "EXAMPLE.com.openai.sky.CUAService",
+    "Library",
+    "Caches",
+    "ComputerUse",
+    "Skysight",
+  );
+  await mkdir(path.join(historyRoot, "segments"), { recursive: true });
+
+  await assert.doesNotReject(async () => {
+    assert.equal(await discoverLocalCodexHistoryRoot({ groupContainersRoot: root }), historyRoot);
+  });
+  await assert.rejects(
+    discoverLocalCodexHistoryRoot({ groupContainersRoot: path.join(root, "empty") }),
+    /Cannot read the macOS Group Containers directory/,
+  );
 });
 
 void test("classifies open, partial, invalid, and complete buckets", () => {
@@ -245,6 +268,7 @@ void test("full paired run records provenance and scores only complete shared bu
   assert.equal(report.overall.matches.tolerant.matches, 1);
   assert.equal(report.provenance.candidate.recorderSettings, "fixture");
   assert.equal(report.provenance.reference.adapter, "skysight-flex-v1");
+  assert.equal(report.provenance.reference.origin, "configured-path");
   assert.equal((await stat(path.join(output, "report.json"))).mode & 0o777, 0o600);
 });
 

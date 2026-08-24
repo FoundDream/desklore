@@ -34,8 +34,14 @@ Compare a candidate recording against a separately collected reference:
 ```bash
 pnpm eval:history -- \
   --candidate "$HOME/Library/Application Support/DeskLore/history" \
-  --reference /path/to/reference/history-root
+  --reference codex-local
 ```
+
+`codex-local` is an explicit read-only opt-in. On macOS it discovers the Computer History Skysight
+root under the Codex CUA service Group Container without hard-coding the Team ID. It reads segment
+metadata and events in place; it does not read Codex chats or prompts, change Computer History
+settings, copy source events into the repository, or make model requests. An explicit Skysight
+history root and `CODEX_COMPUTER_HISTORY_ROOT` remain supported for automation.
 
 The report uses bundle-aware, one-to-one timestamp matching and reports precision, recall, F1,
 semantic agreement, latency, duplicate-burst, and per-kind diagnostics. Headline precision and

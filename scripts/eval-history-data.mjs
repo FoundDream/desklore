@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -25,6 +25,8 @@ const segmentStatuses = [
   "invalid_events",
   "unreadable",
 ];
+const codexContainerSuffix = ".com.openai.sky.CUAService";
+const codexHistoryRelativePath = path.join("Library", "Caches", "ComputerUse", "Skysight");
 
 function argumentsFrom(argv) {
   const values = new Map();
@@ -37,6 +39,74 @@ function argumentsFrom(argv) {
     }
   }
   return values;
+}
+
+async function isRealDirectory(directory) {
+  try {
+    const stats = await lstat(directory);
+    return stats.isDirectory() && !stats.isSymbolicLink();
+  } catch (error) {
+    if (["ENOENT", "EACCES"].includes(error?.code)) return false;
+    throw error;
+  }
+}
+
+export async function discoverLocalCodexHistoryRoot(options = {}) {
+  const groupContainersRoot = path.resolve(
+    options.groupContainersRoot ?? path.join(os.homedir(), "Library", "Group Containers"),
+  );
+  let entries;
+  try {
+    entries = await readdir(groupContainersRoot, { withFileTypes: true });
+  } catch (error) {
+    throw new Error(
+      `Cannot read the macOS Group Containers directory: ${error instanceof Error ? error.message : "unknown_error"}`,
+    );
+  }
+  const candidates = [];
+  for (const entry of entries.sort((lhs, rhs) => lhs.name.localeCompare(rhs.name))) {
+    if (
+      !entry.isDirectory() ||
+      entry.isSymbolicLink() ||
+      !entry.name.endsWith(codexContainerSuffix)
+    ) {
+      continue;
+    }
+    const candidate = path.join(groupContainersRoot, entry.name, codexHistoryRelativePath);
+    if (
+      (await isRealDirectory(candidate)) &&
+      (await isRealDirectory(path.join(candidate, "segments")))
+    ) {
+      candidates.push(candidate);
+    }
+  }
+  if (!candidates.length) {
+    throw new Error(
+      "Local Codex Computer History data was not found. Enable Computer History or pass an explicit --reference root.",
+    );
+  }
+  if (candidates.length > 1) {
+    throw new Error(
+      "Multiple local Codex Computer History roots were found. Pass the intended root explicitly with --reference.",
+    );
+  }
+  return candidates[0];
+}
+
+export async function resolveReferenceRoot(value, options = {}) {
+  if (!value) {
+    throw new Error(
+      "Pass --reference codex-local, pass --reference <Skysight root>, or set CODEX_COMPUTER_HISTORY_ROOT.",
+    );
+  }
+  if (value === "codex-local") return discoverLocalCodexHistoryRoot(options);
+  const root = path.resolve(value);
+  if (!(await isRealDirectory(path.join(root, "segments")))) {
+    throw new Error(
+      "The reference root must contain a readable, non-symlinked segments directory.",
+    );
+  }
+  return root;
 }
 
 function increment(map, key, amount = 1) {
@@ -590,7 +660,7 @@ function summarize(dataset, segmentIDs, excludedBundles) {
   };
 }
 
-function datasetProvenance(dataset, source, recorderSettings, generatedAt) {
+function datasetProvenance(dataset, source, recorderSettings, generatedAt, origin) {
   const timestamps = dataset.segments
     .flatMap((segment) => [segment.startedAt, segment.metadata?.endedAt])
     .filter((value) => typeof value === "string" && Number.isFinite(Date.parse(value)))
@@ -598,6 +668,7 @@ function datasetProvenance(dataset, source, recorderSettings, generatedAt) {
   const latest = timestamps.at(-1);
   return {
     source,
+    origin,
     adapter: source === "candidate" ? "desklore-segment-v1" : "skysight-flex-v1",
     recorderSettings: recorderSettings?.slice(0, 200) || "not_supplied",
     segmentCount: dataset.segments.length,
@@ -881,7 +952,7 @@ function markdown(report) {
     `Excluded bundles: ${report.excludedBundles.join(", ") || "none"}. ` +
     `The reference is an observational comparator, not ground truth.\n\n` +
     `Candidate adapter/settings: ${report.provenance.candidate.adapter} / ${report.provenance.candidate.recorderSettings}. ` +
-    `Reference adapter/settings: ${report.provenance.reference.adapter} / ${report.provenance.reference.recorderSettings}.\n\n` +
+    `Reference adapter/settings/origin: ${report.provenance.reference.adapter} / ${report.provenance.reference.recorderSettings} / ${report.provenance.reference.origin}.\n\n` +
     dataQualityMarkdown(report) +
     `\n` +
     sliceMarkdown(
@@ -916,10 +987,8 @@ export async function run(argv = process.argv.slice(2)) {
       path.join(os.homedir(), "Library/Application Support/DeskLore/history"),
   );
   const referenceRootValue = args.get("reference") ?? process.env.CODEX_COMPUTER_HISTORY_ROOT;
-  if (!referenceRootValue) {
-    throw new Error("Pass --reference <Skysight root> or set CODEX_COMPUTER_HISTORY_ROOT.");
-  }
-  const referenceRoot = path.resolve(referenceRootValue);
+  const referenceRoot = await resolveReferenceRoot(referenceRootValue);
+  const referenceOrigin = referenceRootValue === "codex-local" ? "codex-local" : "configured-path";
   const toleranceMilliseconds = Math.max(
     0,
     Number.parseInt(args.get("tolerance-ms") ?? "2000", 10) || 0,
@@ -993,12 +1062,14 @@ export async function run(argv = process.argv.slice(2)) {
         "candidate",
         args.get("candidate-settings"),
         generatedAt,
+        "configured-path",
       ),
       reference: datasetProvenance(
         referenceDataset,
         "reference",
         args.get("reference-settings"),
         generatedAt,
+        referenceOrigin,
       ),
     },
     overall,
