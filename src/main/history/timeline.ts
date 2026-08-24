@@ -6,6 +6,11 @@ import { translate } from "../../shared/i18n.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
 import type { ModelRuntime } from "./model-client.js";
 import { segmentDurationMilliseconds, type SegmentStore, type StorageLayout } from "./storage.js";
+import {
+  TimelineAgentDiagnosticsRepository,
+  timelineAgentProvider,
+  type TimelineAgentRunRecord,
+} from "./timeline-diagnostics.js";
 import { runTimelineAgent, TimelineAgentError } from "./timeline-agent.js";
 import type {
   ClosedSegment,
@@ -212,15 +217,97 @@ class TimelineLLMError extends Error {
   }
 }
 
+function normalizedTimelineError(error: unknown): TimelineLLMError {
+  if (error instanceof TimelineAgentError) {
+    return new TimelineLLMError(error.reason, error.retryable);
+  }
+  if (error instanceof Error && error.name === "TimeoutError") {
+    return new TimelineLLMError("network_timeout", true);
+  }
+  const code = (error as NodeJS.ErrnoException | undefined)?.cause as
+    | NodeJS.ErrnoException
+    | undefined;
+  if (code?.code === "ENOTFOUND") return new TimelineLLMError("network_dns_failed", true);
+  if (code?.code === "ECONNREFUSED") {
+    return new TimelineLLMError("network_cannot_connect", true);
+  }
+  return new TimelineLLMError("network_request_failed", true);
+}
+
+interface TimelineRunMetrics {
+  turns: number;
+  toolCalls: Record<string, number>;
+  inspectedEventCount: number;
+  evidenceBytes: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+function runRecord(
+  segment: ClosedSegment,
+  runtime: LLMRuntime,
+  retry: boolean,
+  id: string,
+  startedAt: Date,
+  metrics: TimelineRunMetrics,
+  terminalState: TimelineAgentRunRecord["terminalState"],
+  failureReason?: string,
+): TimelineAgentRunRecord {
+  const finishedAt = new Date();
+  return {
+    schemaVersion: 1,
+    id,
+    sourceSegmentID: segment.metadata.id,
+    startedAt: startedAt.toISOString(),
+    finishedAt: finishedAt.toISOString(),
+    model: runtime.settings.model,
+    provider: timelineAgentProvider(runtime.settings.endpoint),
+    protocol: runtime.settings.protocol,
+    retry,
+    ...metrics,
+    latencyMilliseconds: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+    terminalState,
+    failureReason,
+  };
+}
+
 async function modelSummary(
   segment: ClosedSegment,
   events: HistoryEvent[],
   context: TimelineContext,
   runtime: LLMRuntime,
   locale: AppLocale,
+  diagnostics: TimelineAgentDiagnosticsRepository,
+  retry: boolean,
 ): Promise<TimelineDocumentRecord> {
+  const runID = randomUUID().toLowerCase();
+  const startedAt = new Date();
+  const metrics: TimelineRunMetrics = {
+    turns: 0,
+    toolCalls: {},
+    inspectedEventCount: 0,
+    evidenceBytes: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  };
   try {
-    const draft = await runTimelineAgent(events, context.priorSummaries, runtime, locale);
+    const draft = await runTimelineAgent(events, context.priorSummaries, runtime, locale, {
+      onModelTurn: (usage) => {
+        metrics.turns += 1;
+        metrics.inputTokens += usage.inputTokens;
+        metrics.outputTokens += usage.outputTokens;
+      },
+      onToolCall: ({ name }) => {
+        metrics.toolCalls[name] = (metrics.toolCalls[name] ?? 0) + 1;
+      },
+      onEvidence: (usage) => {
+        metrics.inspectedEventCount = usage.inspectedEventCount;
+        metrics.evidenceBytes = usage.evidenceBytes;
+      },
+    });
+    await diagnostics
+      .append(runRecord(segment, runtime, retry, runID, startedAt, metrics, "succeeded"))
+      .catch(() => undefined);
     return {
       schemaVersion: 4,
       id: randomUUID().toLowerCase(),
@@ -242,20 +329,22 @@ async function modelSummary(
       body: semanticBody(draft, locale),
     };
   } catch (error) {
-    if (error instanceof TimelineAgentError) {
-      throw new TimelineLLMError(error.reason, error.retryable);
-    }
-    if (error instanceof Error && error.name === "TimeoutError") {
-      throw new TimelineLLMError("network_timeout", true);
-    }
-    const code = (error as NodeJS.ErrnoException | undefined)?.cause as
-      | NodeJS.ErrnoException
-      | undefined;
-    if (code?.code === "ENOTFOUND") throw new TimelineLLMError("network_dns_failed", true);
-    if (code?.code === "ECONNREFUSED") {
-      throw new TimelineLLMError("network_cannot_connect", true);
-    }
-    throw new TimelineLLMError("network_request_failed", true);
+    const normalized = normalizedTimelineError(error);
+    await diagnostics
+      .append(
+        runRecord(
+          segment,
+          runtime,
+          retry,
+          runID,
+          startedAt,
+          metrics,
+          "fallback",
+          normalized.reason,
+        ),
+      )
+      .catch(() => undefined);
+    throw normalized;
   }
 }
 
@@ -265,9 +354,34 @@ async function summarizeWithFallback(
   context: TimelineContext,
   runtime: LLMRuntime | LLMUnavailable | undefined,
   locale: AppLocale,
+  diagnostics: TimelineAgentDiagnosticsRepository,
+  retry = false,
 ): Promise<TimelineDocumentRecord> {
   if (!runtime) return rawActivityRecord(segment, events, locale);
   if ("failureReason" in runtime) {
+    const now = new Date();
+    await diagnostics
+      .append({
+        schemaVersion: 1,
+        id: randomUUID().toLowerCase(),
+        sourceSegmentID: segment.metadata.id,
+        startedAt: now.toISOString(),
+        finishedAt: now.toISOString(),
+        model: runtime.settings.model,
+        provider: "unavailable",
+        protocol: runtime.settings.protocol,
+        retry,
+        turns: 0,
+        toolCalls: {},
+        inspectedEventCount: 0,
+        evidenceBytes: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        latencyMilliseconds: 0,
+        terminalState: "fallback",
+        failureReason: runtime.failureReason,
+      })
+      .catch(() => undefined);
     const fallback = rawActivityRecord(segment, events, locale);
     return {
       ...fallback,
@@ -280,7 +394,7 @@ async function summarizeWithFallback(
     };
   }
   try {
-    return await modelSummary(segment, events, context, runtime, locale);
+    return await modelSummary(segment, events, context, runtime, locale, diagnostics, retry);
   } catch (error) {
     const fallback = rawActivityRecord(segment, events, locale);
     return {
@@ -305,13 +419,16 @@ async function atomicWrite(filePath: string, contents: string): Promise<void> {
 export class TimelineRepository {
   private readonly generationInFlight = new Set<string>();
   private readonly fallbackRetryDates = new Map<string, number>();
+  private readonly diagnostics: TimelineAgentDiagnosticsRepository;
 
   constructor(
     private readonly layout: StorageLayout,
     private readonly segments: SegmentStore,
     private readonly llmRuntime: LLMRuntimeProvider,
     private readonly locale: () => AppLocale = () => "en",
-  ) {}
+  ) {
+    this.diagnostics = new TimelineAgentDiagnosticsRepository(layout);
+  }
 
   async generateIfNeeded(segment: ClosedSegment): Promise<TimelineDocumentRecord | undefined> {
     if (this.generationInFlight.has(segment.metadata.id)) return undefined;
@@ -332,6 +449,7 @@ export class TimelineRepository {
         context,
         await this.llmRuntime(),
         this.locale(),
+        this.diagnostics,
       );
       const refreshed = await this.loadDocuments();
       if (refreshed.some((item) => item.sourceSegmentID === segment.metadata.id)) return undefined;
@@ -388,6 +506,8 @@ export class TimelineRepository {
           ),
           runtime,
           this.locale(),
+          this.diagnostics,
+          true,
         );
         if (raw.generator.type !== "agent") {
           await atomicWrite(

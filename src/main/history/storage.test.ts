@@ -95,6 +95,9 @@ describe("history storage deletion and retention", () => {
     const layout = makeStorageLayout(root);
     await store.append(event);
     await writeFile(path.join(layout.timeline, "example.md"), "timeline", { mode: 0o600 });
+    await writeFile(path.join(layout.timeline, "timeline-agent-runs.jsonl"), "diagnostic\n", {
+      mode: 0o600,
+    });
     await writeFile(path.join(layout.memoryDay, "example.md"), "memory", { mode: 0o600 });
     await writeFile(path.join(layout.state, "recording-consent.json"), "{}", { mode: 0o600 });
 
@@ -116,17 +119,26 @@ describe("history storage deletion and retention", () => {
     await expect(stat(path.join(layout.timeline, "example.md"))).rejects.toMatchObject({
       code: "ENOENT",
     });
+    await expect(
+      stat(path.join(layout.timeline, "timeline-agent-runs.jsonl")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(path.join(layout.memoryDay, "example.md"))).rejects.toMatchObject({
       code: "ENOENT",
     });
     await expect(
       stat(path.join(layout.trash, archive.id, "timeline", "example.md")),
     ).resolves.toBeDefined();
+    await expect(
+      stat(path.join(layout.trash, archive.id, "timeline", "timeline-agent-runs.jsonl")),
+    ).resolves.toBeDefined();
 
     await expect(restoreHistoryData(layout, archive.id)).resolves.toEqual(archive);
     await expect(readFile(path.join(layout.timeline, "example.md"), "utf8")).resolves.toBe(
       "timeline",
     );
+    await expect(
+      readFile(path.join(layout.timeline, "timeline-agent-runs.jsonl"), "utf8"),
+    ).resolves.toBe("diagnostic\n");
     await expect(readFile(path.join(layout.memoryDay, "example.md"), "utf8")).resolves.toBe(
       "memory",
     );

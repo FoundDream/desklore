@@ -51,7 +51,7 @@ function record({
   };
 }
 
-test("replays the old non-enough baseline against settled last-event-wins intents", () => {
+void test("replays the old non-enough baseline against settled last-event-wins intents", () => {
   const result = replayVisualPolicy([
     record({ offsetSeconds: 0 }),
     record({ offsetSeconds: 0.25 }),
@@ -72,7 +72,7 @@ test("replays the old non-enough baseline against settled last-event-wins intent
   });
 });
 
-test("lets a clear enough event cancel the pending intent for its window", () => {
+void test("lets a clear enough event cancel the pending intent for its window", () => {
   const result = replayVisualPolicy([
     record({ offsetSeconds: 0 }),
     record({ offsetSeconds: 0.25, decision: "enough" }),
@@ -83,7 +83,7 @@ test("lets a clear enough event cancel the pending intent for its window", () =>
   assert.equal(result.decisions[1].candidate.reason, "no_visual_intent");
 });
 
-test("distinguishes early and late Luna enough decisions", () => {
+void test("distinguishes early and late Luna enough decisions", () => {
   const result = replayVisualPolicy([
     record({
       offsetSeconds: 0,
@@ -108,7 +108,7 @@ test("distinguishes early and late Luna enough decisions", () => {
   assert.equal(result.decisions[1].candidate.reason, "candidate_discarded_ax_enough");
 });
 
-test("does not impose a shared hard budget across distinct windows", () => {
+void test("does not impose a shared hard budget across distinct windows", () => {
   const result = replayVisualPolicy(
     Array.from({ length: 8 }, (_, index) => record({ offsetSeconds: 0, window: index + 1 })),
   );
@@ -117,7 +117,7 @@ test("does not impose a shared hard budget across distinct windows", () => {
   assert.deepEqual(result.summary.candidate.gateReasons, { capture_allowed: 8 });
 });
 
-test("reports OCR checkpoint trigger coverage without exposing OCR text", () => {
+void test("reports OCR checkpoint trigger coverage without exposing OCR text", () => {
   const result = replayVisualPolicy(
     [
       record({
@@ -146,7 +146,7 @@ test("reports OCR checkpoint trigger coverage without exposing OCR text", () => 
   assert.equal(result.summary.worstMisses[0].nextCandidateDelayMilliseconds, 11_500);
 });
 
-test("an unresolved event protects the same application when a stable ID appears", () => {
+void test("an unresolved event protects the same application when a stable ID appears", () => {
   const result = replayVisualPolicy([
     record({ offsetSeconds: 0, window: null }),
     record({ offsetSeconds: 1, window: 42 }),
