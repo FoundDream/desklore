@@ -12,14 +12,13 @@ import type {
   InstalledApplication,
   ObservationPolicy,
 } from "../../shared/contracts.js";
+import { defaultModelEndpoints, type ModelProtocol } from "../../shared/model.js";
 import appIcon from "./assets/app-icon.png";
 import { useI18n } from "./i18n.js";
 
 type SettingsTab = "general" | "ai" | "visual" | "privacy" | "data";
 type SettingsDialogName = "clear-history" | "discard-changes" | "remove-key";
 type RunAction = (action: () => Promise<DesktopSnapshot>) => Promise<boolean>;
-
-const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
 
 interface SettingsViewProps {
   desktop: DesktopSnapshot;
@@ -179,8 +178,9 @@ export function SettingsView({
   const [tab, setTab] = useState<SettingsTab>("general");
   const [dialog, setDialog] = useState<SettingsDialogName>();
   const [feedback, setFeedback] = useState<string>();
+  const [protocol, setProtocol] = useState<ModelProtocol>(agent?.llm.protocol ?? "responses");
   const [model, setModel] = useState(agent?.llm.model ?? "gpt-5.6-luna");
-  const [endpoint, setEndpoint] = useState(agent?.llm.endpoint ?? defaultResponsesEndpoint);
+  const [endpoint, setEndpoint] = useState(agent?.llm.endpoint ?? defaultModelEndpoints.responses);
   const [apiKey, setAPIKey] = useState("");
   const [applicationExclusion, setApplicationExclusion] = useState("");
   const [installedApplications, setInstalledApplications] = useState<InstalledApplication[]>();
@@ -192,21 +192,24 @@ export function SettingsView({
   const [windowTitleMatch, setWindowTitleMatch] = useState<"contains" | "exact">("contains");
   const [windowTitleApplication, setWindowTitleApplication] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(
-    Boolean(agent?.llm.endpoint && agent.llm.endpoint !== defaultResponsesEndpoint),
+    Boolean(
+      agent?.llm.endpoint && agent.llm.endpoint !== defaultModelEndpoints[agent.llm.protocol],
+    ),
   );
   const pendingExit = useRef<() => void>(onBack);
 
   useEffect(() => {
     if (!agent) return;
+    setProtocol(agent.llm.protocol);
     setModel(agent.llm.model);
     setEndpoint(agent.llm.endpoint);
-  }, [agent?.llm.endpoint, agent?.llm.model]);
+  }, [agent?.llm.endpoint, agent?.llm.model, agent?.llm.protocol]);
 
   useEffect(() => {
-    if (agent?.llm.endpoint && agent.llm.endpoint !== defaultResponsesEndpoint) {
+    if (agent?.llm.endpoint && agent.llm.endpoint !== defaultModelEndpoints[agent.llm.protocol]) {
       setAdvancedOpen(true);
     }
-  }, [agent?.llm.endpoint]);
+  }, [agent?.llm.endpoint, agent?.llm.protocol]);
 
   const loadInstalledApplications = useCallback(async (): Promise<void> => {
     setInstalledApplicationsLoading(true);
@@ -245,7 +248,10 @@ export function SettingsView({
   } satisfies Record<SettingsTab, [string, string]>;
   const modelDirty =
     Boolean(agent) &&
-    (model !== agent?.llm.model || endpoint !== agent?.llm.endpoint || Boolean(apiKey.trim()));
+    (protocol !== agent?.llm.protocol ||
+      model !== agent?.llm.model ||
+      endpoint !== agent?.llm.endpoint ||
+      Boolean(apiKey.trim()));
   const requestExit = useCallback(
     (action: () => void = onBack): void => {
       if (!modelDirty) {
@@ -310,6 +316,7 @@ export function SettingsView({
       window.computerHistory.configureLLM({
         enabled: agent.llm.enabled,
         memorySynthesisEnabled: agent.llm.memorySynthesisEnabled,
+        protocol,
         model,
         endpoint,
         apiKey,
@@ -622,7 +629,28 @@ export function SettingsView({
                         onChange={(event) => setAPIKey(event.target.value)}
                       />
                     </label>
-                    <label className="wide">
+                    <label>
+                      <span>{t("settings.protocol")}</span>
+                      <select
+                        value={protocol}
+                        disabled={busy}
+                        onChange={(event) => {
+                          const next = event.target.value as ModelProtocol;
+                          setEndpoint((current) =>
+                            current === defaultModelEndpoints[protocol]
+                              ? defaultModelEndpoints[next]
+                              : current,
+                          );
+                          setProtocol(next);
+                        }}
+                      >
+                        <option value="responses">{t("settings.protocolResponses")}</option>
+                        <option value="chat_completions">
+                          {t("settings.protocolChatCompletions")}
+                        </option>
+                      </select>
+                    </label>
+                    <label>
                       <span>{t("settings.model")}</span>
                       <input
                         value={model}

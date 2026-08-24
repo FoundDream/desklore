@@ -1,3 +1,5 @@
+import type { ModelProtocol } from "../../shared/model.js";
+
 export type HistoryEventKind =
   | "window.changed"
   | "mouse.click"
@@ -202,6 +204,7 @@ export type { ObservationPolicy, WindowTitleExclusionRule } from "../../shared/c
 export interface TimelineLLMSettings {
   enabled: boolean;
   memorySynthesisEnabled: boolean;
+  protocol: ModelProtocol;
   model: string;
   endpoint: string;
 }

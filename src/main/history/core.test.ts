@@ -585,6 +585,7 @@ describe("TypeScript history core", () => {
     const settings = {
       enabled: true,
       memorySynthesisEnabled: false,
+      protocol: "responses" as const,
       model: "gpt-5.6-luna",
       endpoint: "https://api.openai.com/v1/responses",
     };
@@ -692,6 +693,7 @@ describe("TypeScript history core", () => {
       settings: {
         enabled: true,
         memorySynthesisEnabled: false,
+        protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
       },
@@ -785,6 +787,7 @@ describe("TypeScript history core", () => {
       settings: {
         enabled: true,
         memorySynthesisEnabled: false,
+        protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
       },

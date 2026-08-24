@@ -117,6 +117,7 @@ export class HistoryService extends EventEmitter {
   private llmSettings: TimelineLLMSettings = {
     enabled: false,
     memorySynthesisEnabled: false,
+    protocol: "responses",
     model: "gpt-5.6-luna",
     endpoint: "https://api.openai.com/v1/responses",
   };
@@ -400,6 +401,7 @@ export class HistoryService extends EventEmitter {
     const next = {
       enabled: input.enabled,
       memorySynthesisEnabled: input.memorySynthesisEnabled,
+      protocol: input.protocol,
       model: input.model.trim(),
       endpoint: input.endpoint.trim(),
     };

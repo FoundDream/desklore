@@ -111,6 +111,8 @@ DeskLore 0.1.0 使用全新且带版本号的本地格式，不导入预发布 C
 DeskLore 不需要 API Key 也能运行，确定性规则会离线生成时间线与长期记忆。只有用户主动开启
 模型摘要时，过滤后的证据才会发送到用户配置的 HTTPS endpoint。API Key 使用 Electron
 `safeStorage` 加密，不进入 renderer。
+模型设置支持 OpenAI Responses 与 Chat Completions 两种线协议，也可以连接兼容的自定义
+endpoint。
 
 视觉补充拆成三个独立设置：
 

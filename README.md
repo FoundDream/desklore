@@ -123,6 +123,8 @@ unversioned settings created by pre-release Computer History builds.
 DeskLore works without an API key. Deterministic rules create timeline and memory artifacts
 offline. If you enable model summaries, DeskLore sends filtered evidence to the HTTPS endpoint you
 configure. API keys are encrypted with Electron `safeStorage` and are not exposed to the renderer.
+Model settings support both OpenAI Responses and Chat Completions wire protocols, including
+compatible custom endpoints.
 
 Visual fallback has three independently configured parts:
 

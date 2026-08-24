@@ -303,14 +303,51 @@ describe("History settings", () => {
     await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
       enabled: false,
       memorySynthesisEnabled: true,
+      protocol: "responses",
       model: "gpt-5.6-luna",
       endpoint: "https://api.openai.com/v1/responses",
     });
     await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
       enabled: false,
       memorySynthesisEnabled: true,
+      protocol: "responses",
       model: "gpt-5.6-luna",
       endpoint: "https://api.openai.com/v1/responses",
+    });
+    expect(
+      JSON.parse(await readFile(path.join(layout.state, "llm-settings.json"), "utf8")),
+    ).toMatchObject({
+      schemaVersion: 2,
+      protocol: "responses",
+    });
+  });
+
+  it("migrates v1 LLM settings to the Responses protocol", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-v1-llm-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    await writeFile(
+      path.join(layout.state, "llm-settings.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        memorySynthesisEnabled: false,
+        model: "legacy-model",
+        endpoint: "https://example.com/v1/responses",
+      }),
+    );
+
+    const settingsStore = new HistorySettingsStore(layout);
+    await expect(settingsStore.loadLLMSettings()).resolves.toMatchObject({
+      protocol: "responses",
+      model: "legacy-model",
+    });
+    expect(
+      JSON.parse(await readFile(path.join(layout.state, "llm-settings.json"), "utf8")),
+    ).toMatchObject({
+      schemaVersion: 2,
+      protocol: "responses",
     });
   });
 
@@ -323,6 +360,7 @@ describe("History settings", () => {
     await settingsStore.saveLLMSettings({
       enabled: true,
       memorySynthesisEnabled: false,
+      protocol: "responses",
       model: "custom-model",
       endpoint: "https://example.com/v1/responses",
     });
@@ -352,8 +390,9 @@ describe("History settings", () => {
     await settingsStore.saveLLMSettings({
       enabled: false,
       memorySynthesisEnabled: true,
+      protocol: "chat_completions",
       model: "custom-model",
-      endpoint: "https://example.com/v1/responses",
+      endpoint: "https://example.com/v1/chat/completions",
     });
     vi.stubEnv("OPENAI_API_KEY", "configured-for-test");
 
@@ -368,7 +407,8 @@ describe("History settings", () => {
     const reloaded = await settingsStore.loadLLMSettings();
     expect(reloaded.enabled).toBe(true);
     expect(reloaded.memorySynthesisEnabled).toBe(true);
+    expect(reloaded.protocol).toBe("chat_completions");
     expect(reloaded.model).toBe("custom-model");
-    expect(reloaded.endpoint).toBe("https://example.com/v1/responses");
+    expect(reloaded.endpoint).toBe("https://example.com/v1/chat/completions");
   });
 });

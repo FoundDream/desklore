@@ -1,4 +1,5 @@
 import type { AppLocale } from "./i18n.js";
+import type { ModelProtocol } from "./model.js";
 
 export type AgentConnectionState = "starting" | "connected" | "stopped" | "missing" | "failed";
 
@@ -85,6 +86,7 @@ export interface CaptureHealth {
 export interface LLMSettings {
   enabled: boolean;
   memorySynthesisEnabled: boolean;
+  protocol: ModelProtocol;
   model: string;
   endpoint: string;
   apiKeyConfigured: boolean;
@@ -170,6 +172,7 @@ export interface DesktopSnapshot {
 export interface LLMConfigurationInput {
   enabled: boolean;
   memorySynthesisEnabled: boolean;
+  protocol: ModelProtocol;
   model: string;
   endpoint: string;
   apiKey: string;

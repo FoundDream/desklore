@@ -3,6 +3,7 @@ import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
 import { isAppLocale, translate } from "../../shared/i18n.js";
+import { isModelProtocol } from "../../shared/model.js";
 import { defaultObservationPolicy, normalizeObservationPolicy } from "./policy.js";
 import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "./types.js";
 import type { StorageLayout } from "./storage.js";
@@ -10,6 +11,7 @@ import type { StorageLayout } from "./storage.js";
 const defaultLLMSettings: TimelineLLMSettings = {
   enabled: false,
   memorySynthesisEnabled: false,
+  protocol: "responses",
   model: "gpt-5.6-luna",
   endpoint: "https://api.openai.com/v1/responses",
 };
@@ -127,9 +129,14 @@ export class HistorySettingsStore {
       | (Partial<TimelineLLMSettings> & { schemaVersion?: unknown })
       | undefined;
     if (!stored) return { ...defaultLLMSettings };
+    const protocol =
+      stored.schemaVersion === undefined || stored.schemaVersion === 1
+        ? "responses"
+        : stored.protocol;
     if (
       typeof stored.enabled !== "boolean" ||
       typeof stored.memorySynthesisEnabled !== "boolean" ||
+      !isModelProtocol(protocol) ||
       typeof stored.model !== "string" ||
       typeof stored.endpoint !== "string"
     ) {
@@ -138,13 +145,14 @@ export class HistorySettingsStore {
     const settings: TimelineLLMSettings = {
       enabled: stored.enabled,
       memorySynthesisEnabled: stored.memorySynthesisEnabled,
+      protocol,
       model: stored.model,
       endpoint: stored.endpoint,
     };
     if (!validateLLMSettings(settings)) throw new Error("Invalid model settings");
-    if (stored.schemaVersion === undefined) {
+    if (stored.schemaVersion === undefined || stored.schemaVersion === 1) {
       await this.saveLLMSettings(settings);
-    } else if (stored.schemaVersion !== 1) {
+    } else if (stored.schemaVersion !== 2) {
       throw new Error("Unsupported model settings schema");
     }
     return settings;
@@ -153,7 +161,7 @@ export class HistorySettingsStore {
   async saveLLMSettings(settings: TimelineLLMSettings): Promise<void> {
     await atomicWrite(
       this.llmPath,
-      `${JSON.stringify({ schemaVersion: 1, ...settings }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 2, ...settings }, null, 2)}\n`,
     );
   }
 
@@ -237,6 +245,7 @@ export class HistorySettingsStore {
 }
 
 export function validateLLMSettings(settings: TimelineLLMSettings): boolean {
+  if (!isModelProtocol(settings.protocol)) return false;
   if (!settings.model.trim()) return false;
   try {
     const endpoint = new URL(settings.endpoint);

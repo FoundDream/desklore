@@ -1,4 +1,4 @@
-import type { LLMRuntime } from "./timeline.js";
+import { generateStructuredText, type ModelMessage, type ModelRuntime } from "./model-client.js";
 import type { AXSufficiencyEvidence, HistoryEvent, VisualEvidence } from "./types.js";
 
 const visualTriggerKinds = new Set<HistoryEvent["kind"]>([
@@ -32,14 +32,6 @@ const semanticTargetRoles = new Set([
   "AXLink",
   "AXButton",
 ]);
-
-interface OpenAIResponsePayload {
-  status?: string;
-  error?: { code?: string; message?: string };
-  output?: Array<{
-    content?: Array<{ type?: string; text?: string; refusal?: string }>;
-  }>;
-}
 
 export interface VisualCapturePayload {
   status: "captured" | "unavailable" | "blocked" | "failed";
@@ -154,17 +146,6 @@ export function evaluateAXByRules(event: HistoryEvent): AXSufficiencyEvidence {
   return decision("uncertain", 0.5, reasons, ["visible_content_coverage", "interaction_result"]);
 }
 
-function outputText(payload: OpenAIResponsePayload): string {
-  if (payload.status === "failed" || payload.error) throw new Error("model_response_failed");
-  const content = payload.output?.flatMap((item) => item.content ?? []) ?? [];
-  if (content.some((item) => item.type === "refusal" || item.refusal)) {
-    throw new Error("model_refusal");
-  }
-  const text = content.find((item) => item.type === "output_text")?.text;
-  if (!text) throw new Error("model_output_missing");
-  return text;
-}
-
 function objectOutput(text: string): Record<string, unknown> {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
@@ -176,25 +157,22 @@ function objectOutput(text: string): Record<string, unknown> {
 }
 
 async function structuredResponse(
-  runtime: LLMRuntime,
-  body: Record<string, unknown>,
+  runtime: ModelRuntime,
+  request: {
+    maxOutputTokens: number;
+    messages: ModelMessage[];
+    schemaName: string;
+    schema: Record<string, unknown>;
+  },
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(runtime.settings.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${runtime.apiKey}`,
-    },
-    body: JSON.stringify({ model: runtime.settings.model, store: false, ...body }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`model_http_${response.status}`);
-  return objectOutput(outputText((await response.json()) as OpenAIResponsePayload));
+  return objectOutput(
+    await generateStructuredText(runtime, { ...request, timeoutMilliseconds: 30_000 }),
+  );
 }
 
 export async function judgeAXWithLuna(
   event: HistoryEvent,
-  runtime: LLMRuntime,
+  runtime: ModelRuntime,
 ): Promise<AXSufficiencyEvidence> {
   const ruleResult = evaluateAXByRules(event);
   if (ruleResult.decision !== "uncertain") return ruleResult;
@@ -211,8 +189,10 @@ export async function judgeAXWithLuna(
   };
   try {
     const draft = await structuredResponse(runtime, {
-      max_output_tokens: 500,
-      input: [
+      maxOutputTokens: 500,
+      schemaName: "ax_evidence_sufficiency",
+      schema,
+      messages: [
         {
           role: "system",
           content:
@@ -233,14 +213,6 @@ export async function judgeAXWithLuna(
           }),
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "ax_evidence_sufficiency",
-          strict: true,
-          schema,
-        },
-      },
     });
     const modelDecision = draft.decision;
     if (
@@ -278,7 +250,7 @@ export async function judgeAXWithLuna(
 export async function understandVisualWithLuna(
   event: HistoryEvent,
   capture: VisualCapturePayload,
-  runtime: LLMRuntime,
+  runtime: ModelRuntime,
 ): Promise<{ understanding: string; confidence: number }> {
   if (!capture.imageBase64) throw new Error("visual_image_missing");
   const schema = {
@@ -291,8 +263,10 @@ export async function understandVisualWithLuna(
     required: ["understanding", "confidence"],
   };
   const draft = await structuredResponse(runtime, {
-    max_output_tokens: 700,
-    input: [
+    maxOutputTokens: 700,
+    schemaName: "visual_event_understanding",
+    schema,
+    messages: [
       {
         role: "system",
         content:
@@ -302,7 +276,7 @@ export async function understandVisualWithLuna(
         role: "user",
         content: [
           {
-            type: "input_text",
+            type: "text",
             text: JSON.stringify({
               application: event.application,
               window: event.window?.title,
@@ -311,21 +285,13 @@ export async function understandVisualWithLuna(
             }),
           },
           {
-            type: "input_image",
-            image_url: `data:image/png;base64,${capture.imageBase64}`,
+            type: "image",
+            url: `data:image/png;base64,${capture.imageBase64}`,
             detail: "low",
           },
         ],
       },
     ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "visual_event_understanding",
-        strict: true,
-        schema,
-      },
-    },
   });
   if (typeof draft.understanding !== "string" || typeof draft.confidence !== "number") {
     throw new Error("visual_understanding_invalid");

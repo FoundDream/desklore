@@ -119,7 +119,13 @@ describe("History memory", () => {
     );
     vi.stubGlobal("fetch", fetch);
     const repository = new MemoryRepository(makeStorageLayout(root), async () => ({
-      settings: { model: "gpt-5.6-luna", endpoint: "https://api.openai.com/v1/responses" },
+      settings: {
+        enabled: true,
+        memorySynthesisEnabled: true,
+        protocol: "responses",
+        model: "gpt-5.6-luna",
+        endpoint: "https://api.openai.com/v1/responses",
+      },
       apiKey: "test-key",
     }));
 

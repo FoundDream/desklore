@@ -28,6 +28,7 @@ const runtime = {
   settings: {
     enabled: false,
     memorySynthesisEnabled: false,
+    protocol: "responses" as const,
     model: "gpt-5.6-luna",
     endpoint: "https://api.openai.com/v1/responses",
   },
