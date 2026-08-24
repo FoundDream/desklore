@@ -1,7 +1,11 @@
-import { parentPort } from "electron";
 import { InProcessTimelineAgentSessionFactory } from "./history/timeline-agent-runtime.js";
 import type { TimelineAgentRuntimeSession } from "./history/timeline-agent-runtime.js";
 import { TimelineAgentError } from "./history/timeline-agent.js";
+
+const parentPort = process.parentPort;
+if (!parentPort) {
+  throw new Error("Timeline Agent worker must run in an Electron utility process");
+}
 
 interface WorkerRequest {
   id: string;
@@ -62,3 +66,5 @@ parentPort.on("message", (event) => {
     }
   })();
 });
+
+parentPort.postMessage({ type: "ready", protocolVersion: 1 });

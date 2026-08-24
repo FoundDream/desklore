@@ -16,6 +16,7 @@ import { makeStorageLayout, SegmentStore, segmentIdentifier } from "./storage.js
 import {
   compactTimelineAgentContext,
   runTimelineAgent,
+  TimelineAgentError,
   timelineAgentBaseURL,
   timelineAgentInitialPrompt,
   timelineAgentSystemPrompt,
@@ -1085,6 +1086,51 @@ describe("TypeScript history core", () => {
       },
     ]);
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("tracks worker startup failures separately from provider requests", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-worker-retry-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const input = event({}, 43);
+    await store.append(input);
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    const factory: TimelineAgentSessionFactory = {
+      create: vi.fn(async () => {
+        throw new TimelineAgentError("agent_worker_crashed", true);
+      }),
+    };
+    const repository = new TimelineRepository(
+      layout,
+      store,
+      async () => ({
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model: "test-model",
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      }),
+      () => "en",
+      factory,
+    );
+    const attemptedAt = new Date("2026-08-20T13:50:01.000Z");
+
+    await repository.generateIfNeeded(closed!);
+    await repository.advanceNextAgentJob([closed!], attemptedAt);
+
+    const [job] = await new TimelineAgentJobRepository(layout).load();
+    expect(job).toMatchObject({
+      status: "waiting_runtime",
+      failureClass: "agent_worker_crashed",
+      totalProviderRequests: 0,
+      totalRuntimeFailures: 1,
+    });
+    expect(Date.parse(job!.nextEligibleAt!)).toBeGreaterThan(attemptedAt.getTime());
+    expect(Date.parse(job!.nextEligibleAt!)).toBeLessThan(attemptedAt.getTime() + 20_000);
   });
 
   it("drops an active session when the runtime fingerprint changes", async () => {

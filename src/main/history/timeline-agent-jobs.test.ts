@@ -22,6 +22,7 @@ describe("timeline agent jobs", () => {
     const repository = new TimelineAgentJobRepository(layout);
 
     const created = await repository.create("segment-1", "document-1", "fingerprint-1");
+    expect(created.totalRuntimeFailures).toBe(0);
     await repository.update(created.id, {
       status: "waiting_provider",
       failureClass: "network_timeout",

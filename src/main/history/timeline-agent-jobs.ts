@@ -9,6 +9,7 @@ export type TimelineAgentJobStatus =
   | "baseline_ready"
   | "queued"
   | "running"
+  | "waiting_runtime"
   | "waiting_provider"
   | "waiting_configuration"
   | "stalled"
@@ -31,6 +32,7 @@ export interface TimelineAgentJob {
   totalToolCalls: number;
   totalSubmissions: number;
   totalProviderRequests: number;
+  totalRuntimeFailures: number;
   noProgressStreak: number;
   nextEligibleAt?: string;
   createdAt: string;
@@ -41,6 +43,7 @@ const statuses = new Set<TimelineAgentJobStatus>([
   "baseline_ready",
   "queued",
   "running",
+  "waiting_runtime",
   "waiting_provider",
   "waiting_configuration",
   "stalled",
@@ -93,6 +96,7 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
     totalToolCalls: count(source.totalToolCalls),
     totalSubmissions: count(source.totalSubmissions),
     totalProviderRequests: count(source.totalProviderRequests),
+    totalRuntimeFailures: count(source.totalRuntimeFailures),
     noProgressStreak: count(source.noProgressStreak),
     nextEligibleAt,
     createdAt: source.createdAt,
@@ -151,6 +155,7 @@ export class TimelineAgentJobRepository {
       totalToolCalls: 0,
       totalSubmissions: 0,
       totalProviderRequests: 0,
+      totalRuntimeFailures: 0,
       noProgressStreak: 0,
       createdAt,
       updatedAt: createdAt,

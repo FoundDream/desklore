@@ -324,7 +324,7 @@ async function atomicWrite(filePath: string, contents: string): Promise<void> {
   await chmod(filePath, 0o600);
 }
 
-const timelineAgentRuntimeVersion = 2;
+const timelineAgentRuntimeVersion = 3;
 
 function runtimeFingerprint(
   segment: ClosedSegment,
@@ -356,6 +356,24 @@ function retryDate(job: TimelineAgentJob, date: Date): string {
   const base = Math.min(6 * 60 * 60 * 1_000, 30_000 * 2 ** exponent);
   const jitter = Number.parseInt(job.id.slice(0, 4), 16) % Math.max(1, Math.floor(base / 5));
   return new Date(date.getTime() + base + jitter).toISOString();
+}
+
+function runtimeRetryDate(job: TimelineAgentJob, date: Date): string {
+  const exponent = Math.min(5, Math.max(0, job.totalRuntimeFailures - 1));
+  const base = Math.min(5 * 60 * 1_000, 15_000 * 2 ** exponent);
+  const jitter = Number.parseInt(job.id.slice(0, 4), 16) % Math.max(1, Math.floor(base / 5));
+  return new Date(date.getTime() + base + jitter).toISOString();
+}
+
+function isWorkerRuntimeFailure(reason: string): boolean {
+  return [
+    "agent_worker_crashed",
+    "agent_worker_failed",
+    "agent_worker_session_missing",
+    "agent_worker_startup_timeout",
+    "agent_worker_stopped",
+    "agent_worker_timeout",
+  ].includes(reason);
 }
 
 function eligible(job: TimelineAgentJob, date: Date): boolean {
@@ -663,6 +681,7 @@ export class TimelineRepository {
       return { processed: true, upgraded: false, pending: true, nextWakeAt };
     } catch (error) {
       const normalized = normalizedTimelineError(error);
+      const workerRuntimeFailure = isWorkerRuntimeFailure(normalized.reason);
       const turnDelta = lastStepMetrics?.turns ?? 0;
       const toolDelta = Object.values(lastStepMetrics?.toolCalls ?? {}).reduce(
         (sum, value) => sum + value,
@@ -672,7 +691,9 @@ export class TimelineRepository {
       const updated = {
         ...job,
         totalTurns: job.totalTurns + turnDelta,
-        totalProviderRequests: job.totalProviderRequests + Math.max(1, turnDelta),
+        totalProviderRequests:
+          job.totalProviderRequests + (workerRuntimeFailure ? turnDelta : Math.max(1, turnDelta)),
+        totalRuntimeFailures: job.totalRuntimeFailures + (workerRuntimeFailure ? 1 : 0),
         totalToolCalls: job.totalToolCalls + toolDelta,
         totalSubmissions: job.totalSubmissions + submissionDelta,
       };
@@ -681,12 +702,21 @@ export class TimelineRepository {
         {
           totalTurns: updated.totalTurns,
           totalProviderRequests: updated.totalProviderRequests,
+          totalRuntimeFailures: updated.totalRuntimeFailures,
           totalToolCalls: updated.totalToolCalls,
           totalSubmissions: updated.totalSubmissions,
-          status: normalized.retryable ? "waiting_provider" : "stalled",
+          status: normalized.retryable
+            ? workerRuntimeFailure
+              ? "waiting_runtime"
+              : "waiting_provider"
+            : "stalled",
           failureClass: normalized.reason,
           failureSignature: normalized.reason,
-          nextEligibleAt: normalized.retryable ? retryDate(updated, date) : undefined,
+          nextEligibleAt: normalized.retryable
+            ? workerRuntimeFailure
+              ? runtimeRetryDate(updated, date)
+              : retryDate(updated, date)
+            : undefined,
         },
         date,
       );
@@ -724,6 +754,7 @@ export class TimelineRepository {
           "baseline_ready",
           "queued",
           "running",
+          "waiting_runtime",
           "waiting_provider",
           "waiting_configuration",
           "paused",

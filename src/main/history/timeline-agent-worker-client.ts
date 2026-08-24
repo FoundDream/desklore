@@ -16,6 +16,11 @@ interface WorkerReply {
   error?: { reason?: string; retryable?: boolean; message?: string };
 }
 
+interface WorkerReady {
+  type: "ready";
+  protocolVersion: number;
+}
+
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -23,6 +28,23 @@ interface PendingRequest {
 }
 
 const workerRequestTimeoutMilliseconds = 60_000;
+const workerStartupTimeoutMilliseconds = 10_000;
+const workerStartupErrorLimit = 4_096;
+
+function isWorkerReady(message: unknown): message is WorkerReady {
+  if (!message || typeof message !== "object") return false;
+  const ready = message as Partial<WorkerReady>;
+  return ready.type === "ready" && ready.protocolVersion === 1;
+}
+
+function clippedStartupError(value: string): string | undefined {
+  const firstLine = value
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return undefined;
+  return firstLine.replaceAll(process.cwd(), "<app>").slice(0, 240);
+}
 
 function workerEnvironment(): NodeJS.ProcessEnv {
   const allowed = [
@@ -103,47 +125,71 @@ export class TimelineAgentUtilityProcessClient implements TimelineAgentSessionFa
   }
 
   private ensureChild(): Promise<void> {
-    if (this.child?.pid) return Promise.resolve();
     if (this.spawnPromise) return this.spawnPromise;
+    if (this.child?.pid) return Promise.resolve();
     const child = utilityProcess.fork(
       fileURLToPath(new URL("./timeline-agent-worker.js", import.meta.url)),
       [],
       {
         env: workerEnvironment(),
-        stdio: "ignore",
+        stdio: "pipe",
         serviceName: "DeskLore Timeline Agent",
       },
     );
     this.child = child;
-    child.on("message", (message) => this.handleReply(message));
-    child.on("exit", () => {
+    child.stdout?.resume();
+    let startupError = "";
+    let ready = false;
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      if (ready || startupError.length >= workerStartupErrorLimit) return;
+      startupError += String(chunk).slice(0, workerStartupErrorLimit - startupError.length);
+    });
+    let resolveStartup!: () => void;
+    let rejectStartup!: (error: Error) => void;
+    const startup = new Promise<void>((resolve, reject) => {
+      resolveStartup = resolve;
+      rejectStartup = reject;
+    });
+    const startupTimer = setTimeout(() => {
+      if (ready || this.child !== child) return;
+      const error = new TimelineAgentError("agent_worker_startup_timeout", true);
+      rejectStartup(error);
+      this.stopChild(error);
+    }, workerStartupTimeoutMilliseconds);
+    child.on("message", (message) => {
+      if (isWorkerReady(message)) {
+        ready = true;
+        clearTimeout(startupTimer);
+        resolveStartup();
+        return;
+      }
+      this.handleReply(message);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(startupTimer);
       if (this.child !== child) return;
       this.child = undefined;
       this.spawnPromise = undefined;
-      this.rejectPending(new TimelineAgentError("agent_worker_crashed", true));
+      const error = new TimelineAgentError("agent_worker_crashed", true, {
+        exit_code: code,
+        startup_error: ready ? undefined : clippedStartupError(startupError),
+      });
+      if (!ready) rejectStartup(error);
+      this.rejectPending(error);
     });
     child.on("error", () => {
+      clearTimeout(startupTimer);
+      const error = new TimelineAgentError("agent_worker_crashed", true, {
+        startup_error: ready ? undefined : clippedStartupError(startupError),
+      });
       if (this.child === child) {
         this.child = undefined;
         this.spawnPromise = undefined;
       }
-      this.rejectPending(new TimelineAgentError("agent_worker_crashed", true));
+      if (!ready) rejectStartup(error);
+      this.rejectPending(error);
     });
-    this.spawnPromise = new Promise((resolve, reject) => {
-      let settled = false;
-      const spawned = (): void => {
-        settled = true;
-        resolve();
-      };
-      const failed = (): void => {
-        if (settled) return;
-        settled = true;
-        reject(new TimelineAgentError("agent_worker_crashed", true));
-      };
-      child.once("spawn", spawned);
-      child.once("error", failed);
-      child.once("exit", failed);
-    });
+    this.spawnPromise = startup;
     return this.spawnPromise;
   }
 

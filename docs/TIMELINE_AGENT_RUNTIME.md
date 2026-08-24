@@ -53,6 +53,7 @@ The primary states are:
 baseline_ready -> queued -> running -> succeeded
                      |         |
                      |         +-> stalled -> backoff -> queued
+                     +------------> waiting_runtime  -> backoff -> queued
                      +------------> waiting_provider -> backoff -> queued
                      +------------> waiting_configuration
                      +------------> paused
@@ -63,6 +64,10 @@ configuration availability, or generator version changes the runtime fingerprint
 otherwise configuration-blocked or stalled job. App shutdown aborts active work and records
 runnable jobs as paused. On restart, a job is reconstructed from its retained source segment; the
 ephemeral model transcript is intentionally not persisted.
+
+Worker startup and IPC failures are tracked separately from provider requests. They use a shorter,
+five-minute-capped retry schedule so a local runtime defect cannot masquerade as a provider outage
+or inflate provider retry counters.
 
 ## Submission and evidence contract
 
