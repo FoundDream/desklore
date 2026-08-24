@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyKeyboardEvent, EventBurstCoalescer, EventCoalescer } from "./coalescer.js";
-import { sampleTimelineEvents } from "./lifecycle.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
 import {
   applyObservationPolicy,
@@ -13,11 +12,8 @@ import {
   sanitizeEvent,
 } from "./policy.js";
 import { makeStorageLayout, SegmentStore, segmentIdentifier } from "./storage.js";
-import {
-  prepareTimelineEventsForModel,
-  rawActivityRecord,
-  TimelineRepository,
-} from "./timeline.js";
+import { runTimelineAgent, timelineAgentBaseURL } from "./timeline-agent.js";
+import { rawActivityRecord, TimelineRepository } from "./timeline.js";
 import {
   normalizeHistoryEvent,
   normalizeMetadata,
@@ -45,17 +41,181 @@ function event(overrides: Partial<HistoryEvent> = {}, index = 0): HistoryEvent {
   };
 }
 
-function llmResponse(draft: Record<string, unknown>): Response {
+let piResponseIndex = 0;
+
+function piToolResponse(name: string, argumentsValue: Record<string, unknown>): Response {
+  piResponseIndex += 1;
+  const id = piResponseIndex;
+  const item = {
+    type: "function_call",
+    id: `fc_${id}`,
+    call_id: `call_${id}`,
+    name,
+    arguments: JSON.stringify(argumentsValue),
+    status: "completed",
+  };
+  const response = {
+    id: `resp_${id}`,
+    object: "response",
+    status: "completed",
+    output: [item],
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+  };
+  const events = [
+    { type: "response.created", response: { ...response, status: "in_progress", output: [] } },
+    { type: "response.output_item.added", output_index: 0, item: { ...item, arguments: "" } },
+    {
+      type: "response.function_call_arguments.done",
+      output_index: 0,
+      item_id: item.id,
+      arguments: item.arguments,
+    },
+    { type: "response.output_item.done", output_index: 0, item },
+    { type: "response.completed", response },
+  ];
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function chatToolResponse(name: string, argumentsValue: Record<string, unknown>): Response {
+  piResponseIndex += 1;
+  const id = piResponseIndex;
+  const chunks = [
+    {
+      id: `chatcmpl_${id}`,
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "test-model",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: `call_${id}`,
+                type: "function",
+                function: { name, arguments: JSON.stringify(argumentsValue) },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      id: `chatcmpl_${id}`,
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "test-model",
+      choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    },
+  ];
   return new Response(
-    JSON.stringify({
-      status: "completed",
-      output: [{ content: [{ type: "output_text", text: JSON.stringify(draft) }] }],
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
+    `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
+    { status: 200, headers: { "Content-Type": "text/event-stream" } },
   );
 }
 
+function readEventsCall(eventIDs: string[], includeAccessibility = true): Response {
+  return piToolResponse("read_events", {
+    event_ids: eventIDs,
+    include_accessibility: includeAccessibility,
+  });
+}
+
+function submitTimelineCall(
+  eventIDs: string[],
+  overrides: Partial<Record<string, unknown>> = {},
+): Response {
+  return piToolResponse("submit_timeline", {
+    title: "继续迁移 DeskLore",
+    description: "完成了 TypeScript 迁移链路的实现工作。",
+    continuation_hint: "",
+    claims: [
+      {
+        text: "完成了 TypeScript 迁移链路的实现工作。",
+        evidence_event_ids: eventIDs,
+      },
+    ],
+    evidence_event_ids: eventIDs,
+    ...overrides,
+  });
+}
+
 describe("TypeScript history core", () => {
+  it("normalizes full model endpoints for the Pi provider adapter", () => {
+    expect(timelineAgentBaseURL("https://api.openai.com/v1/responses", "responses")).toBe(
+      "https://api.openai.com/v1",
+    );
+    expect(
+      timelineAgentBaseURL(
+        "https://gateway.example.com/openai/v1/chat/completions",
+        "chat_completions",
+      ),
+    ).toBe("https://gateway.example.com/openai/v1");
+    expect(timelineAgentBaseURL("https://gateway.example.com/openai/v1", "responses")).toBe(
+      "https://gateway.example.com/openai/v1",
+    );
+  });
+
+  it("runs the same native tool loop through a chat-completions endpoint", async () => {
+    const input = event({}, 7);
+    const requestedURLs: string[] = [];
+    const responses = [
+      chatToolResponse("read_events", {
+        event_ids: [input.id],
+        include_accessibility: true,
+      }),
+      chatToolResponse("submit_timeline", {
+        title: "Inspect chat endpoint",
+        description: "The chat-completions provider completed the native tool loop.",
+        continuation_hint: "",
+        claims: [{ text: "The event was inspected.", evidence_event_ids: [input.id] }],
+        evidence_event_ids: [input.id],
+      }),
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: string | URL | Request) => {
+        requestedURLs.push(
+          typeof request === "string"
+            ? request
+            : request instanceof URL
+              ? request.toString()
+              : request.url,
+        );
+        return responses.shift()!;
+      }),
+    );
+
+    const result = await runTimelineAgent(
+      [input],
+      [],
+      {
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "chat_completions",
+          model: "test-model",
+          endpoint: "https://gateway.example.com/openai/v1/chat/completions",
+        },
+        apiKey: "test-key",
+      },
+      "en",
+    );
+
+    expect(result.evidenceEventIDs).toEqual([input.id]);
+    expect(requestedURLs).toEqual([
+      "https://gateway.example.com/openai/v1/chat/completions",
+      "https://gateway.example.com/openai/v1/chat/completions",
+    ]);
+  });
+
   it("rejects pre-DeskLore snake_case event and metadata shapes", () => {
     expect(() =>
       normalizeHistoryEvent({
@@ -607,40 +767,16 @@ describe("TypeScript history core", () => {
     apiKeyConfigured = true;
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            output: [
-              {
-                content: [
-                  {
-                    type: "output_text",
-                    text: JSON.stringify({
-                      title: "继续迁移 DeskLore",
-                      description: "完成了 TypeScript 迁移链路的实现工作。",
-                      continuation_hint: "",
-                      claims: [
-                        {
-                          text: "完成了 TypeScript 迁移链路的实现工作。",
-                          evidence_event_ids: [input.id],
-                        },
-                      ],
-                      evidence_event_ids: [input.id],
-                    }),
-                  },
-                ],
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
+      vi
+        .fn()
+        .mockResolvedValueOnce(readEventsCall([input.id]))
+        .mockResolvedValueOnce(submitTimelineCall([input.id])),
     );
 
     await expect(repository.retryFallbackDocuments([closed!], new Date(), 0)).resolves.toBe(1);
     await expect(repository.loadDocuments()).resolves.toMatchObject([
       {
-        generator: { type: "llm" },
+        generator: { type: "agent" },
       },
     ]);
   });
@@ -660,34 +796,21 @@ describe("TypeScript history core", () => {
     const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            output: [
+      vi
+        .fn()
+        .mockResolvedValueOnce(readEventsCall([input.id]))
+        .mockResolvedValueOnce(
+          submitTimelineCall([input.id], {
+            title: "查看 DeskLore 迁移状态",
+            description: "查看了当前迁移状态，活动仍处于规划阶段。",
+            claims: [
               {
-                content: [
-                  {
-                    type: "output_text",
-                    text: JSON.stringify({
-                      title: "查看 DeskLore 迁移状态",
-                      description: "查看了当前迁移状态，活动仍处于规划阶段。",
-                      continuation_hint: "",
-                      claims: [
-                        {
-                          text: "活动仍处于规划阶段。",
-                          evidence_event_ids: [input.id],
-                        },
-                      ],
-                      evidence_event_ids: [input.id],
-                    }),
-                  },
-                ],
+                text: "活动仍处于规划阶段。",
+                evidence_event_ids: [input.id],
               },
             ],
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      ),
     );
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
@@ -702,7 +825,7 @@ describe("TypeScript history core", () => {
 
     const document = await repository.generateIfNeeded(closed!);
 
-    expect(document?.generator.type).toBe("llm");
+    expect(document?.generator.type).toBe("agent");
     expect(document?.continuationHint).toBeUndefined();
     expect(document).not.toHaveProperty("task");
     expect(document).not.toHaveProperty("progression");
@@ -710,40 +833,18 @@ describe("TypeScript history core", () => {
     expect(document).not.toHaveProperty("openLoops");
   });
 
-  it("bounds model input by total bytes while preserving temporal endpoints", () => {
+  it("lets the timeline agent search the complete segment before reading evidence", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
     const events = Array.from({ length: 400 }, (_, index) =>
       event(
         {
           timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 0, index)).toISOString(),
           accessibility: {
             mode: "diffFromPrevious",
-            text: `${index} ${"rich accessibility context ".repeat(500)}`,
-          },
-        },
-        index,
-      ),
-    );
-
-    const prepared = prepareTimelineEventsForModel(events);
-
-    expect(prepared.length).toBeLessThanOrEqual(64);
-    expect(Buffer.byteLength(JSON.stringify(prepared), "utf8")).toBeLessThanOrEqual(120 * 1_024);
-    expect(prepared.some((item) => item.id === events[0]?.id)).toBe(true);
-    expect(prepared.some((item) => item.id === events.at(-1)?.id)).toBe(true);
-  });
-
-  it("retries an incomplete response with a smaller model input", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
-    temporaryDirectories.push(root);
-    const layout = makeStorageLayout(root);
-    const store = new SegmentStore(layout);
-    const events = Array.from({ length: 80 }, (_, index) =>
-      event(
-        {
-          timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, index)).toISOString(),
-          accessibility: {
-            mode: "diffFromPrevious",
-            text: "AXTreeDiff v2\n" + "context ".repeat(1_000),
+            text: index === 317 ? "Build complete. Tests passed." : "ordinary editor context",
           },
         },
         index,
@@ -751,35 +852,32 @@ describe("TypeScript history core", () => {
     );
     for (const input of events) await store.append(input);
     const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
-    const requestSizes: number[] = [];
-    let requestCount = 0;
+    const requestBodies: string[] = [];
+    const target = events[317]!;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-        requestCount += 1;
         const requestBody = typeof init?.body === "string" ? init.body : "";
-        requestSizes.push(Buffer.byteLength(requestBody, "utf8"));
-        if (requestCount === 1) {
-          return new Response(
-            JSON.stringify({
-              status: "incomplete",
-              incomplete_details: { reason: "max_output_tokens" },
-              output: [],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
+        requestBodies.push(requestBody);
+        if (requestBodies.length === 1) {
+          return piToolResponse("search_events", {
+            query: "Build complete",
+            bundle_identifiers: [],
+            event_kinds: [],
+            offset: 0,
+            limit: 10,
+            include_accessibility: true,
+          });
         }
-        return llmResponse({
-          title: "恢复 DeskLore 的结构化活动摘要",
-          description: "模型输出中断后缩小输入范围，并成功生成了结构化的活动时间线摘要。",
-          continuation_hint: "",
+        return submitTimelineCall([target.id], {
+          title: "验证 DeskLore 构建",
+          description: "DeskLore 构建和测试已经通过。",
           claims: [
             {
-              text: "缩小输入后成功生成摘要。",
-              evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
+              text: "构建和测试已经通过。",
+              evidence_event_ids: [target.id],
             },
           ],
-          evidence_event_ids: [events[0]!.id, events.at(-1)!.id],
         });
       }),
     );
@@ -796,27 +894,58 @@ describe("TypeScript history core", () => {
 
     const document = await repository.generateIfNeeded(closed!);
 
-    expect(document?.generator.type).toBe("llm");
-    expect(requestCount).toBe(2);
-    expect(requestSizes[1]).toBeLessThan(requestSizes[0]!);
+    expect(document?.generator.type).toBe("agent");
+    expect(document?.evidenceEventIDs).toEqual([target.id]);
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]).toContain('\\"eventCount\\":400');
+    expect(requestBodies[0]).not.toContain("Build complete. Tests passed.");
+    expect(requestBodies[1]).toContain("Build complete. Tests passed.");
+    const firstRequest = JSON.parse(requestBodies[0]!) as Record<string, unknown>;
+    expect(firstRequest.store).toBe(false);
+    expect(firstRequest).not.toHaveProperty("response_format");
+    expect((firstRequest.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual([
+      "list_activity_spans",
+      "read_event_range",
+      "search_events",
+      "read_events",
+      "submit_timeline",
+    ]);
   });
 
-  it("keeps high-information accessibility evidence in a crowded sample", () => {
-    const events = Array.from({ length: 1_000 }, (_, index) =>
-      event(
-        {
-          timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 0, index)).toISOString(),
-          accessibility: {
-            mode: "diffFromPrevious",
-            text: index === 731 ? "Build complete. Tests passed." : "ordinary editor content",
-          },
-        },
-        index,
-      ),
+  it("rejects final claims that cite events the agent did not inspect", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-ts-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const inspected = event({}, 1);
+    const uninspected = event({}, 2);
+    await store.append(inspected);
+    await store.append(uninspected);
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(readEventsCall([inspected.id]))
+        .mockResolvedValueOnce(submitTimelineCall([uninspected.id])),
     );
-    const sample = sampleTimelineEvents(events, 32);
-    expect(sample).toHaveLength(32);
-    expect(sample.some((item) => item.id === events[731]?.id)).toBe(true);
+    const repository = new TimelineRepository(layout, store, async () => ({
+      settings: {
+        enabled: true,
+        memorySynthesisEnabled: false,
+        protocol: "responses",
+        model: "gpt-5.6-luna",
+        endpoint: "https://api.openai.com/v1/responses",
+      },
+      apiKey: "test-key",
+    }));
+
+    const document = await repository.generateIfNeeded(closed!);
+
+    expect(document?.generator).toMatchObject({
+      type: "raw-fallback",
+      failureReason: "agent_invalid_evidence_ids",
+    });
   });
 
   it("keeps the full window title and omits inferred continuation from raw activity", () => {

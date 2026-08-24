@@ -1,5 +1,7 @@
 allowBuilds:
+  "@google/genai": false
   electron-winstaller: false
+  protobufjs: false
 peerDependencyRules:
   allowedVersions:
     vite: 0.2.9

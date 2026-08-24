@@ -37,6 +37,8 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -44,6 +46,7 @@
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
     "electron-vite-plus": "0.1.0-alpha.2",
+    "jiti": "2.7.0",
     "typescript": "^5.9.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9",
     "vite-plus": "0.2.9",

@@ -14,6 +14,43 @@ import {
 } from "./eval-visual-value.mjs";
 
 const startedAt = "2026-08-22T12:00:00.000Z";
+let piResponseIndex = 0;
+
+function piToolResponse(name, argumentsValue) {
+  piResponseIndex += 1;
+  const id = piResponseIndex;
+  const item = {
+    type: "function_call",
+    id: `fc_${id}`,
+    call_id: `call_${id}`,
+    name,
+    arguments: JSON.stringify(argumentsValue),
+    status: "completed",
+  };
+  const response = {
+    id: `resp_${id}`,
+    object: "response",
+    status: "completed",
+    output: [item],
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+  };
+  const events = [
+    { type: "response.created", response: { ...response, status: "in_progress", output: [] } },
+    { type: "response.output_item.added", output_index: 0, item: { ...item, arguments: "" } },
+    {
+      type: "response.function_call_arguments.done",
+      output_index: 0,
+      item_id: item.id,
+      arguments: item.arguments,
+    },
+    { type: "response.output_item.done", output_index: 0, item },
+    { type: "response.completed", response },
+  ];
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
 
 function event({
   id = "event-a",
@@ -99,7 +136,7 @@ async function writeSegmentFixture(root, ocrText = "PRIVATE_VISUAL_SOURCE_TEXT")
   return { segmentID, source };
 }
 
-test("classifies AX-empty, AX-rich, and mixed captured visual cases", () => {
+void test("classifies AX-empty, AX-rich, and mixed captured visual cases", () => {
   assert.equal(classifyVisualValueCase([event({ ocrText: "visible" })]).cohort, "positive");
   assert.equal(
     classifyVisualValueCase([event({ axText: "a".repeat(1_000), ocrText: "visible" })]).cohort,
@@ -112,7 +149,7 @@ test("classifies AX-empty, AX-rich, and mixed captured visual cases", () => {
   assert.equal(classifyVisualValueCase([event({ axText: "short" })]), undefined);
 });
 
-test("creates identical sampled IDs while removing only visual evidence from AX-only", () => {
+void test("keeps every sanitized event ID while removing only visual evidence from AX-only", () => {
   const source = event({
     axText: "api_key=abcdefghijklmnop",
     ocrText: "token=abcdefghijklmnop",
@@ -131,7 +168,7 @@ test("creates identical sampled IDs while removing only visual evidence from AX-
   assert.equal(paired.withVisual[0].window.url, "https://example.com/page");
 });
 
-test("stratifies newest cases across cohorts and keeps blind labels deterministic", () => {
+void test("stratifies newest cases across cohorts and keeps blind labels deterministic", () => {
   const cases = [
     { segmentID: "positive-new", cohort: "positive", startedAt: "2026-08-22T12:03:00Z" },
     { segmentID: "positive-old", cohort: "positive", startedAt: "2026-08-22T12:00:00Z" },
@@ -147,7 +184,7 @@ test("stratifies newest cases across cohorts and keeps blind labels deterministi
   assert.ok(["a", "b"].includes(blindVisualArm("segment-a")));
 });
 
-test("aggregates paired judge scores without mixing failed cases", () => {
+void test("aggregates paired judge scores without mixing failed cases", () => {
   const scores = {
     axOnly: {
       factual_coverage: 2,
@@ -180,7 +217,7 @@ test("aggregates paired judge scores without mixing failed cases", () => {
   assert.equal(report.modelUsage.calls, 3);
 });
 
-test("applies the production summary citation and content constraints", () => {
+void test("applies the production summary citation and content constraints", () => {
   const summary = {
     title: "Activity",
     description: "Reviewed the visible state.",
@@ -200,7 +237,7 @@ test("applies the production summary citation and content constraints", () => {
   );
 });
 
-test("manifest-only run reads local evidence but writes no source text", async (context) => {
+void test("manifest-only run reads local evidence but writes no source text", async (context) => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-value-"));
   context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const outputDirectory = path.join(temporaryRoot, "output");
@@ -226,7 +263,7 @@ test("manifest-only run reads local evidence but writes no source text", async (
   assert.equal((await stat(path.join(outputDirectory, "report.json"))).mode & 0o777, 0o600);
 });
 
-test("paired model run maps randomized labels back to AX-only and visual arms", async (context) => {
+void test("paired model run maps randomized labels back to AX-only and visual arms", async (context) => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "computer-history-visual-model-"));
   const outputDirectory = path.join(temporaryRoot, "output");
   const { segmentID } = await writeSegmentFixture(temporaryRoot);
@@ -243,46 +280,58 @@ test("paired model run maps randomized labels back to AX-only and visual arms", 
   globalThis.fetch = async (_url, options) => {
     calls += 1;
     const request = JSON.parse(options.body);
-    const schemaName = request.text.format.name;
-    let value;
-    if (schemaName === "computer_history_visual_value_summary") {
-      const hasVisual = request.input[1].content.includes('"visual":');
-      value = {
+    if (request.tools) {
+      const toolOutput = request.input.find((item) => item.type === "function_call_output");
+      if (!toolOutput) {
+        return piToolResponse("read_events", {
+          event_ids: ["event-private"],
+          include_accessibility: true,
+        });
+      }
+      const hasVisual = toolOutput.output.includes('"visual"');
+      return piToolResponse("submit_timeline", {
         title: hasVisual ? "Visual summary" : "AX summary",
         description: hasVisual ? "Included a supported visible fact." : "Used AX events only.",
         continuation_hint: "",
         claims: [{ text: "Supported activity", evidence_event_ids: ["event-private"] }],
         evidence_event_ids: ["event-private"],
-      };
-    } else {
-      const visualLabel = blindVisualArm(segmentID);
-      const visualScores = {
-        factual_coverage: 4,
-        visual_fact_coverage: 4,
-        citation_support: 4,
-        unsupported_claims: 0,
-      };
-      const axScores = {
-        factual_coverage: 2,
-        visual_fact_coverage: 0,
-        citation_support: 4,
-        unsupported_claims: 0,
-      };
-      value = {
-        candidate_a: visualLabel === "a" ? visualScores : axScores,
-        candidate_b: visualLabel === "b" ? visualScores : axScores,
-        winner: visualLabel,
-        reason_codes: ["visual_fact_added"],
-      };
+      });
     }
-    return {
-      ok: true,
-      json: async () => ({
+    const visualLabel = blindVisualArm(segmentID);
+    const visualScores = {
+      factual_coverage: 4,
+      visual_fact_coverage: 4,
+      citation_support: 4,
+      unsupported_claims: 0,
+    };
+    const axScores = {
+      factual_coverage: 2,
+      visual_fact_coverage: 0,
+      citation_support: 4,
+      unsupported_claims: 0,
+    };
+    return new Response(
+      JSON.stringify({
         status: "completed",
-        output: [{ content: [{ type: "output_text", text: JSON.stringify(value) }] }],
+        output: [
+          {
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  candidate_a: visualLabel === "a" ? visualScores : axScores,
+                  candidate_b: visualLabel === "b" ? visualScores : axScores,
+                  winner: visualLabel,
+                  reason_codes: ["visual_fact_added"],
+                }),
+              },
+            ],
+          },
+        ],
         usage: { input_tokens: 10, output_tokens: 5 },
       }),
-    };
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
   };
 
   const report = await run([
@@ -296,7 +345,7 @@ test("paired model run maps randomized labels back to AX-only and visual arms", 
   ]);
   const cases = await readFile(path.join(outputDirectory, "cases.jsonl"), "utf8");
 
-  assert.equal(calls, 3);
+  assert.equal(calls, 5);
   assert.equal(report.comparison.successfulCases, 1);
   assert.deepEqual(report.comparison.overall.winners, { with_visual: 1 });
   assert.equal(report.comparison.overall.withVisual.visualFactCoverage, 4);

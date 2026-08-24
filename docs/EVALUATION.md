@@ -39,8 +39,9 @@ pnpm eval:visual-value -- \
   --output .eval-data/visual-value-manifest
 ```
 
-The evaluator samples identical event IDs for two arms. AX-only removes only persisted visual
-evidence; AX+Visual retains sanitized OCR and visual understanding. Raw pixels are never read.
+The evaluator uses the same complete set of sanitized event IDs for both arms. AX-only removes only
+persisted visual evidence; AX+Visual retains sanitized OCR and visual understanding. Raw pixels are
+never read.
 
 Model mode is explicit:
 
@@ -49,6 +50,10 @@ OPENAI_API_KEY=... pnpm eval:visual-value -- \
   --input "$HOME/Library/Application Support/DeskLore/history" \
   --run-models
 ```
+
+Each summary arm runs through the same Pi tool-calling Timeline Agent used by the application,
+including on-demand evidence inspection, turn and byte budgets, and `submit_timeline` citation
+validation. The final blind judge remains a separate structured model call.
 
 Generated summaries can repeat sanitized source content and must still be treated as private. A
 manifest, one generation, or an automatic judge is not a causal product result. Use a fresh

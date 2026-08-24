@@ -153,9 +153,9 @@ const englishMessages = {
   "settings.modelConnection": "Model connection",
   "settings.modelConnectionDetail":
     "The API key is stored in Keychain. Leave it blank when updating other fields.",
-  "settings.semanticSummaries": "Semantic summaries",
+  "settings.semanticSummaries": "Agent timeline",
   "settings.semanticSummariesDetail":
-    "Send filtered event samples to produce richer ten-minute timeline summaries.",
+    "Let an evidence agent inspect sanitized events on demand and produce richer ten-minute timeline summaries.",
   "settings.protocol": "API protocol",
   "settings.protocolResponses": "Responses",
   "settings.protocolChatCompletions": "Chat Completions",
@@ -176,7 +176,7 @@ const englishMessages = {
   "settings.removeKey": "Remove key",
   "settings.removeKeyTitle": "Remove the API key?",
   "settings.removeKeyDetail":
-    "Semantic summaries and model-generated memory will stop working until a new key is saved.",
+    "Agent timeline and model-generated memory will stop working until a new key is saved.",
   "settings.removeKeyConfirm": "Remove API key",
   "settings.saved": "Saved",
   "settings.unsavedChanges": "Unsaved changes",
@@ -185,7 +185,7 @@ const englishMessages = {
     "Send local ten-minute summaries to the same model endpoint to create six-hour and daily memories.",
   "settings.dataBoundary": "Data boundary",
   "settings.dataBoundaryDetail":
-    "Raw events, timeline entries, and long-term memories stay on this Mac. Semantic summaries send filtered event samples. Model-generated long-term memory separately sends local ten-minute summaries. Search and deterministic rollups remain fully offline when both switches are off.",
+    "Raw events, timeline entries, and long-term memories stay on this Mac. Agent timeline first sends a derived segment overview, then only the sanitized evidence it requests. Model-generated long-term memory separately sends local ten-minute summaries. Search and deterministic rollups remain fully offline when both switches are off.",
   "settings.visualEvidence": "Visual evidence",
   "settings.visualEvidenceDetail":
     "An optional fallback when Accessibility semantics are insufficient. Off by default.",
@@ -478,8 +478,9 @@ const simplifiedChineseMessages: Record<MessageKey, string> = {
   "settings.openDiagnostics": "查看诊断",
   "settings.modelConnection": "模型连接",
   "settings.modelConnectionDetail": "API Key 保存在 Keychain；修改其他字段时留空即可。",
-  "settings.semanticSummaries": "语义摘要",
-  "settings.semanticSummariesDetail": "发送过滤后的事件样本，生成信息更完整的十分钟时间线摘要。",
+  "settings.semanticSummaries": "Agent 时间线",
+  "settings.semanticSummariesDetail":
+    "让证据 Agent 按需查看经过过滤和脱敏的事件，生成信息更完整的十分钟时间线摘要。",
   "settings.protocol": "API 协议",
   "settings.protocolResponses": "Responses",
   "settings.protocolChatCompletions": "Chat Completions",
@@ -498,7 +499,7 @@ const simplifiedChineseMessages: Record<MessageKey, string> = {
   "settings.saveModel": "保存模型设置",
   "settings.removeKey": "移除密钥",
   "settings.removeKeyTitle": "移除 API Key？",
-  "settings.removeKeyDetail": "保存新密钥之前，语义摘要与模型归纳记忆将无法继续工作。",
+  "settings.removeKeyDetail": "保存新密钥之前，Agent 时间线与模型归纳记忆将无法继续工作。",
   "settings.removeKeyConfirm": "移除 API Key",
   "settings.saved": "已保存",
   "settings.unsavedChanges": "有未保存的更改",
@@ -507,7 +508,7 @@ const simplifiedChineseMessages: Record<MessageKey, string> = {
     "将本地十分钟摘要发送到同一模型 endpoint，生成 6 小时和每日综合记忆。",
   "settings.dataBoundary": "数据边界",
   "settings.dataBoundaryDetail":
-    "原始事件、时间线和长期记忆保存在本机。开启语义摘要会发送经过过滤的事件样本；模型归纳长期记忆会另行发送本地十分钟摘要。两个开关均关闭时，检索与确定性聚合完全离线。",
+    "原始事件、时间线和长期记忆保存在本机。Agent 时间线会先发送本地派生的片段概览，之后只发送 Agent 按需请求且经过过滤和脱敏的证据；模型归纳长期记忆会另行发送本地十分钟摘要。两个开关均关闭时，检索与确定性聚合完全离线。",
   "settings.visualEvidence": "视觉证据",
   "settings.visualEvidenceDetail": "作为 AX 不足时的可选补充能力，默认关闭。",
   "settings.visualFallback": "视觉补充",
