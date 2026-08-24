@@ -13,7 +13,7 @@
   font-synthesis: none;
   --background: #f1f1f1;
   --surface: #ffffff;
-  --sidebar: #f6f6f6;
+  --sidebar: var(--background);
   --foreground: #303033;
   --muted: #6f7075;
   --muted-soft: #9c9da2;
