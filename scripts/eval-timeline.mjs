@@ -3,12 +3,18 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { createJiti } from "jiti";
 import { sanitizeEvent } from "../src/main/history/policy.ts";
 import { readDataset } from "./eval-history-data.mjs";
 
+const jiti = createJiti(import.meta.url);
+const { runTimelineAgent } = await jiti.import("../src/main/history/timeline-agent.ts");
+
 const defaultInputRoot = path.join(os.homedir(), "Library/Application Support/DeskLore/history");
 const defaultEndpoint = "https://api.openai.com/v1/responses";
+const defaultGenerationModel = "gpt-5.6-luna";
 const defaultJudgeModel = "gpt-5.6-luna";
+const protocols = new Set(["responses", "chat_completions"]);
 
 function argumentsFrom(argv) {
   const values = new Map();
@@ -31,6 +37,22 @@ function positiveInteger(value, fallback, name) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Invalid --${name}: ${value}`);
   return parsed;
+}
+
+function segmentIDs(value) {
+  if (value === undefined) return undefined;
+  const ids = [
+    ...new Set(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (!ids.length || ids.some((id) => id.length > 128 || path.basename(id) !== id)) {
+    throw new Error("Invalid --segment-ids");
+  }
+  return ids;
 }
 
 function hash(value) {
@@ -72,9 +94,8 @@ export function blindTimelineArm(segmentID) {
 }
 
 function normalizeIDs(value) {
-  return Array.isArray(value)
-    ? value.filter((item) => typeof item === "string").map((item) => item.toLowerCase())
-    : [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return undefined;
+  return value.map((item) => item.trim().toLowerCase());
 }
 
 export function validateTimelineSummary(value, evidenceEventIDs) {
@@ -94,7 +115,7 @@ export function validateTimelineSummary(value, evidenceEventIDs) {
     title.length > 120 ||
     description.length > 1_800 ||
     continuationHint.length > 300 ||
-    !summaryIDs.length ||
+    !summaryIDs?.length ||
     new Set(summaryIDs).size !== summaryIDs.length ||
     summaryIDs.some((id) => !evidenceIDs.has(id))
   ) {
@@ -108,7 +129,7 @@ export function validateTimelineSummary(value, evidenceEventIDs) {
     const ids = normalizeIDs(claim?.evidenceEventIDs ?? claim?.evidence_event_ids);
     if (
       !text ||
-      !ids.length ||
+      !ids?.length ||
       new Set(ids).size !== ids.length ||
       ids.some((id) => !evidenceIDs.has(id) || !summaryIDs.includes(id))
     ) {
@@ -116,6 +137,13 @@ export function validateTimelineSummary(value, evidenceEventIDs) {
     }
     return { text, evidenceEventIDs: ids };
   });
+  const claimEvidenceIDs = [...new Set(claims.flatMap((claim) => claim.evidenceEventIDs))];
+  if (
+    claimEvidenceIDs.length !== summaryIDs.length ||
+    summaryIDs.some((id) => !claimEvidenceIDs.includes(id))
+  ) {
+    throw new Error("summary_evidence_union_mismatch");
+  }
   return {
     title,
     description,
@@ -125,7 +153,7 @@ export function validateTimelineSummary(value, evidenceEventIDs) {
   };
 }
 
-async function timelineCases(root, maximumCases) {
+async function timelineCases(root, maximumCases, requestedSegmentIDs) {
   const dataset = await readDataset(root, "candidate");
   const complete = dataset.segments
     .filter((segment) => segment.status === "complete")
@@ -133,9 +161,17 @@ async function timelineCases(root, maximumCases) {
       (lhs, rhs) =>
         Date.parse(rhs.startedAt ?? "") - Date.parse(lhs.startedAt ?? "") ||
         lhs.id.localeCompare(rhs.id),
-    )
-    .slice(0, maximumCases);
-  const cases = complete.map((segment) => {
+    );
+  let selected = complete.slice(0, maximumCases);
+  if (requestedSegmentIDs) {
+    const byID = new Map(dataset.segments.map((segment) => [segment.id, segment]));
+    const unavailable = requestedSegmentIDs.filter((id) => byID.get(id)?.status !== "complete");
+    if (unavailable.length) {
+      throw new Error(`Selected segments are missing or incomplete: ${unavailable.join(", ")}`);
+    }
+    selected = requestedSegmentIDs.map((id) => byID.get(id));
+  }
+  const cases = selected.map((segment) => {
     const evidence = dataset.events
       .filter((event) => event.segmentID === segment.id)
       .map((event) => sanitizeEvent(event.raw, 2_048, 4_000));
@@ -152,7 +188,11 @@ async function timelineCases(root, maximumCases) {
       ].sort(),
     };
   });
-  return { cases, dataQuality: dataset.dataQuality };
+  return {
+    cases,
+    dataQuality: dataset.dataQuality,
+    selectionMode: requestedSegmentIDs ? "explicit" : "newest_complete",
+  };
 }
 
 async function summariesBySegment(filePath, cases) {
@@ -186,6 +226,111 @@ async function summariesBySegment(filePath, cases) {
     }
   }
   return { summaries, quality: { rows: values.length, malformedLines, issues } };
+}
+
+function emptyGenerationMetrics() {
+  return {
+    turns: 0,
+    providerRequests: 0,
+    toolCalls: {},
+    inspectedEventCount: 0,
+    evidenceBytes: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedInputTokens: 0,
+    submissionAttempts: 0,
+    normalizedDuplicateCount: 0,
+    uninspectedEvidenceCount: 0,
+  };
+}
+
+function generatedSummary(result) {
+  return {
+    title: result.title,
+    description: result.description,
+    continuationHint: result.continuationHint,
+    claims: result.claims,
+    evidenceEventIDs: result.evidenceEventIDs,
+  };
+}
+
+function generationFailure(error) {
+  if (typeof error?.reason === "string") return error.reason.slice(0, 160);
+  return (error instanceof Error ? error.message : String(error)).slice(0, 160);
+}
+
+async function generateCurrentArm(cases, runtime, locale) {
+  const summaries = new Map();
+  const rows = [];
+  const issues = [];
+  for (const item of cases) {
+    const metrics = emptyGenerationMetrics();
+    const startedAt = Date.now();
+    try {
+      const result = await runTimelineAgent(item.evidence, [], runtime, locale, {
+        onModelTurn: (usage) => {
+          metrics.turns += 1;
+          metrics.inputTokens += usage.inputTokens;
+          metrics.outputTokens += usage.outputTokens;
+        },
+        onProviderRequest: (usage) => {
+          metrics.providerRequests += 1;
+          metrics.estimatedInputTokens += usage.estimatedInputTokens;
+        },
+        onToolCall: ({ name }) => {
+          metrics.toolCalls[name] = (metrics.toolCalls[name] ?? 0) + 1;
+        },
+        onEvidence: (usage) => {
+          metrics.inspectedEventCount = usage.inspectedEventCount;
+          metrics.evidenceBytes = usage.evidenceBytes;
+        },
+        onSubmission: (submission) => {
+          metrics.submissionAttempts += 1;
+          metrics.normalizedDuplicateCount += submission.normalizedDuplicateCount;
+          metrics.uninspectedEvidenceCount += submission.uninspectedEvidenceCount;
+        },
+      });
+      const summary = validateTimelineSummary(generatedSummary(result), item.evidenceEventIDs);
+      summaries.set(item.segmentID, summary);
+      rows.push({
+        segmentID: item.segmentID,
+        evidenceHash: item.evidenceHash,
+        summary,
+        runtime: {
+          model: runtime.settings.model,
+          protocol: runtime.settings.protocol,
+          ...metrics,
+          latencyMilliseconds: Date.now() - startedAt,
+        },
+      });
+    } catch (error) {
+      const reason = generationFailure(error);
+      issues.push({ segmentID: item.segmentID, reason });
+      rows.push({
+        segmentID: item.segmentID,
+        evidenceHash: item.evidenceHash,
+        error: reason,
+        runtime: {
+          model: runtime.settings.model,
+          protocol: runtime.settings.protocol,
+          ...metrics,
+          latencyMilliseconds: Date.now() - startedAt,
+        },
+      });
+    }
+  }
+  return {
+    summaries,
+    rows,
+    quality: {
+      rows: rows.length,
+      generated: rows.length,
+      succeeded: summaries.size,
+      failed: issues.length,
+      malformedLines: 0,
+      issues,
+    },
+  };
 }
 
 function deterministicCitationMetrics(summary, evidenceEventIDs) {
@@ -348,19 +493,154 @@ export function aggregateTimelineResults(results) {
   };
 }
 
+const humanScoreFields = [
+  ["threadCoverage", "threadCoverageA", "threadCoverageB"],
+  ["factualSupport", "factualSupportA", "factualSupportB"],
+  ["continuityValue", "continuityValueA", "continuityValueB"],
+  ["citationSupport", "citationSupportA", "citationSupportB"],
+];
+
+function validatedHumanReview(value) {
+  const review = value?.review;
+  if (!review || !["a", "b", "tie"].includes(review.winner)) {
+    throw new Error("human_review_incomplete");
+  }
+  for (const [, candidateA, candidateB] of humanScoreFields) {
+    for (const field of [candidateA, candidateB]) {
+      if (!Number.isInteger(review[field]) || review[field] < 0 || review[field] > 4) {
+        throw new Error("human_review_invalid_score");
+      }
+    }
+  }
+  return review;
+}
+
+function mappedHumanReview(segmentID, review) {
+  const armALabel = blindTimelineArm(segmentID);
+  const originalScores = (arm) => {
+    const displayedAsCandidateA = arm === "armA" ? armALabel === "a" : armALabel === "b";
+    return Object.fromEntries(
+      humanScoreFields.map(([name, candidateA, candidateB]) => [
+        name,
+        review[displayedAsCandidateA ? candidateA : candidateB],
+      ]),
+    );
+  };
+  return {
+    segmentID,
+    winner: review.winner === "tie" ? "tie" : review.winner === armALabel ? "arm_a" : "arm_b",
+    armA: originalScores("armA"),
+    armB: originalScores("armB"),
+  };
+}
+
+async function completedHumanReviews(filePath, reviewTemplates) {
+  const { values, malformedLines } = await readJSONLines(filePath);
+  const templates = new Map(reviewTemplates.map((item) => [item.segmentID, item]));
+  const completedBySegment = new Map();
+  const issues = [];
+  for (const value of values) {
+    const segmentID = typeof value?.segmentID === "string" ? value.segmentID : undefined;
+    const template = templates.get(segmentID);
+    if (!segmentID || !template) {
+      issues.push({ segmentID: segmentID ?? "<missing>", reason: "segment_not_paired" });
+      continue;
+    }
+    if (completedBySegment.has(segmentID)) {
+      issues.push({ segmentID, reason: "duplicate_human_review" });
+      continue;
+    }
+    if (value.evidenceHash !== template.evidenceHash) {
+      issues.push({ segmentID, reason: "evidence_hash_mismatch" });
+      continue;
+    }
+    if (
+      hash(value.candidateA) !== hash(template.candidateA) ||
+      hash(value.candidateB) !== hash(template.candidateB)
+    ) {
+      issues.push({ segmentID, reason: "candidate_hash_mismatch" });
+      continue;
+    }
+    try {
+      completedBySegment.set(segmentID, mappedHumanReview(segmentID, validatedHumanReview(value)));
+    } catch (error) {
+      issues.push({
+        segmentID,
+        reason: error instanceof Error ? error.message : "human_review_invalid",
+      });
+    }
+  }
+  const completed = [...completedBySegment.values()];
+  const score = (arm, field) => mean(completed.map((item) => item[arm][field]));
+  return {
+    summary: {
+      required: true,
+      completed: completed.length,
+      pending: Math.max(0, reviewTemplates.length - completed.length),
+      invalidRows: malformedLines + issues.length,
+      winners: countBy(completed, (item) => item.winner),
+      armA: Object.fromEntries(humanScoreFields.map(([field]) => [field, score("armA", field)])),
+      armB: Object.fromEntries(humanScoreFields.map(([field]) => [field, score("armB", field)])),
+    },
+    quality: { rows: values.length, malformedLines, issues },
+  };
+}
+
+function generationReport(generated, settings) {
+  if (!generated) return undefined;
+  const runtimes = generated.rows.map((item) => item.runtime);
+  const total = (field) => runtimes.reduce((sum, runtime) => sum + runtime[field], 0);
+  const toolCalls = {};
+  for (const runtime of runtimes) {
+    for (const [name, count] of Object.entries(runtime.toolCalls)) {
+      toolCalls[name] = (toolCalls[name] ?? 0) + count;
+    }
+  }
+  return {
+    model: settings.model,
+    protocol: settings.protocol,
+    locale: settings.locale,
+    attemptedCases: generated.rows.length,
+    succeededCases: generated.summaries.size,
+    failedCases: generated.rows.length - generated.summaries.size,
+    runtime: {
+      turns: total("turns"),
+      providerRequests: total("providerRequests"),
+      toolCalls,
+      inspectedEventCount: total("inspectedEventCount"),
+      evidenceBytes: total("evidenceBytes"),
+      inputTokens: total("inputTokens"),
+      outputTokens: total("outputTokens"),
+      estimatedInputTokens: total("estimatedInputTokens"),
+      submissionAttempts: total("submissionAttempts"),
+      normalizedDuplicateCount: total("normalizedDuplicateCount"),
+      uninspectedEvidenceCount: total("uninspectedEvidenceCount"),
+      latencyMilliseconds: total("latencyMilliseconds"),
+    },
+  };
+}
+
 function markdown(report) {
   const lines = [
     "# DeskLore paired timeline evaluation",
     "",
     `Generated at ${report.generatedAt}. Schema ${report.schemaVersion}.`,
     "",
-    `Mode: ${report.mode}. Selected complete segments: ${report.selection.selectedCases}.`,
+    `Mode: ${report.mode}. Selected complete segments: ${report.selection.selectedCases} (${report.selection.mode}).`,
     `Arm A: ${report.arms?.a ?? "not provided"}. Arm B: ${report.arms?.b ?? "not provided"}.`,
     "",
     "Both arms are validated against the same sanitized evidence IDs and evidence hash. Skysight summaries are not treated as a controlled arm because its proprietary generator cannot be given this exact evidence contract.",
     "",
-    `Paired summaries: ${report.comparison?.pairedCases ?? 0}. Pending human reviews: ${report.humanReview.pending}.`,
+    `Paired summaries: ${report.comparison?.pairedCases ?? 0}. Human reviews: ${report.humanReview.completed} completed, ${report.humanReview.pending} pending, ${report.humanReview.invalidRows ?? 0} invalid.`,
   ];
+  if (report.generation) {
+    lines.push(
+      `Generated current arm: ${report.generation.succeededCases}/${report.generation.attemptedCases} succeeded with ${report.generation.model} (${report.generation.protocol}).`,
+    );
+  }
+  if (report.humanReview.completed) {
+    lines.push(`Human-review winners: ${JSON.stringify(report.humanReview.winners)}.`);
+  }
   if (report.comparison?.automatic) {
     lines.push(
       `Automatically judged: ${report.comparison.automatic.judgedCases}; failed: ${report.comparison.automatic.failedCases}.`,
@@ -377,15 +657,24 @@ function markdown(report) {
   return lines.join("\n");
 }
 
-function validateEndpoint(value) {
+function validateEndpoint(value, option = "endpoint") {
   const endpoint = new URL(value);
   if (
     endpoint.protocol !== "https:" &&
     endpoint.hostname !== "localhost" &&
     endpoint.hostname !== "127.0.0.1"
   ) {
-    throw new Error("--endpoint must use HTTPS unless it targets localhost");
+    throw new Error(`--${option} must use HTTPS unless it targets localhost`);
   }
+  return endpoint.toString();
+}
+
+function reportableEndpoint(value) {
+  const endpoint = new URL(value);
+  endpoint.username = "";
+  endpoint.password = "";
+  endpoint.search = "";
+  endpoint.hash = "";
   return endpoint.toString();
 }
 
@@ -394,26 +683,66 @@ export async function run(argv = process.argv.slice(2)) {
   const root = path.resolve(args.get("input") ?? defaultInputRoot);
   const outputDirectory = path.resolve(args.get("output") ?? ".eval-data/timeline");
   const maximumCases = positiveInteger(args.get("max-cases"), 12, "max-cases");
-  const dataset = await timelineCases(root, maximumCases);
+  const requestedSegmentIDs = segmentIDs(args.get("segment-ids"));
+  const dataset = await timelineCases(root, maximumCases, requestedSegmentIDs);
   const armAPath = args.get("arm-a");
   const armBPath = args.get("arm-b");
-  if (Boolean(armAPath) !== Boolean(armBPath)) {
+  const generateCurrent = args.get("generate-current") === "true";
+  if (generateCurrent && armAPath) {
+    throw new Error("--generate-current supplies arm A; do not also pass --arm-a");
+  }
+  if (!generateCurrent && Boolean(armAPath) !== Boolean(armBPath)) {
     throw new Error("Pass both --arm-a and --arm-b for a paired comparison");
   }
-  const armA = armAPath
-    ? await summariesBySegment(path.resolve(armAPath), dataset.cases)
+  const runJudge = args.get("run-judge") === "true";
+  const apiKey = generateCurrent || runJudge ? process.env.OPENAI_API_KEY : undefined;
+  if ((generateCurrent || runJudge) && !apiKey) {
+    throw new Error("OPENAI_API_KEY is required for model generation or judging");
+  }
+
+  const protocol = args.get("protocol") ?? "responses";
+  if (!protocols.has(protocol)) throw new Error(`Invalid --protocol: ${protocol}`);
+  const locale = args.get("locale") ?? "en";
+  if (!["en", "zh-CN"].includes(locale)) throw new Error(`Invalid --locale: ${locale}`);
+  const generationModel = args.get("model") ?? defaultGenerationModel;
+  const generationEndpoint = generateCurrent
+    ? validateEndpoint(
+        args.get("endpoint") ??
+          (protocol === "responses"
+            ? (process.env.OPENAI_RESPONSES_ENDPOINT ?? defaultEndpoint)
+            : "https://api.openai.com/v1/chat/completions"),
+      )
     : undefined;
+  const generated = generateCurrent
+    ? await generateCurrentArm(
+        dataset.cases,
+        {
+          apiKey,
+          settings: {
+            enabled: true,
+            memorySynthesisEnabled: false,
+            protocol,
+            model: generationModel,
+            endpoint: generationEndpoint,
+          },
+        },
+        locale,
+      )
+    : undefined;
+  const armA =
+    generated ??
+    (armAPath ? await summariesBySegment(path.resolve(armAPath), dataset.cases) : undefined);
   const armB = armBPath
     ? await summariesBySegment(path.resolve(armBPath), dataset.cases)
     : undefined;
-  const runJudge = args.get("run-judge") === "true";
   if (runJudge && (!armA || !armB)) throw new Error("--run-judge requires both summary arms");
-  const endpoint = validateEndpoint(
-    args.get("endpoint") ?? process.env.OPENAI_RESPONSES_ENDPOINT ?? defaultEndpoint,
-  );
   const judgeModel = args.get("judge-model") ?? defaultJudgeModel;
-  const apiKey = runJudge ? process.env.OPENAI_API_KEY : undefined;
-  if (runJudge && !apiKey) throw new Error("OPENAI_API_KEY is required with --run-judge");
+  const judgeEndpoint = runJudge
+    ? validateEndpoint(
+        args.get("judge-endpoint") ?? process.env.OPENAI_RESPONSES_ENDPOINT ?? defaultEndpoint,
+        "judge-endpoint",
+      )
+    : undefined;
 
   const results = [];
   const reviewTemplates = [];
@@ -457,7 +786,12 @@ export async function run(argv = process.argv.slice(2)) {
           result.judgment = mappedJudgment(
             item.segmentID,
             armALabel,
-            await judgePair({ apiKey, endpoint, model: judgeModel }, item, candidateA, candidateB),
+            await judgePair(
+              { apiKey, endpoint: judgeEndpoint, model: judgeModel },
+              item,
+              candidateA,
+              candidateB,
+            ),
           );
         } catch (error) {
           result.error = error instanceof Error ? error.message : String(error);
@@ -467,39 +801,96 @@ export async function run(argv = process.argv.slice(2)) {
     }
   }
   const automatic = runJudge ? aggregateTimelineResults(results) : undefined;
+  const humanReviewPath = args.get("human-review");
+  if (humanReviewPath && (!armA || !armB)) {
+    throw new Error("--human-review requires a paired comparison");
+  }
+  const importedHumanReviews = humanReviewPath
+    ? await completedHumanReviews(path.resolve(humanReviewPath), reviewTemplates)
+    : undefined;
+  const humanReview = importedHumanReviews?.summary ?? {
+    required: Boolean(armA && armB),
+    completed: 0,
+    pending: reviewTemplates.length,
+    invalidRows: 0,
+    winners: {},
+    armA: Object.fromEntries(humanScoreFields.map(([field]) => [field, null])),
+    armB: Object.fromEntries(humanScoreFields.map(([field]) => [field, null])),
+  };
+  const generation = generationReport(generated, {
+    model: generationModel,
+    protocol,
+    locale,
+  });
+  const startedTimes = dataset.cases
+    .map((item) => item.startedAt)
+    .filter(Boolean)
+    .sort((lhs, rhs) => lhs.localeCompare(rhs));
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     mode:
       armA && armB
         ? runJudge
           ? "paired_with_automatic_judge"
           : "paired_validation"
-        : "manifest_only",
+        : generated
+          ? "generated_current"
+          : "manifest_only",
     input: {
       selectedSegmentIDs: dataset.cases.map((item) => item.segmentID),
-      newestStartedAt: dataset.cases[0]?.startedAt,
-      oldestStartedAt: dataset.cases.at(-1)?.startedAt,
+      newestStartedAt: startedTimes.at(-1),
+      oldestStartedAt: startedTimes[0],
     },
     selection: {
+      mode: dataset.selectionMode,
       selectedCases: dataset.cases.length,
       applicationCoverage: countBy(
         dataset.cases.flatMap((item) => item.applications),
         (application) => application,
       ),
     },
-    arms: armA && armB ? { a: path.basename(armAPath), b: path.basename(armBPath) } : undefined,
+    arms:
+      armA || armB
+        ? {
+            a: generated
+              ? "generated-current.jsonl"
+              : armAPath
+                ? path.basename(armAPath)
+                : undefined,
+            b: armBPath ? path.basename(armBPath) : undefined,
+          }
+        : undefined,
+    generation,
+    models:
+      generateCurrent || runJudge
+        ? {
+            generation: generateCurrent
+              ? {
+                  model: generationModel,
+                  protocol,
+                  locale,
+                  endpoint: reportableEndpoint(generationEndpoint),
+                }
+              : undefined,
+            judge: runJudge
+              ? { model: judgeModel, endpoint: reportableEndpoint(judgeEndpoint) }
+              : undefined,
+          }
+        : undefined,
     dataQuality: {
       source: dataset.dataQuality,
       armA: armA?.quality,
       armB: armB?.quality,
+      humanReview: importedHumanReviews?.quality,
     },
     comparison: armA && armB ? { pairedCases: results.length, automatic } : undefined,
-    humanReview: { required: true, pending: reviewTemplates.length, completed: 0 },
+    humanReview,
     privacy: {
       sourceEventPayloadsWrittenToArtifacts: false,
+      sanitizedEvidenceSentToGenerator: generateCurrent,
       sanitizedEvidenceSentToJudge: runJudge,
-      candidateSummariesWrittenToArtifacts: Boolean(armA && armB),
+      candidateSummariesWrittenToArtifacts: Boolean(armA || armB),
     },
     limitations: [
       "Reference similarity, human correctness, and product usefulness remain separate claims.",
@@ -529,9 +920,16 @@ export async function run(argv = process.argv.slice(2)) {
     "cases.jsonl": results.length
       ? `${results.map((item) => JSON.stringify(item)).join("\n")}\n`
       : "",
-    "human-review.jsonl": reviewTemplates.length
+    [humanReviewPath ? "human-review-template.jsonl" : "human-review.jsonl"]: reviewTemplates.length
       ? `${reviewTemplates.map((item) => JSON.stringify(item)).join("\n")}\n`
       : "",
+    ...(generated
+      ? {
+          "generated-current.jsonl": generated.rows.length
+            ? `${generated.rows.map((item) => JSON.stringify(item)).join("\n")}\n`
+            : "",
+        }
+      : {}),
   };
   await Promise.all(
     Object.entries(artifacts).map(([name, contents]) =>

@@ -54,29 +54,76 @@ making a release comparison.
 
 ## Paired timeline benchmark
 
-Create a same-evidence manifest without model calls:
-
-```bash
-pnpm eval:timeline -- --max-cases 12
-```
-
-To compare two previously generated candidate files, pass JSONL files containing the manifest's
-`segmentID`, exact `evidenceHash`, and a Timeline Agent-shaped `summary`:
+Start by freezing the exact complete segments used by every arm. A comma-separated
+`--segment-ids` list overrides newest-first selection and is recorded in the report:
 
 ```bash
 pnpm eval:timeline -- \
-  --arm-a /path/to/current.jsonl \
-  --arm-b /path/to/candidate.jsonl
+  --segment-ids 2026-08-22T12-00-00Z,2026-08-22T12-10-00Z \
+  --output .eval-data/timeline-manifest
 ```
 
-The evaluator validates both arms against the same complete sanitized event IDs and evidence hash,
-then writes a blind `human-review.jsonl` template. An optional automatic judge is explicit:
+Omit `--segment-ids` to select the newest complete segments with `--max-cases`. Manifest-only mode
+makes no model calls and writes IDs, counts, applications, and evidence hashes without source event
+payloads.
+
+Generate the current DeskLore arm through the production Pi Timeline Agent:
+
+```bash
+OPENAI_API_KEY=... pnpm eval:timeline -- \
+  --segment-ids 2026-08-22T12-00-00Z,2026-08-22T12-10-00Z \
+  --generate-current \
+  --model gpt-5.6-luna \
+  --output .eval-data/timeline-current
+```
+
+`generated-current.jsonl` includes the validated summary, evidence hash, and per-case runtime
+metrics: model turns, provider requests, tool calls, inspected events, evidence bytes, token usage,
+submission attempts, normalization repairs, and latency. It never includes source event payloads.
+Generation uses the production agent prompts, evidence tools, request timeout, structured
+submission repair, and exact claim/evidence union validation. The agent has no cumulative turn,
+tool, evidence-byte, retry, or elapsed-time cap; request-scoped limits still apply. Utility-process
+isolation and persistent scheduling are runtime concerns covered by application tests, not this
+in-process benchmark runner.
+
+To compare two generated files, pass JSONL arms containing the manifest's `segmentID`, exact
+`evidenceHash`, and a Timeline Agent-shaped `summary`:
+
+```bash
+pnpm eval:timeline -- \
+  --segment-ids 2026-08-22T12-00-00Z,2026-08-22T12-10-00Z \
+  --arm-a /path/to/current.jsonl \
+  --arm-b /path/to/candidate.jsonl \
+  --output .eval-data/timeline-pair
+```
+
+Alternatively, generate current as arm A and pair it with an existing arm B in one run by combining
+`--generate-current` and `--arm-b`.
+
+The evaluator validates both arms against the same complete sanitized event IDs and evidence hash.
+The summary-level evidence IDs must be exactly the union of claim citations. It then writes a blind
+`human-review.jsonl` template. Fill every 0-4 score and `winner` (`a`, `b`, or `tie`), save the
+completed file, and aggregate it against the unchanged arms:
+
+```bash
+pnpm eval:timeline -- \
+  --segment-ids 2026-08-22T12-00-00Z,2026-08-22T12-10-00Z \
+  --arm-a .eval-data/timeline-current/generated-current.jsonl \
+  --arm-b /path/to/candidate.jsonl \
+  --human-review /path/to/completed-human-review.jsonl \
+  --output .eval-data/timeline-reviewed
+```
+
+Human-review import verifies the segment, evidence hash, randomized candidate contents, score
+ranges, and duplicate rows before mapping displayed labels back to the real arms. Notes are not
+copied into the aggregate report. An optional automatic judge is explicit and remains separate:
 
 ```bash
 OPENAI_API_KEY=... pnpm eval:timeline -- \
   --arm-a /path/to/current.jsonl \
   --arm-b /path/to/candidate.jsonl \
-  --run-judge
+  --run-judge \
+  --judge-model gpt-5.6-luna
 ```
 
 The automatic judge scores activity-thread coverage, factual support, continuation value, citation
@@ -119,8 +166,9 @@ OPENAI_API_KEY=... pnpm eval:visual-value -- \
 ```
 
 Each summary arm runs through the same Pi tool-calling Timeline Agent used by the application,
-including on-demand evidence inspection, turn and byte budgets, and `submit_timeline` citation
-validation. The final blind judge remains a separate structured model call.
+including on-demand evidence inspection, request-scoped safeguards, and `submit_timeline` citation
+validation. There is no cumulative agent-work cap. The final blind judge remains a separate
+structured model call.
 
 Generated summaries can repeat sanitized source content and must still be treated as private. A
 manifest, one generation, or an automatic judge is not a causal product result. Use a fresh
