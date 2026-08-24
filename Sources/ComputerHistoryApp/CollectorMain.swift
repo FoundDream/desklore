@@ -6,7 +6,7 @@ import Foundation
 struct DeskLoreCollector {
     static func main() {
         let application = NSApplication.shared
-        let delegate = AgentAppDelegate()
+        let delegate = CollectorAppDelegate()
         application.delegate = delegate
         application.setActivationPolicy(.prohibited)
         application.run()
@@ -14,12 +14,12 @@ struct DeskLoreCollector {
 }
 
 @MainActor
-private final class AgentAppDelegate: NSObject, NSApplicationDelegate {
+private final class CollectorAppDelegate: NSObject, NSApplicationDelegate {
     private let engine = HistoryEngine()
-    private var bridge: AgentBridge?
+    private var bridge: CollectorBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        bridge = AgentBridge(engine: engine)
+        bridge = CollectorBridge(engine: engine)
         bridge?.start()
     }
 

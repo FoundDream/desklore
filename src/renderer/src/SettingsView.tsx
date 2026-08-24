@@ -167,13 +167,15 @@ export function SettingsView({
   onOpenDiagnostics,
 }: SettingsViewProps) {
   const { locale, t } = useI18n();
-  const agent = desktop.agent;
+  const history = desktop.history;
   const [tab, setTab] = useState<SettingsTab>("general");
   const [dialog, setDialog] = useState<SettingsDialogName>();
   const [feedback, setFeedback] = useState<string>();
-  const [protocol, setProtocol] = useState<ModelProtocol>(agent?.llm.protocol ?? "responses");
-  const [model, setModel] = useState(agent?.llm.model ?? "gpt-5.6-luna");
-  const [endpoint, setEndpoint] = useState(agent?.llm.endpoint ?? defaultModelEndpoints.responses);
+  const [protocol, setProtocol] = useState<ModelProtocol>(history?.llm.protocol ?? "responses");
+  const [model, setModel] = useState(history?.llm.model ?? "gpt-5.6-luna");
+  const [endpoint, setEndpoint] = useState(
+    history?.llm.endpoint ?? defaultModelEndpoints.responses,
+  );
   const [apiKey, setAPIKey] = useState("");
   const [applicationExclusion, setApplicationExclusion] = useState("");
   const [installedApplications, setInstalledApplications] = useState<InstalledApplication[]>();
@@ -186,23 +188,26 @@ export function SettingsView({
   const [windowTitleApplication, setWindowTitleApplication] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(
     Boolean(
-      agent?.llm.endpoint && agent.llm.endpoint !== defaultModelEndpoints[agent.llm.protocol],
+      history?.llm.endpoint && history.llm.endpoint !== defaultModelEndpoints[history.llm.protocol],
     ),
   );
   const pendingExit = useRef<() => void>(onBack);
 
   useEffect(() => {
-    if (!agent) return;
-    setProtocol(agent.llm.protocol);
-    setModel(agent.llm.model);
-    setEndpoint(agent.llm.endpoint);
-  }, [agent?.llm.endpoint, agent?.llm.model, agent?.llm.protocol]);
+    if (!history) return;
+    setProtocol(history.llm.protocol);
+    setModel(history.llm.model);
+    setEndpoint(history.llm.endpoint);
+  }, [history?.llm.endpoint, history?.llm.model, history?.llm.protocol]);
 
   useEffect(() => {
-    if (agent?.llm.endpoint && agent.llm.endpoint !== defaultModelEndpoints[agent.llm.protocol]) {
+    if (
+      history?.llm.endpoint &&
+      history.llm.endpoint !== defaultModelEndpoints[history.llm.protocol]
+    ) {
       setAdvancedOpen(true);
     }
-  }, [agent?.llm.endpoint, agent?.llm.protocol]);
+  }, [history?.llm.endpoint, history?.llm.protocol]);
 
   const loadInstalledApplications = useCallback(async (): Promise<void> => {
     setInstalledApplicationsLoading(true);
@@ -240,10 +245,10 @@ export function SettingsView({
     data: [t("settings.tabData"), t("settings.dataDescription")],
   } satisfies Record<SettingsTab, [string, string]>;
   const modelDirty =
-    Boolean(agent) &&
-    (protocol !== agent?.llm.protocol ||
-      model !== agent?.llm.model ||
-      endpoint !== agent?.llm.endpoint ||
+    Boolean(history) &&
+    (protocol !== history?.llm.protocol ||
+      model !== history?.llm.model ||
+      endpoint !== history?.llm.endpoint ||
       Boolean(apiKey.trim()));
   const requestExit = useCallback(
     (action: () => void = onBack): void => {
@@ -267,19 +272,19 @@ export function SettingsView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [dialog, requestExit]);
 
-  const recording = agent?.recorderState === "running";
-  const collectorReady = desktop.connectionState === "connected" && Boolean(agent);
+  const recording = history?.recorderState === "running";
+  const collectorReady = desktop.connectionState === "connected" && Boolean(history);
   const captureStatus = !collectorReady
     ? "unavailable"
-    : !agent?.health.accessibilityGranted
+    : !history?.health.accessibilityGranted
       ? "permission"
-      : !agent.health.interactionMonitorActive
+      : !history.health.interactionMonitorActive
         ? "attention"
         : recording
           ? "ready"
           : "paused";
-  const visualEnabled = agent?.visual.captureMode === "fallback";
-  const providerStatus = agent?.visual.providerStatus;
+  const visualEnabled = history?.visual.captureMode === "fallback";
+  const providerStatus = history?.visual.providerStatus;
   const providerLabel =
     providerStatus === "ready"
       ? t("common.ready")
@@ -303,12 +308,12 @@ export function SettingsView({
   };
 
   const saveModel = async (): Promise<void> => {
-    if (!agent) return;
+    if (!history) return;
     setFeedback(undefined);
     const saved = await run(() =>
       window.computerHistory.configureLLM({
-        enabled: agent.llm.enabled,
-        memorySynthesisEnabled: agent.llm.memorySynthesisEnabled,
+        enabled: history.llm.enabled,
+        memorySynthesisEnabled: history.llm.memorySynthesisEnabled,
         protocol,
         model,
         endpoint,
@@ -326,12 +331,12 @@ export function SettingsView({
     captureMode?: "off" | "fallback";
     understandingMode?: "off" | "ocr" | "luna";
   }): void => {
-    if (!agent) return;
+    if (!history) return;
     void run(() =>
       window.computerHistory.configureVisual({
-        axJudge: next.axJudge ?? agent.visual.axJudge,
-        captureMode: next.captureMode ?? agent.visual.captureMode,
-        understandingMode: next.understandingMode ?? agent.visual.understandingMode,
+        axJudge: next.axJudge ?? history.visual.axJudge,
+        captureMode: next.captureMode ?? history.visual.captureMode,
+        understandingMode: next.understandingMode ?? history.visual.understandingMode,
       }),
     );
   };
@@ -525,7 +530,7 @@ export function SettingsView({
                     {recording ? t("sidebar.recording") : t("sidebar.paused")}
                   </StatusPill>
                   <button
-                    disabled={busy || !agent}
+                    disabled={busy || !history}
                     onClick={() =>
                       void run(() =>
                         recording
@@ -572,7 +577,7 @@ export function SettingsView({
                     desktop.connectionState !== "starting" && (
                       <button
                         disabled={busy}
-                        onClick={() => void run(() => window.computerHistory.startAgent())}
+                        onClick={() => void run(() => window.computerHistory.startCollector())}
                       >
                         {t("connection.restart")}
                       </button>
@@ -600,8 +605,8 @@ export function SettingsView({
                 <div className="settings-form-block">
                   <header>
                     <p>{t("settings.modelConnectionDetail")}</p>
-                    <StatusPill tone={agent?.llm.apiKeyConfigured ? "success" : "neutral"}>
-                      {agent?.llm.apiKeyConfigured
+                    <StatusPill tone={history?.llm.apiKeyConfigured ? "success" : "neutral"}>
+                      {history?.llm.apiKeyConfigured
                         ? t("settings.configured")
                         : t("settings.notConfigured")}
                     </StatusPill>
@@ -610,14 +615,14 @@ export function SettingsView({
                     <label className="wide">
                       <span>
                         {t("settings.apiKey")}
-                        {agent?.llm.apiKeyConfigured && <b>{t("settings.keychainSaved")}</b>}
+                        {history?.llm.apiKeyConfigured && <b>{t("settings.keychainSaved")}</b>}
                       </span>
                       <input
                         type="password"
                         value={apiKey}
                         disabled={busy}
                         placeholder={
-                          agent?.llm.apiKeyConfigured ? t("settings.keepExistingKey") : "sk-…"
+                          history?.llm.apiKeyConfigured ? t("settings.keepExistingKey") : "sk-…"
                         }
                         onChange={(event) => setAPIKey(event.target.value)}
                       />
@@ -672,7 +677,7 @@ export function SettingsView({
                     <div className="settings-save-state" role="status">
                       {feedback ?? (modelDirty ? t("settings.unsavedChanges") : "")}
                     </div>
-                    {agent?.llm.apiKeyConfigured && (
+                    {history?.llm.apiKeyConfigured && (
                       <button
                         className="text-danger"
                         disabled={busy}
@@ -693,7 +698,7 @@ export function SettingsView({
               </SettingsSection>
 
               <SettingsSection title={t("settings.featureControls")}>
-                {!agent?.llm.apiKeyConfigured && (
+                {!history?.llm.apiKeyConfigured && (
                   <div className="settings-inline-warning" role="status">
                     <strong>{t("settings.keyRequired")}</strong>
                     <span>{t("settings.keyRequiredDetail")}</span>
@@ -707,9 +712,9 @@ export function SettingsView({
                     <input
                       type="checkbox"
                       aria-label={t("settings.semanticSummaries")}
-                      checked={agent?.llm.enabled ?? false}
+                      checked={history?.llm.enabled ?? false}
                       disabled={
-                        busy || !agent || (!agent.llm.apiKeyConfigured && !agent.llm.enabled)
+                        busy || !history || (!history.llm.apiKeyConfigured && !history.llm.enabled)
                       }
                       onChange={(event) =>
                         void run(() => window.computerHistory.setLLMEnabled(event.target.checked))
@@ -726,11 +731,11 @@ export function SettingsView({
                     <input
                       type="checkbox"
                       aria-label={t("settings.memorySynthesis")}
-                      checked={agent?.llm.memorySynthesisEnabled ?? false}
+                      checked={history?.llm.memorySynthesisEnabled ?? false}
                       disabled={
                         busy ||
-                        !agent ||
-                        (!agent.llm.apiKeyConfigured && !agent.llm.memorySynthesisEnabled)
+                        !history ||
+                        (!history.llm.apiKeyConfigured && !history.llm.memorySynthesisEnabled)
                       }
                       onChange={(event) =>
                         void run(() =>
@@ -760,7 +765,7 @@ export function SettingsView({
                       type="checkbox"
                       aria-label={t("settings.visualFallback")}
                       checked={visualEnabled}
-                      disabled={busy || !agent}
+                      disabled={busy || !history}
                       onChange={(event) =>
                         configureVisual({
                           captureMode: event.target.checked ? "fallback" : "off",
@@ -775,7 +780,7 @@ export function SettingsView({
                     <label>
                       <span>{t("settings.axJudge")}</span>
                       <select
-                        value={agent?.visual.axJudge ?? "rules"}
+                        value={history?.visual.axJudge ?? "rules"}
                         disabled={busy || !visualEnabled}
                         onChange={(event) =>
                           configureVisual({ axJudge: event.target.value as "rules" | "luna" })
@@ -788,7 +793,7 @@ export function SettingsView({
                     <label>
                       <span>{t("settings.visualUnderstanding")}</span>
                       <select
-                        value={agent?.visual.understandingMode ?? "off"}
+                        value={history?.visual.understandingMode ?? "off"}
                         disabled={busy || !visualEnabled}
                         onChange={(event) =>
                           configureVisual({
@@ -848,13 +853,13 @@ export function SettingsView({
                 <SettingRow
                   title={t("settings.currentApplication")}
                   description={
-                    agent?.activeApplication?.name ?? t("settings.noForegroundApplication")
+                    history?.activeApplication?.name ?? t("settings.noForegroundApplication")
                   }
                 >
-                  {agent?.activeApplication && (
+                  {history?.activeApplication && (
                     <>
-                      <StatusPill tone={agent.activeApplicationAllowed ? "success" : "neutral"}>
-                        {agent.activeApplicationAllowed
+                      <StatusPill tone={history.activeApplicationAllowed ? "success" : "neutral"}>
+                        {history.activeApplicationAllowed
                           ? t("settings.observed")
                           : t("settings.excluded")}
                       </StatusPill>
@@ -862,13 +867,13 @@ export function SettingsView({
                         disabled={busy}
                         onClick={() =>
                           void run(() =>
-                            agent.activeApplicationAllowed
+                            history.activeApplicationAllowed
                               ? window.computerHistory.blockActiveApplication()
                               : window.computerHistory.allowActiveApplication(),
                           )
                         }
                       >
-                        {agent.activeApplicationAllowed
+                        {history.activeApplicationAllowed
                           ? t("settings.excludeApplication")
                           : t("settings.includeApplication")}
                       </button>
@@ -877,12 +882,12 @@ export function SettingsView({
                 </SettingRow>
                 <SettingRow
                   title={t("settings.currentDomain")}
-                  description={agent?.activeDomain ?? t("settings.noBrowserDomain")}
+                  description={history?.activeDomain ?? t("settings.noBrowserDomain")}
                 >
-                  {agent?.activeDomain && (
+                  {history?.activeDomain && (
                     <>
-                      <StatusPill tone={agent.activeDomainAllowed ? "success" : "neutral"}>
-                        {agent.activeDomainAllowed
+                      <StatusPill tone={history.activeDomainAllowed ? "success" : "neutral"}>
+                        {history.activeDomainAllowed
                           ? t("settings.observed")
                           : t("settings.excluded")}
                       </StatusPill>
@@ -890,13 +895,13 @@ export function SettingsView({
                         disabled={busy}
                         onClick={() =>
                           void run(() =>
-                            agent.activeDomainAllowed
+                            history.activeDomainAllowed
                               ? window.computerHistory.blockActiveDomain()
                               : window.computerHistory.allowActiveDomain(),
                           )
                         }
                       >
-                        {agent.activeDomainAllowed
+                        {history.activeDomainAllowed
                           ? t("settings.excludeDomain")
                           : t("settings.includeDomain")}
                       </button>
@@ -1168,10 +1173,10 @@ export function SettingsView({
               <SettingsSection title={t("settings.localArchive")}>
                 <SettingRow
                   title={t("settings.storageLocation")}
-                  description={agent?.storageRoot ?? "—"}
+                  description={history?.storageRoot ?? "—"}
                 >
                   <button
-                    disabled={busy || !agent}
+                    disabled={busy || !history}
                     onClick={() => void run(() => window.computerHistory.revealStorage())}
                   >
                     {t("common.revealFiles")}
@@ -1180,8 +1185,8 @@ export function SettingsView({
                 <SettingRow
                   title={t("settings.archiveContents")}
                   description={t("settings.historyCounts", {
-                    documents: agent?.documents.length ?? 0,
-                    memories: agent?.memories.length ?? 0,
+                    documents: history?.documents.length ?? 0,
+                    memories: history?.memories.length ?? 0,
                   })}
                 >
                   <StatusPill tone="success">{t("settings.localOnly")}</StatusPill>
@@ -1226,7 +1231,7 @@ export function SettingsView({
                 >
                   <button
                     className="text-danger"
-                    disabled={busy || !agent}
+                    disabled={busy || !history}
                     onClick={() => setDialog("clear-history")}
                   >
                     {t("settings.clearHistory")}
@@ -1272,8 +1277,8 @@ export function SettingsView({
         <SettingsDialog
           title={t("settings.clearDialogTitle")}
           detail={`${t("settings.clearDialogDetail")} ${t("settings.clearDialogCounts", {
-            documents: agent?.documents.length ?? 0,
-            memories: agent?.memories.length ?? 0,
+            documents: history?.documents.length ?? 0,
+            memories: history?.memories.length ?? 0,
           })}`}
           secondaryDetail={t("settings.clearDialogPause")}
           confirmLabel={t("settings.clearDialogConfirm")}

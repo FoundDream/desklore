@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentClient } from "../agent-client.js";
+import type { CollectorClient } from "../collector-client.js";
 import { HistoryService } from "./service.js";
 import { HistorySettingsStore } from "./settings.js";
 import { defaultObservationPolicy } from "./policy.js";
@@ -34,7 +34,7 @@ describe("History settings", () => {
     temporaryDirectories.push(root);
     const collector = Object.assign(new EventEmitter(), {
       current: () => ({ connectionState: "stopped" as const }),
-    }) as unknown as AgentClient;
+    }) as unknown as CollectorClient;
     const service = new HistoryService(collector, root);
     const document: TimelineDocumentRecord = {
       schemaVersion: 4,
@@ -86,7 +86,7 @@ describe("History settings", () => {
       stop,
       request,
       terminate,
-    }) as unknown as AgentClient;
+    }) as unknown as CollectorClient;
     const service = new HistoryService(collector, root);
 
     await expect(service.start()).resolves.toMatchObject({
@@ -165,7 +165,7 @@ describe("History settings", () => {
     temporaryDirectories.push(root);
     const collector = Object.assign(new EventEmitter(), {
       current: () => ({ connectionState: "stopped" as const }),
-    }) as unknown as AgentClient;
+    }) as unknown as CollectorClient;
     const service = new HistoryService(collector, root);
     const internals = service as unknown as {
       policy: typeof defaultObservationPolicy;
@@ -210,7 +210,7 @@ describe("History settings", () => {
     const collector = Object.assign(new EventEmitter(), {
       current: () => ({ connectionState: "connected" as const }),
       request,
-    }) as unknown as AgentClient;
+    }) as unknown as CollectorClient;
     const service = new HistoryService(collector, root);
 
     await expect(
@@ -368,7 +368,7 @@ describe("History settings", () => {
 
     const collector = Object.assign(new EventEmitter(), {
       current: () => ({ connectionState: "disconnected" as const }),
-    }) as unknown as AgentClient;
+    }) as unknown as CollectorClient;
     const service = new HistoryService(collector, root);
     await (service as unknown as { initialize(): Promise<void> }).initialize();
 
@@ -398,7 +398,7 @@ describe("History settings", () => {
 
     const collector = Object.assign(new EventEmitter(), {
       current: () => ({ connectionState: "disconnected" as const }),
-    }) as unknown as AgentClient;
+    }) as unknown as CollectorClient;
     const service = new HistoryService(collector, root);
     await (service as unknown as { initialize(): Promise<void> }).initialize();
 

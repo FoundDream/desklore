@@ -1,7 +1,7 @@
 import type { AppLocale } from "./i18n.js";
 import type { ModelProtocol } from "./model.js";
 
-export type AgentConnectionState = "starting" | "connected" | "stopped" | "missing" | "failed";
+export type CollectorConnectionState = "starting" | "connected" | "stopped" | "missing" | "failed";
 
 export type RecorderState = "stopped" | "running" | "paused";
 
@@ -137,7 +137,7 @@ export interface VisualHealth {
   lastCaptureDecisionReason?: string;
 }
 
-export interface AgentSnapshot {
+export interface HistorySnapshot {
   recorderState: RecorderState;
   storageRoot: string;
   activeApplication?: TimelineApplication;
@@ -161,10 +161,10 @@ export interface HistoryRecovery {
 
 export interface DesktopSnapshot {
   locale: AppLocale;
-  connectionState: AgentConnectionState;
+  connectionState: CollectorConnectionState;
   recordingConsentGranted: boolean;
   observationPolicy: ObservationPolicy;
-  agent?: AgentSnapshot;
+  history?: HistorySnapshot;
   connectionError?: string;
   historyRecovery?: HistoryRecovery;
 }
@@ -185,8 +185,8 @@ export interface ComputerHistoryAPI {
   listInstalledApplications(): Promise<InstalledApplication[]>;
   setLocale(locale: AppLocale): Promise<DesktopSnapshot>;
   grantRecordingConsent(): Promise<DesktopSnapshot>;
-  startAgent(): Promise<DesktopSnapshot>;
-  stopAgent(): Promise<DesktopSnapshot>;
+  startCollector(): Promise<DesktopSnapshot>;
+  stopCollector(): Promise<DesktopSnapshot>;
   pause(): Promise<DesktopSnapshot>;
   resume(): Promise<DesktopSnapshot>;
   refreshPermissions(): Promise<DesktopSnapshot>;

@@ -4,14 +4,14 @@ import { EventEmitter } from "node:events";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import type {
-  AgentConnectionState,
   CaptureHealth,
+  CollectorConnectionState,
   RecorderState,
   TimelineApplication,
 } from "../shared/contracts.js";
 import { normalizeHistoryEvent, type HistoryEvent } from "./history/types.js";
 
-export interface NativeAgentSnapshot {
+export interface CollectorSnapshot {
   recorderState: RecorderState;
   activeApplication?: TimelineApplication;
   activeDomain?: string;
@@ -20,30 +20,30 @@ export interface NativeAgentSnapshot {
 }
 
 export interface CollectorConnection {
-  connectionState: AgentConnectionState;
-  agent?: NativeAgentSnapshot;
+  connectionState: CollectorConnectionState;
+  snapshot?: CollectorSnapshot;
   connectionError?: string;
 }
 
-interface AgentMessage {
+interface CollectorMessage {
   type: "snapshot" | "event" | "response" | "error";
   requestID?: string;
-  snapshot?: NativeAgentSnapshot;
+  snapshot?: CollectorSnapshot;
   event?: unknown;
   payload?: unknown;
   error?: string;
 }
 
 interface PendingRequest {
-  resolve: (message: AgentMessage) => void;
+  resolve: (message: CollectorMessage) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }
 
-export class AgentClient extends EventEmitter {
+export class CollectorClient extends EventEmitter {
   private process?: ChildProcessWithoutNullStreams;
-  private state: AgentConnectionState = "stopped";
-  private snapshot?: NativeAgentSnapshot;
+  private state: CollectorConnectionState = "stopped";
+  private snapshot?: CollectorSnapshot;
   private connectionError?: string;
   private stdoutBuffer = "";
   private readonly pending = new Map<string, PendingRequest>();
@@ -58,7 +58,7 @@ export class AgentClient extends EventEmitter {
   current(): CollectorConnection {
     return {
       connectionState: this.state,
-      agent: this.snapshot,
+      snapshot: this.snapshot,
       connectionError: this.connectionError,
     };
   }
@@ -103,10 +103,10 @@ export class AgentClient extends EventEmitter {
           this.connectionError ?? "No native error output",
         );
       }
-      this.rejectPending(new Error("Native agent stopped"));
+      this.rejectPending(new Error("Collector stopped"));
       this.updateState(
         expected ? "stopped" : "failed",
-        expected ? undefined : `Native agent exited with ${code ?? signal}`,
+        expected ? undefined : `Collector exited with ${code ?? signal}`,
       );
     });
     return this.current();
@@ -157,17 +157,17 @@ export class AgentClient extends EventEmitter {
   private async requestMessage(
     command: string,
     payload: Record<string, unknown>,
-  ): Promise<AgentMessage> {
-    if (!this.process || this.process.exitCode !== null) await this.start();
+  ): Promise<CollectorMessage> {
+    if (!this.process || this.process.exitCode === null) await this.start();
     if (!this.process || this.process.exitCode !== null) {
-      throw new Error(this.connectionError ?? "Native agent is unavailable");
+      throw new Error(this.connectionError ?? "Collector is unavailable");
     }
     const id = randomUUID();
-    return new Promise<AgentMessage>((resolve, reject) => {
+    return new Promise<CollectorMessage>((resolve, reject) => {
       const timeout = setTimeout(
         () => {
           this.pending.delete(id);
-          reject(new Error(`Native agent timed out while handling ${command}`));
+          reject(new Error(`Collector timed out while handling ${command}`));
         },
         command === "captureVisualEvidence" ? 20_000 : 8_000,
       );
@@ -200,11 +200,11 @@ export class AgentClient extends EventEmitter {
   }
 
   private handleLine(line: string): void {
-    let message: AgentMessage;
+    let message: CollectorMessage;
     try {
-      message = JSON.parse(line) as AgentMessage;
+      message = JSON.parse(line) as CollectorMessage;
     } catch {
-      this.updateState("failed", "Native agent emitted invalid JSON");
+      this.updateState("failed", "Collector emitted invalid JSON");
       return;
     }
     if (message.snapshot) {
@@ -226,7 +226,7 @@ export class AgentClient extends EventEmitter {
         clearTimeout(pending.timeout);
         this.pending.delete(message.requestID);
         if (message.type === "error") {
-          pending.reject(new Error(message.error ?? "Native agent command failed"));
+          pending.reject(new Error(message.error ?? "Collector command failed"));
         } else {
           pending.resolve(message);
         }
@@ -234,7 +234,7 @@ export class AgentClient extends EventEmitter {
     }
   }
 
-  private updateState(state: AgentConnectionState, error?: string): void {
+  private updateState(state: CollectorConnectionState, error?: string): void {
     this.state = state;
     this.connectionError = error;
     this.emit("snapshot", this.current());
@@ -249,7 +249,7 @@ export class AgentClient extends EventEmitter {
   }
 }
 
-export function agentExecutableCandidates(
+export function collectorExecutableCandidates(
   appPath: string,
   resourcesPath: string,
   projectRoot: string,

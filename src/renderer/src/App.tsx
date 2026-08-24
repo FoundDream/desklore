@@ -4,7 +4,7 @@ import { Icon } from "./Icon.js";
 import { I18nProvider, useI18n } from "./i18n.js";
 import { SettingsView as SettingsPage } from "./SettingsView.js";
 import type {
-  AgentSnapshot,
+  HistorySnapshot,
   DesktopSnapshot,
   HistorySearchResponse,
   MemoryRollup,
@@ -222,11 +222,11 @@ function ConnectionNotice({
   if (!desktop || !desktop.recordingConsentGranted) return null;
 
   if (desktop.connectionState === "connected") {
-    const agent = desktop.agent;
-    if (!agent || agent.recorderState !== "running") return null;
-    const permissionMissing = !agent.health.accessibilityGranted;
+    const history = desktop.history;
+    if (!history || history.recorderState !== "running") return null;
+    const permissionMissing = !history.health.accessibilityGranted;
     const monitorUnavailable =
-      agent.health.accessibilityGranted && !agent.health.interactionMonitorActive;
+      history.health.accessibilityGranted && !history.health.interactionMonitorActive;
     if (!permissionMissing && !monitorUnavailable) return null;
     return (
       <div className="connection-notice">
@@ -265,7 +265,7 @@ function ConnectionNotice({
         {desktop.connectionError && <small>{desktop.connectionError}</small>}
       </div>
       {desktop.connectionState !== "starting" && (
-        <button onClick={() => void run(() => window.computerHistory.startAgent())}>
+        <button onClick={() => void run(() => window.computerHistory.startCollector())}>
           {t("connection.restart")}
         </button>
       )}
@@ -393,17 +393,17 @@ function RecordingConsentView({
 
 function Sidebar({
   view,
-  agent,
+  history,
   onView,
   onToggleRecording,
 }: {
   view: View;
-  agent?: AgentSnapshot;
+  history?: HistorySnapshot;
   onView: (view: View) => void;
   onToggleRecording: () => void;
 }) {
   const { t } = useI18n();
-  const running = agent?.recorderState === "running";
+  const running = history?.recorderState === "running";
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -418,12 +418,12 @@ function Sidebar({
         <button className={view === "timeline" ? "active" : ""} onClick={() => onView("timeline")}>
           <Icon name="timeline" />
           <span>{t("sidebar.timeline")}</span>
-          <b>{agent?.documents.length ?? "—"}</b>
+          <b>{history?.documents.length ?? "—"}</b>
         </button>
         <button className={view === "memory" ? "active" : ""} onClick={() => onView("memory")}>
           <Icon name="memory" />
           <span>{t("sidebar.memory")}</span>
-          <b>{agent ? agent.memories.filter((memory) => memory.kind === "day").length : "—"}</b>
+          <b>{history ? history.memories.filter((memory) => memory.kind === "day").length : "—"}</b>
         </button>
         <button
           className={view === "settings" || view === "diagnostics" ? "active" : ""}
@@ -567,13 +567,13 @@ function DaySwitcher({
 }
 
 function TimelineView({
-  agent,
+  history,
   run,
   selectedDate,
   referencedDocumentIDs,
   onSelectDate,
 }: {
-  agent?: AgentSnapshot;
+  history?: HistorySnapshot;
   run: RunAction;
   selectedDate?: string;
   referencedDocumentIDs: string[];
@@ -582,7 +582,7 @@ function TimelineView({
   const { t } = useI18n();
   const days = useMemo(() => {
     const groups = new Map<string, TimelineDocument[]>();
-    const documents = [...(agent?.documents ?? [])].sort(
+    const documents = [...(history?.documents ?? [])].sort(
       (lhs, rhs) => Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt),
     );
     for (const document of documents) {
@@ -594,7 +594,7 @@ function TimelineView({
       startedAt: documents[0].startedAt,
       documents,
     }));
-  }, [agent?.documents]);
+  }, [history?.documents]);
   const selectedDay = days.find((day) => day.date === selectedDate) ?? days[0];
   const referencedDocuments = useMemo(
     () => new Set(referencedDocumentIDs),
@@ -635,7 +635,7 @@ function TimelineView({
         }
       />
       <section className="archive">
-        {!agent ? (
+        {!history ? (
           <div className="empty-state">
             <div className="empty-clock" />
             <h2>{t("timeline.connecting")}</h2>
@@ -704,11 +704,11 @@ function MemorySourceFooter({
 }
 
 function MemoryView({
-  agent,
+  history,
   run,
   onOpenTimeline,
 }: {
-  agent?: AgentSnapshot;
+  history?: HistorySnapshot;
   run: RunAction;
   onOpenTimeline: (memory: MemoryRollup) => void;
 }) {
@@ -718,7 +718,7 @@ function MemoryView({
   const [searching, setSearching] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>();
   const days = useMemo(() => {
-    const memories = agent?.memories ?? [];
+    const memories = history?.memories ?? [];
     const periods = memories.filter((memory) => memory.kind === "6h");
     const coveredPeriods = new Set<string>();
     const groups: MemoryDay[] = memories
@@ -757,7 +757,7 @@ function MemoryView({
       });
     }
     return groups.sort((lhs, rhs) => Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt));
-  }, [agent?.memories]);
+  }, [history?.memories]);
   const selectedDay = days.find((day) => day.date === selectedDate) ?? days[0];
 
   useEffect(() => {
@@ -836,7 +836,7 @@ function MemoryView({
         )}
       </section>
       <section className="memory-archive">
-        {!agent ? (
+        {!history ? (
           <div className="empty-state">
             <div className="empty-clock" />
             <h2>{t("memory.connecting")}</h2>
@@ -894,16 +894,16 @@ function MemoryView({
 }
 
 function DiagnosticsView({
-  agent,
+  history,
   run,
   onBack,
 }: {
-  agent?: AgentSnapshot;
+  history?: HistorySnapshot;
   run: RunAction;
   onBack: () => void;
 }) {
   const { t } = useI18n();
-  const health = agent?.health;
+  const health = history?.health;
   const rows = [
     [t("health.accessibility"), health?.accessibilityGranted],
     [t("health.globalInteractions"), health?.interactionMonitorActive],
@@ -1029,8 +1029,8 @@ export function App() {
     try {
       const result = await action();
       setDesktop(result);
-      setError(result.agent?.lastError);
-      return !result.agent?.lastError;
+      setError(result.history?.lastError);
+      return !result.history?.lastError;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       return false;
@@ -1070,8 +1070,8 @@ export function App() {
     if (!desktop?.recordingConsentGranted) {
       void run(() => window.computerHistory.grantRecordingConsent());
     } else if (desktop.connectionState !== "connected") {
-      void run(() => window.computerHistory.startAgent());
-    } else if (desktop.agent?.recorderState === "running") {
+      void run(() => window.computerHistory.startCollector());
+    } else if (desktop.history?.recorderState === "running") {
       void run(() => window.computerHistory.pause());
     } else {
       void run(() => window.computerHistory.resume());
@@ -1086,7 +1086,7 @@ export function App() {
   const openMemoryTimeline = useCallback(
     (memory: MemoryRollup): void => {
       const sourceIDs = new Set(memory.sourceDocumentIDs);
-      const documents = desktop?.agent?.documents ?? [];
+      const documents = desktop?.history?.documents ?? [];
       const firstSource = [...documents]
         .filter((document) => sourceIDs.has(document.id))
         .sort((lhs, rhs) => Date.parse(lhs.startedAt) - Date.parse(rhs.startedAt))[0];
@@ -1105,7 +1105,7 @@ export function App() {
       );
       setView("timeline");
     },
-    [desktop?.agent?.documents],
+    [desktop?.history?.documents],
   );
 
   const locale = desktop?.locale ?? "en";
@@ -1164,7 +1164,7 @@ export function App() {
       <div className={`app-shell ${busy ? "busy" : ""}`}>
         <Sidebar
           view={view}
-          agent={desktop?.agent}
+          history={desktop?.history}
           onView={navigate}
           onToggleRecording={toggleRecording}
         />
@@ -1179,16 +1179,20 @@ export function App() {
           )}
           {view === "timeline" ? (
             <TimelineView
-              agent={desktop?.agent}
+              history={desktop?.history}
               run={run}
               selectedDate={selectedTimelineDate}
               referencedDocumentIDs={referencedDocumentIDs}
               onSelectDate={selectTimelineDate}
             />
           ) : view === "memory" ? (
-            <MemoryView agent={desktop?.agent} run={run} onOpenTimeline={openMemoryTimeline} />
+            <MemoryView history={desktop?.history} run={run} onOpenTimeline={openMemoryTimeline} />
           ) : (
-            <DiagnosticsView agent={desktop?.agent} run={run} onBack={() => setView("settings")} />
+            <DiagnosticsView
+              history={desktop?.history}
+              run={run}
+              onBack={() => setView("settings")}
+            />
           )}
         </main>
       </div>

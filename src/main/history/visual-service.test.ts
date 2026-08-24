@@ -3,17 +3,17 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentClient } from "../agent-client.js";
+import type { CollectorClient } from "../collector-client.js";
 import { HistoryService } from "./service.js";
 import type { HistoryEvent } from "./types.js";
 import type { VisualCaptureProvider } from "./visual.js";
 
 const temporaryDirectories: string[] = [];
 
-function collector(): AgentClient {
+function collector(): CollectorClient {
   return Object.assign(new EventEmitter(), {
     current: () => ({ connectionState: "disconnected" as const }),
-  }) as unknown as AgentClient;
+  }) as unknown as CollectorClient;
 }
 
 function uncertainEvent(): HistoryEvent {

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { shell } from "electron";
 import type {
-  AgentSnapshot,
+  HistorySnapshot,
   DesktopSnapshot,
   HistoryRecovery,
   LLMConfigurationInput,
@@ -13,7 +13,7 @@ import type {
 } from "../../shared/contracts.js";
 import type { AppLocale } from "../../shared/i18n.js";
 import { translate } from "../../shared/i18n.js";
-import { AgentClient } from "../agent-client.js";
+import { CollectorClient } from "../collector-client.js";
 import { classifyKeyboardEvent, EventBurstCoalescer, EventCoalescer } from "./coalescer.js";
 import {
   allowsApplication,
@@ -180,7 +180,7 @@ export class HistoryService extends EventEmitter {
   };
 
   constructor(
-    private readonly collector: AgentClient,
+    private readonly collector: CollectorClient,
     storageRoot: string,
     private readonly visualCaptureProvider?: VisualCaptureProvider,
     timelineAgentSessionFactory?: TimelineAgentSessionFactory,
@@ -219,21 +219,21 @@ export class HistoryService extends EventEmitter {
 
   current(): DesktopSnapshot {
     const native = this.collector.current();
-    const snapshot: AgentSnapshot | undefined = native.agent
+    const snapshot: HistorySnapshot | undefined = native.snapshot
       ? {
-          recorderState: native.agent.recorderState,
+          recorderState: native.snapshot.recorderState,
           storageRoot: this.layout.root,
-          activeApplication: native.agent.activeApplication,
-          activeApplicationAllowed: native.agent.activeApplication
-            ? allowsApplication(this.policy, native.agent.activeApplication.bundleIdentifier)
+          activeApplication: native.snapshot.activeApplication,
+          activeApplicationAllowed: native.snapshot.activeApplication
+            ? allowsApplication(this.policy, native.snapshot.activeApplication.bundleIdentifier)
             : undefined,
-          activeDomain: native.agent.activeDomain,
-          activeDomainAllowed: native.agent.activeDomain
-            ? allowsDomain(this.policy, native.agent.activeDomain)
+          activeDomain: native.snapshot.activeDomain,
+          activeDomainAllowed: native.snapshot.activeDomain
+            ? allowsDomain(this.policy, native.snapshot.activeDomain)
             : undefined,
           documents: this.documents.map((document) => this.publicDocument(document)),
           memories: this.memories.map((record) => this.publicMemory(record)),
-          health: { ...native.agent.health, ...this.semanticHealth },
+          health: { ...native.snapshot.health, ...this.semanticHealth },
           llm: { ...this.llmSettings, apiKeyConfigured: this.apiKeyConfigured },
           visual: {
             ...this.visualSettings,
@@ -243,7 +243,7 @@ export class HistoryService extends EventEmitter {
                 ? "disabled"
                 : (this.visualCaptureProvider?.status() ?? "unavailable"),
           },
-          lastError: this.lastError ?? native.agent.lastError,
+          lastError: this.lastError ?? native.snapshot.lastError,
         }
       : undefined;
     return {
@@ -251,7 +251,7 @@ export class HistoryService extends EventEmitter {
       connectionState: native.connectionState,
       recordingConsentGranted: this.recordingConsentGranted,
       observationPolicy: structuredClone(this.policy),
-      agent: snapshot,
+      history: snapshot,
       connectionError: native.connectionError,
       historyRecovery: this.historyRecovery,
     };
@@ -301,7 +301,7 @@ export class HistoryService extends EventEmitter {
     this.stopTimers();
     if (
       this.collector.current().connectionState === "connected" &&
-      this.collector.current().agent?.recorderState === "running"
+      this.collector.current().snapshot?.recorderState === "running"
     ) {
       await this.collector.request("pause").catch(() => undefined);
     }
@@ -353,7 +353,7 @@ export class HistoryService extends EventEmitter {
   }
 
   async setActiveApplicationAllowed(allowed: boolean): Promise<DesktopSnapshot> {
-    const application = this.collector.current().agent?.activeApplication;
+    const application = this.collector.current().snapshot?.activeApplication;
     if (!application) return this.current();
     const next = structuredClone(this.policy);
     next.allowedBundleIdentifiers = next.allowedBundleIdentifiers.filter(
@@ -371,7 +371,7 @@ export class HistoryService extends EventEmitter {
   }
 
   async setActiveDomainAllowed(allowed: boolean): Promise<DesktopSnapshot> {
-    const domain = this.collector.current().agent?.activeDomain;
+    const domain = this.collector.current().snapshot?.activeDomain;
     if (!domain) return this.current();
     const next = structuredClone(this.policy);
     next.allowedDomains = next.allowedDomains.filter((value) => value !== domain);
@@ -531,7 +531,7 @@ export class HistoryService extends EventEmitter {
     this.timeline.abortAgentJobs();
     if (
       this.collector.current().connectionState === "connected" &&
-      this.collector.current().agent?.recorderState === "running"
+      this.collector.current().snapshot?.recorderState === "running"
     ) {
       await this.collector.request("pause").catch(() => undefined);
     }
@@ -574,7 +574,7 @@ export class HistoryService extends EventEmitter {
     this.timeline.abortAgentJobs();
     const wasRunning =
       this.collector.current().connectionState === "connected" &&
-      this.collector.current().agent?.recorderState === "running";
+      this.collector.current().snapshot?.recorderState === "running";
     if (wasRunning) await this.collector.request("pause").catch(() => undefined);
     try {
       await this.enqueueCapture(async () => {

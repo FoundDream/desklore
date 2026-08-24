@@ -17,9 +17,9 @@ import type {
 } from "../shared/contracts.js";
 import type { AppLocale } from "../shared/i18n.js";
 import { isAppLocale, translate } from "../shared/i18n.js";
-import { AgentClient, agentExecutableCandidates } from "./agent-client.js";
+import { CollectorClient, collectorExecutableCandidates } from "./collector-client.js";
 import { discoverInstalledApplications, readICNSIconDataURL } from "./applications.js";
-import { NativeAgentVisualCaptureProvider } from "./history/native-visual-provider.js";
+import { CollectorVisualCaptureProvider } from "./history/native-visual-provider.js";
 import { HistoryService } from "./history/service.js";
 import { TimelineAgentUtilityProcessClient } from "./history/timeline-agent-worker-client.js";
 
@@ -31,15 +31,15 @@ app.setName("DeskLore");
 app.setPath("userData", path.join(app.getPath("appData"), "DeskLore"));
 
 const projectRoot = process.cwd();
-const collector = new AgentClient(
-  agentExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
+const collector = new CollectorClient(
+  collectorExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
   app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
 );
 const timelineAgentWorker = new TimelineAgentUtilityProcessClient();
 const history = new HistoryService(
   collector,
   path.join(app.getPath("userData"), "history"),
-  new NativeAgentVisualCaptureProvider(collector),
+  new CollectorVisualCaptureProvider(collector),
   timelineAgentWorker,
 );
 const applicationIconCache = new Map<string, Promise<string | undefined>>();
@@ -141,7 +141,7 @@ function setDevelopmentDockIcon(): void {
 
 function rebuildTray(snapshot: DesktopSnapshot): void {
   if (!tray) return;
-  const running = snapshot.agent?.recorderState === "running";
+  const running = snapshot.history?.recorderState === "running";
   const t = (key: Parameters<typeof translate>[1]): string => translate(snapshot.locale, key);
   tray.setToolTip(running ? t("tray.recording") : "DeskLore");
   tray.setContextMenu(
@@ -223,11 +223,11 @@ function registerIPC(): void {
     assertRenderer(event);
     return history.searchMemory(historyQuery(value));
   });
-  ipcMain.handle("history:start-agent", async (event) => {
+  ipcMain.handle("history:start-collector", async (event) => {
     assertRenderer(event);
     return history.start();
   });
-  ipcMain.handle("history:stop-agent", async (event) => {
+  ipcMain.handle("history:stop-collector", async (event) => {
     assertRenderer(event);
     return history.stop();
   });

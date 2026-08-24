@@ -3,15 +3,15 @@ import Combine
 import ComputerHistoryCore
 import Foundation
 
-private struct AgentCommand: Decodable {
+private struct CollectorCommand: Decodable {
     let id: String
     let command: String
     let bundleIdentifiers: [String]?
-    let visualRequest: AgentVisualCaptureRequest?
+    let visualRequest: CollectorVisualCaptureRequest?
     let observationPolicy: ObservationPolicy?
 }
 
-private struct AgentVisualCaptureRequest: Decodable {
+private struct CollectorVisualCaptureRequest: Decodable {
     let requestID: String
     let eventID: String
     let bundleIdentifier: String
@@ -23,13 +23,13 @@ private struct AgentVisualCaptureRequest: Decodable {
     let includeImage: Bool
 }
 
-private struct AgentApplicationDTO: Encodable {
+private struct CollectorApplicationDTO: Encodable {
     let bundleIdentifier: String
     let name: String
     let iconPath: String?
 }
 
-private struct AgentHealthDTO: Encodable {
+private struct CollectorHealthDTO: Encodable {
     let accessibilityGranted: Bool
     let interactionMonitorActive: Bool
     let axObserverActive: Bool
@@ -49,48 +49,48 @@ private struct AgentHealthDTO: Encodable {
     let screenCaptureGranted: Bool
 }
 
-private struct AgentSnapshotDTO: Encodable {
+private struct CollectorSnapshotDTO: Encodable {
     let recorderState: String
-    let activeApplication: AgentApplicationDTO?
+    let activeApplication: CollectorApplicationDTO?
     let activeDomain: String?
-    let health: AgentHealthDTO
+    let health: CollectorHealthDTO
     let lastError: String?
 }
 
-private struct AgentSnapshotMessage: Encodable {
+private struct CollectorSnapshotMessage: Encodable {
     let type = "snapshot"
     let requestID: String?
-    let snapshot: AgentSnapshotDTO
+    let snapshot: CollectorSnapshotDTO
 }
 
-private struct AgentEventMessage: Encodable {
+private struct CollectorEventMessage: Encodable {
     let type = "event"
     let event: HistoryEvent
 }
 
-private struct AgentIconPayload: Encodable {
+private struct CollectorIconPayload: Encodable {
     let iconPaths: [String: String]
 }
 
-private struct AgentIconResponse: Encodable {
+private struct CollectorIconResponse: Encodable {
     let type = "response"
     let requestID: String
-    let payload: AgentIconPayload
+    let payload: CollectorIconPayload
 }
 
-private struct AgentVisualCaptureResponse: Encodable {
+private struct CollectorVisualCaptureResponse: Encodable {
     let type = "response"
     let requestID: String
     let payload: VisualCaptureResult
 }
 
-private struct AgentErrorMessage: Encodable {
+private struct CollectorErrorMessage: Encodable {
     let type = "error"
     let requestID: String?
     let error: String
 }
 
-private final class AgentInputReader: @unchecked Sendable {
+private final class CollectorInputReader: @unchecked Sendable {
     private let input = FileHandle.standardInput
     private let lock = NSLock()
     private var buffer = Data()
@@ -134,7 +134,7 @@ private final class AgentInputReader: @unchecked Sendable {
 }
 
 @MainActor
-final class AgentBridge {
+final class CollectorBridge {
     private let engine: HistoryEngine
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -145,7 +145,7 @@ final class AgentBridge {
     private var applicationIconPaths: [String: String] = [:]
     private var unresolvedApplicationIconIdentifiers: Set<String> = []
     private let visualCaptureProvider = VisualCaptureProvider()
-    private lazy var inputReader = AgentInputReader(
+    private lazy var inputReader = CollectorInputReader(
         onLine: { [weak self] data in
             Task { @MainActor [weak self] in self?.handle(data) }
         },
@@ -160,7 +160,7 @@ final class AgentBridge {
 
     func start() {
         engine.onEvent = { [weak self] event in
-            self?.write(AgentEventMessage(event: event))
+            self?.write(CollectorEventMessage(event: event))
         }
         engine.objectWillChange
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
@@ -177,11 +177,11 @@ final class AgentBridge {
     }
 
     private func handle(_ data: Data) {
-        let command: AgentCommand
+        let command: CollectorCommand
         do {
-            command = try JSONDecoder().decode(AgentCommand.self, from: data)
+            command = try JSONDecoder().decode(CollectorCommand.self, from: data)
         } catch {
-            sendError("Invalid agent command: \(error.localizedDescription)")
+            sendError("Invalid collector command: \(error.localizedDescription)")
             return
         }
 
@@ -241,7 +241,7 @@ final class AgentBridge {
                     ) ?? false
                 }
                 write(
-                    AgentVisualCaptureResponse(
+                    CollectorVisualCaptureResponse(
                         requestID: command.id,
                         payload: result
                     )
@@ -254,9 +254,9 @@ final class AgentBridge {
                 applicationIconPath(for: identifier).map { (identifier, $0) }
             })
             write(
-                AgentIconResponse(
+                CollectorIconResponse(
                     requestID: command.id,
-                    payload: AgentIconPayload(iconPaths: paths)
+                    payload: CollectorIconPayload(iconPaths: paths)
                 )
             )
             return
@@ -265,18 +265,18 @@ final class AgentBridge {
             DispatchQueue.main.async { NSApplication.shared.terminate(nil) }
             return
         default:
-            sendError("Unsupported agent command", requestID: command.id)
+            sendError("Unsupported collector command", requestID: command.id)
             return
         }
         sendSnapshot(requestID: command.id)
     }
 
     private func sendSnapshot(requestID: String? = nil) {
-        write(AgentSnapshotMessage(requestID: requestID, snapshot: snapshot()))
+        write(CollectorSnapshotMessage(requestID: requestID, snapshot: snapshot()))
     }
 
     private func sendError(_ error: String, requestID: String? = nil) {
-        write(AgentErrorMessage(requestID: requestID, error: error))
+        write(CollectorErrorMessage(requestID: requestID, error: error))
     }
 
     private func write<T: Encodable>(_ value: T) {
@@ -285,12 +285,12 @@ final class AgentBridge {
         try? FileHandle.standardOutput.write(contentsOf: data)
     }
 
-    private func snapshot() -> AgentSnapshotDTO {
-        AgentSnapshotDTO(
+    private func snapshot() -> CollectorSnapshotDTO {
+        CollectorSnapshotDTO(
             recorderState: engine.state.rawValue,
             activeApplication: engine.activeApplication.map(applicationDTO),
             activeDomain: engine.activeDomain,
-            health: AgentHealthDTO(
+            health: CollectorHealthDTO(
                 accessibilityGranted: engine.accessibilityGranted,
                 interactionMonitorActive: engine.interactionMonitorActive,
                 axObserverActive: engine.axObserverActive,
@@ -316,8 +316,8 @@ final class AgentBridge {
 
     private func applicationDTO(
         _ application: HistoryEvent.Application
-    ) -> AgentApplicationDTO {
-        AgentApplicationDTO(
+    ) -> CollectorApplicationDTO {
+        CollectorApplicationDTO(
             bundleIdentifier: application.bundleIdentifier,
             name: application.name,
             iconPath: applicationIconPath(for: application.bundleIdentifier)

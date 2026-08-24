@@ -1,4 +1,4 @@
-import type { AgentClient } from "../agent-client.js";
+import type { CollectorClient } from "../collector-client.js";
 import type {
   VisualCaptureIntent,
   VisualCapturePayload,
@@ -6,15 +6,15 @@ import type {
   VisualCaptureProviderStatus,
 } from "./visual.js";
 
-export class NativeAgentVisualCaptureProvider implements VisualCaptureProvider {
+export class CollectorVisualCaptureProvider implements VisualCaptureProvider {
   readonly id = "macos-screencapturekit";
 
-  constructor(private readonly collector: AgentClient) {}
+  constructor(private readonly collector: CollectorClient) {}
 
   status(): VisualCaptureProviderStatus {
-    const agent = this.collector.current().agent;
-    if (!agent) return "unhealthy";
-    return agent.health.screenCaptureGranted ? "ready" : "permission_required";
+    const snapshot = this.collector.current().snapshot;
+    if (!snapshot) return "unhealthy";
+    return snapshot.health.screenCaptureGranted ? "ready" : "permission_required";
   }
 
   async requestPermission(): Promise<void> {
