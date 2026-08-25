@@ -140,6 +140,7 @@ export class HistoryService extends EventEmitter {
   private visualUnderstandingWork: Promise<unknown> = Promise.resolve();
   private timelineAgentEnabled = false;
   private timelineAgentTimer?: NodeJS.Timeout;
+  private timelineAgentWakeAt?: number;
   private readonly pendingVisualIntents = new Map<string, PendingVisualIntent>();
   private readonly visualCaptureScheduler = new VisualCaptureScheduler();
   private readonly visualUnderstandingCache = new VisualUnderstandingCache();
@@ -295,8 +296,7 @@ export class HistoryService extends EventEmitter {
 
   async stop(): Promise<DesktopSnapshot> {
     this.timelineAgentEnabled = false;
-    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
-    this.timelineAgentTimer = undefined;
+    this.clearTimelineAgentTimer();
     this.timeline.abortAgentJobs();
     this.stopTimers();
     if (
@@ -325,8 +325,7 @@ export class HistoryService extends EventEmitter {
 
   terminate(): void {
     this.timelineAgentEnabled = false;
-    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
-    this.timelineAgentTimer = undefined;
+    this.clearTimelineAgentTimer();
     this.timeline.disposeAgentRuntime();
     this.cancelAllPendingVisualIntents();
     this.stopTimers();
@@ -525,8 +524,7 @@ export class HistoryService extends EventEmitter {
     await this.initialize();
     this.stopTimers();
     this.timelineAgentEnabled = false;
-    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
-    this.timelineAgentTimer = undefined;
+    this.clearTimelineAgentTimer();
     this.timeline.abortAgentJobs();
     if (
       this.collector.current().connectionState === "connected" &&
@@ -568,8 +566,7 @@ export class HistoryService extends EventEmitter {
     await this.initialize();
     this.stopTimers();
     this.timelineAgentEnabled = false;
-    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
-    this.timelineAgentTimer = undefined;
+    this.clearTimelineAgentTimer();
     this.timeline.abortAgentJobs();
     const wasRunning =
       this.collector.current().connectionState === "connected" &&
@@ -1175,33 +1172,46 @@ export class HistoryService extends EventEmitter {
   }
 
   private kickTimelineAgent(delayMilliseconds = 0): void {
-    if (!this.timelineAgentEnabled || this.timelineAgentTimer) return;
-    this.timelineAgentTimer = setTimeout(
-      () => {
-        this.timelineAgentTimer = undefined;
-        if (!this.timelineAgentEnabled) return;
-        void this.enqueueTimelineAgent(async () => {
-          const segments = await this.segments.pendingClosedSegments();
-          const outcome = await this.timeline.advanceNextAgentJob(segments);
-          if (outcome.upgraded) {
-            await this.enqueueTimeline(async () => this.refreshDocuments());
+    if (!this.timelineAgentEnabled) return;
+    const delay = Math.max(0, delayMilliseconds);
+    const wakeAt = Date.now() + delay;
+    if (this.timelineAgentTimer) {
+      if ((this.timelineAgentWakeAt ?? Number.NEGATIVE_INFINITY) <= wakeAt) return;
+      this.clearTimelineAgentTimer();
+    }
+    const timer = setTimeout(() => {
+      if (this.timelineAgentTimer !== timer) return;
+      this.timelineAgentTimer = undefined;
+      this.timelineAgentWakeAt = undefined;
+      if (!this.timelineAgentEnabled) return;
+      void this.enqueueTimelineAgent(async () => {
+        const segments = await this.segments.pendingClosedSegments();
+        const outcome = await this.timeline.advanceNextAgentJob(segments);
+        if (outcome.upgraded) {
+          await this.enqueueTimeline(async () => this.refreshDocuments());
+        }
+        return outcome;
+      })
+        .then((outcome) => {
+          if (!this.timelineAgentEnabled || !outcome.pending) return;
+          if (outcome.processed) {
+            this.kickTimelineAgent();
+            return;
           }
-          return outcome;
+          if (outcome.nextWakeAt) {
+            this.kickTimelineAgent(Math.max(1_000, Date.parse(outcome.nextWakeAt) - Date.now()));
+          }
         })
-          .then((outcome) => {
-            if (!this.timelineAgentEnabled || !outcome.pending) return;
-            if (outcome.processed) {
-              this.kickTimelineAgent();
-              return;
-            }
-            if (outcome.nextWakeAt) {
-              this.kickTimelineAgent(Math.max(1_000, Date.parse(outcome.nextWakeAt) - Date.now()));
-            }
-          })
-          .catch((error) => this.captureError(error));
-      },
-      Math.max(0, delayMilliseconds),
-    );
+        .catch((error) => this.captureError(error));
+    }, delay);
+    this.timelineAgentTimer = timer;
+    this.timelineAgentWakeAt = wakeAt;
+  }
+
+  private clearTimelineAgentTimer(): void {
+    if (this.timelineAgentTimer) clearTimeout(this.timelineAgentTimer);
+    this.timelineAgentTimer = undefined;
+    this.timelineAgentWakeAt = undefined;
   }
 
   private wakeTimelineAgentJobs(reason: string): void {

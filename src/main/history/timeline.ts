@@ -346,14 +346,14 @@ function runtimeFingerprint(
 }
 
 function retryDate(job: TimelineAgentJob, date: Date): string {
-  const exponent = Math.min(10, Math.max(0, job.totalProviderRequests - 1));
+  const exponent = Math.min(10, Math.max(0, job.consecutiveFailures - 1));
   const base = Math.min(6 * 60 * 60 * 1_000, 30_000 * 2 ** exponent);
   const jitter = Number.parseInt(job.id.slice(0, 4), 16) % Math.max(1, Math.floor(base / 5));
   return new Date(date.getTime() + base + jitter).toISOString();
 }
 
 function runtimeRetryDate(job: TimelineAgentJob, date: Date): string {
-  const exponent = Math.min(5, Math.max(0, job.totalRuntimeFailures - 1));
+  const exponent = Math.min(5, Math.max(0, job.consecutiveFailures - 1));
   const base = Math.min(5 * 60 * 1_000, 15_000 * 2 ** exponent);
   const jitter = Number.parseInt(job.id.slice(0, 4), 16) % Math.max(1, Math.floor(base / 5));
   return new Date(date.getTime() + base + jitter).toISOString();
@@ -517,6 +517,7 @@ export class TimelineRepository {
             runtime && "failureReason" in runtime ? runtime.failureReason : "llm_disabled",
           failureSignature:
             runtime && "failureReason" in runtime ? runtime.failureReason : "llm_disabled",
+          consecutiveFailures: 0,
           nextEligibleAt: undefined,
         },
         date,
@@ -534,6 +535,7 @@ export class TimelineRepository {
           wakeReason: "runtime_changed",
           failureClass: undefined,
           failureSignature: undefined,
+          consecutiveFailures: 0,
           noProgressStreak: 0,
           nextEligibleAt: undefined,
         },
@@ -616,6 +618,7 @@ export class TimelineRepository {
             status: "succeeded",
             failureClass: undefined,
             failureSignature: undefined,
+            consecutiveFailures: 0,
             noProgressStreak: 0,
             nextEligibleAt: undefined,
           },
@@ -629,7 +632,11 @@ export class TimelineRepository {
         return { processed: true, upgraded: true, pending: runnable.length > 1, nextWakeAt };
       }
       if (step.state === "stalled") {
-        const updated = { ...job, ...totals };
+        const updated = {
+          ...job,
+          ...totals,
+          consecutiveFailures: job.consecutiveFailures + 1,
+        };
         await this.jobs.update(
           job.id,
           {
@@ -637,6 +644,7 @@ export class TimelineRepository {
             status: "stalled",
             failureClass: "agent_stalled",
             failureSignature: "no_progress",
+            consecutiveFailures: updated.consecutiveFailures,
             noProgressStreak: step.noProgressStreak,
             nextEligibleAt: retryDate(updated, date),
           },
@@ -667,6 +675,7 @@ export class TimelineRepository {
           status: "queued",
           failureClass: undefined,
           failureSignature: undefined,
+          consecutiveFailures: step.progressed ? 0 : job.consecutiveFailures,
           noProgressStreak: step.noProgressStreak,
           nextEligibleAt: undefined,
         },
@@ -688,6 +697,7 @@ export class TimelineRepository {
         totalProviderRequests:
           job.totalProviderRequests + (workerRuntimeFailure ? turnDelta : Math.max(1, turnDelta)),
         totalRuntimeFailures: job.totalRuntimeFailures + (workerRuntimeFailure ? 1 : 0),
+        consecutiveFailures: job.consecutiveFailures + 1,
         totalToolCalls: job.totalToolCalls + toolDelta,
         totalSubmissions: job.totalSubmissions + submissionDelta,
       };
@@ -697,6 +707,7 @@ export class TimelineRepository {
           totalTurns: updated.totalTurns,
           totalProviderRequests: updated.totalProviderRequests,
           totalRuntimeFailures: updated.totalRuntimeFailures,
+          consecutiveFailures: updated.consecutiveFailures,
           totalToolCalls: updated.totalToolCalls,
           totalSubmissions: updated.totalSubmissions,
           status: normalized.retryable
@@ -772,6 +783,7 @@ export class TimelineRepository {
           wakeReason: reason,
           failureClass: undefined,
           failureSignature: undefined,
+          consecutiveFailures: 0,
           noProgressStreak: 0,
           nextEligibleAt: undefined,
         },
@@ -905,6 +917,7 @@ export class TimelineRepository {
           wakeReason: "runtime_changed",
           failureClass: undefined,
           failureSignature: undefined,
+          consecutiveFailures: 0,
           noProgressStreak: 0,
           nextEligibleAt: undefined,
         })) ?? existing

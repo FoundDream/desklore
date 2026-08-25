@@ -1133,6 +1133,69 @@ describe("TypeScript history core", () => {
     expect(Date.parse(job!.nextEligibleAt!)).toBeLessThan(attemptedAt.getTime() + 20_000);
   });
 
+  it("backs off failed runs by failure streak instead of accumulated model turns", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-failure-backoff-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    const store = new SegmentStore(layout);
+    const input = event({}, 44);
+    await store.append(input);
+    const closed = await store.closeExpired(new Date("2026-08-20T13:50:00.000Z"));
+    const factory: TimelineAgentSessionFactory = {
+      create: vi.fn(async () => ({
+        step: async (): Promise<TimelineAgentRuntimeStep> => ({
+          step: { state: "stalled", progressed: false, noProgressStreak: 3 },
+          metrics: {
+            turns: 21,
+            toolCalls: {},
+            inspectedEventCount: 0,
+            evidenceBytes: 0,
+            inputTokens: 210,
+            outputTokens: 105,
+            estimatedInputTokens: 240,
+            submissionAttempts: 0,
+            normalizedDuplicateCount: 0,
+            uninspectedEvidenceCount: 0,
+          },
+          inspectedEventIDs: [],
+        }),
+        abort: vi.fn(),
+        dispose: vi.fn(),
+      })),
+    };
+    const repository = new TimelineRepository(
+      layout,
+      store,
+      async () => ({
+        settings: {
+          enabled: true,
+          memorySynthesisEnabled: false,
+          protocol: "responses",
+          model: "test-model",
+          endpoint: "https://api.openai.com/v1/responses",
+        },
+        apiKey: "test-key",
+      }),
+      () => "en",
+      factory,
+    );
+    const attemptedAt = new Date("2026-08-20T13:50:01.000Z");
+
+    await repository.generateIfNeeded(closed!);
+    await repository.advanceNextAgentJob([closed!], attemptedAt);
+
+    const [job] = await new TimelineAgentJobRepository(layout).load();
+    const retryDelay = Date.parse(job!.nextEligibleAt!) - attemptedAt.getTime();
+    expect(job).toMatchObject({
+      status: "stalled",
+      failureClass: "agent_stalled",
+      totalProviderRequests: 21,
+      consecutiveFailures: 1,
+    });
+    expect(retryDelay).toBeGreaterThanOrEqual(30_000);
+    expect(retryDelay).toBeLessThan(36_000);
+  });
+
   it("drops an active session when the runtime fingerprint changes", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-runtime-change-"));
     temporaryDirectories.push(root);

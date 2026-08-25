@@ -22,6 +22,7 @@ vi.mock("electron", () => ({
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
@@ -29,6 +30,46 @@ afterEach(async () => {
 });
 
 describe("History settings", () => {
+  it("lets immediate timeline work preempt a delayed retry wake-up", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-agent-wake-"));
+    temporaryDirectories.push(root);
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "stopped" as const }),
+      terminate: vi.fn(),
+    }) as unknown as CollectorClient;
+    const service = new HistoryService(collector, root);
+    const advanceNextAgentJob = vi.fn(async () => ({
+      processed: false,
+      upgraded: false,
+      pending: false,
+    }));
+    const internals = service as unknown as {
+      timelineAgentEnabled: boolean;
+      timelineAgentWork: Promise<unknown>;
+      segments: { pendingClosedSegments(): Promise<never[]> };
+      timeline: {
+        advanceNextAgentJob(segments: never[]): Promise<{
+          processed: boolean;
+          upgraded: boolean;
+          pending: boolean;
+        }>;
+      };
+      kickTimelineAgent(delayMilliseconds?: number): void;
+    };
+    vi.spyOn(internals.segments, "pendingClosedSegments").mockResolvedValue([]);
+    vi.spyOn(internals.timeline, "advanceNextAgentJob").mockImplementation(advanceNextAgentJob);
+    vi.useFakeTimers();
+    internals.timelineAgentEnabled = true;
+
+    internals.kickTimelineAgent(6 * 60 * 60 * 1_000);
+    internals.kickTimelineAgent();
+    await vi.advanceTimersByTimeAsync(0);
+    await internals.timelineAgentWork;
+
+    expect(advanceNextAgentJob).toHaveBeenCalledOnce();
+    service.terminate();
+  });
+
   it("cascades timeline deletion to its source segment before refreshing memory", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-delete-"));
     temporaryDirectories.push(root);

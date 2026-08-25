@@ -34,6 +34,7 @@ export interface TimelineAgentJob {
   totalSubmissions: number;
   totalProviderRequests: number;
   totalRuntimeFailures: number;
+  consecutiveFailures: number;
   noProgressStreak: number;
   nextEligibleAt?: string;
   createdAt: string;
@@ -75,10 +76,19 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
   ) {
     return undefined;
   }
-  const nextEligibleAt =
+  const parsedNextEligibleAt =
     typeof source.nextEligibleAt === "string" && Number.isFinite(Date.parse(source.nextEligibleAt))
       ? source.nextEligibleAt
       : undefined;
+  const legacyFailureState =
+    source.consecutiveFailures === undefined &&
+    ["waiting_runtime", "waiting_provider", "stalled"].includes(source.status as string);
+  const missingAgentStallRetry =
+    source.status === "stalled" && source.failureClass === "agent_stalled" && !parsedNextEligibleAt;
+  const nextEligibleAt =
+    (legacyFailureState && parsedNextEligibleAt) || missingAgentStallRetry
+      ? source.updatedAt
+      : parsedNextEligibleAt;
   return {
     schemaVersion: 1,
     id: source.id.slice(0, 80),
@@ -98,6 +108,7 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
     totalSubmissions: count(source.totalSubmissions),
     totalProviderRequests: count(source.totalProviderRequests),
     totalRuntimeFailures: count(source.totalRuntimeFailures),
+    consecutiveFailures: legacyFailureState ? 1 : count(source.consecutiveFailures),
     noProgressStreak: count(source.noProgressStreak),
     nextEligibleAt,
     createdAt: source.createdAt,
@@ -149,6 +160,7 @@ export class TimelineAgentJobRepository {
       totalSubmissions: 0,
       totalProviderRequests: 0,
       totalRuntimeFailures: 0,
+      consecutiveFailures: 0,
       noProgressStreak: 0,
       createdAt,
       updatedAt: createdAt,
