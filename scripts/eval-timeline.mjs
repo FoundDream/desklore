@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import { sanitizeEvent } from "../src/main/history/policy.ts";
 import { readDataset } from "./eval-history-data.mjs";
+import { argumentsFrom, countBy, positiveInteger, readJSONLines } from "./eval-utils.mjs";
 
 const jiti = createJiti(import.meta.url);
 const { runTimelineAgent } = await jiti.import("../src/main/history/timeline-agent.ts");
@@ -15,29 +16,6 @@ const defaultEndpoint = "https://api.openai.com/v1/responses";
 const defaultGenerationModel = "gpt-5.6-luna";
 const defaultJudgeModel = "gpt-5.6-luna";
 const protocols = new Set(["responses", "chat_completions"]);
-
-function argumentsFrom(argv) {
-  const values = new Map();
-  for (let index = 0; index < argv.length; index += 1) {
-    const key = argv[index];
-    if (!key?.startsWith("--")) continue;
-    const value = argv[index + 1];
-    if (value && !value.startsWith("--")) {
-      values.set(key.slice(2), value);
-      index += 1;
-    } else {
-      values.set(key.slice(2), "true");
-    }
-  }
-  return values;
-}
-
-function positiveInteger(value, fallback, name) {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Invalid --${name}: ${value}`);
-  return parsed;
-}
 
 function segmentIDs(value) {
   if (value === undefined) return undefined;
@@ -59,34 +37,10 @@ function hash(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function countBy(values, key) {
-  const counts = new Map();
-  for (const value of values) {
-    const name = key(value);
-    counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
-  return Object.fromEntries([...counts].sort((lhs, rhs) => rhs[1] - lhs[1]));
-}
-
 function mean(values) {
   return values.length
     ? Number((values.reduce((total, value) => total + value, 0) / values.length).toFixed(3))
     : null;
-}
-
-async function readJSONLines(filePath) {
-  const contents = await readFile(filePath, "utf8");
-  const values = [];
-  let malformedLines = 0;
-  for (const line of contents.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      values.push(JSON.parse(line));
-    } catch {
-      malformedLines += 1;
-    }
-  }
-  return { values, malformedLines };
 }
 
 export function blindTimelineArm(segmentID) {

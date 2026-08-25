@@ -12,34 +12,16 @@ import {
   normalizeHistoryEvent,
   normalizeMetadata,
 } from "../src/main/history/types.ts";
+import {
+  argumentsFrom,
+  countBy,
+  dateArgument,
+  positiveInteger,
+  readOptionalJSONLines,
+} from "./eval-utils.mjs";
 
 const defaultExcludedBundles = new Set(["com.github.Electron", "com.desklore.desktop"]);
 const axDecisions = new Set(["enough", "needs_visual", "uncertain"]);
-
-function argumentsFrom(argv) {
-  const values = new Map();
-  for (let index = 0; index < argv.length; index += 1) {
-    const key = argv[index];
-    if (!key?.startsWith("--")) continue;
-    const value = argv[index + 1];
-    if (value && !value.startsWith("--")) {
-      values.set(key.slice(2), value);
-      index += 1;
-    } else {
-      values.set(key.slice(2), "true");
-    }
-  }
-  return values;
-}
-
-function countBy(items, key) {
-  const counts = new Map();
-  for (const item of items) {
-    const value = key(item);
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-  return Object.fromEntries([...counts.entries()].sort((lhs, rhs) => rhs[1] - lhs[1]));
-}
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -57,20 +39,6 @@ function number(value) {
 
 function string(value) {
   return typeof value === "string" && value ? value : undefined;
-}
-
-function positiveInteger(value, fallback, name) {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`Invalid --${name}: ${value}`);
-  return parsed;
-}
-
-function dateArgument(value, name) {
-  if (value === undefined) return undefined;
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) throw new Error(`Invalid --${name}: ${value}`);
-  return parsed;
 }
 
 function windowIdentity(applicationKey, runtimeIdentifier) {
@@ -157,26 +125,6 @@ function normalizedTraceRecord(event, evidence, segmentID) {
   };
 }
 
-async function readJSONLines(filePath) {
-  try {
-    const contents = await readFile(filePath, "utf8");
-    const values = [];
-    let malformedLines = 0;
-    for (const line of contents.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        values.push(JSON.parse(line));
-      } catch {
-        malformedLines += 1;
-      }
-    }
-    return { values, malformedLines };
-  } catch (error) {
-    if (error.code === "ENOENT") return { values: [], malformedLines: 0 };
-    throw error;
-  }
-}
-
 async function readTrace(root, includeOpen) {
   const segmentsRoot = path.join(root, "segments");
   const entries = await readdir(segmentsRoot, { withFileTypes: true });
@@ -207,8 +155,8 @@ async function readTrace(root, includeOpen) {
     }
 
     const [eventsFile, evidenceFile] = await Promise.all([
-      readJSONLines(path.join(directory, "events.jsonl")),
-      readJSONLines(path.join(directory, "evidence.jsonl")),
+      readOptionalJSONLines(path.join(directory, "events.jsonl")),
+      readOptionalJSONLines(path.join(directory, "evidence.jsonl")),
     ]);
     malformedLines += eventsFile.malformedLines + evidenceFile.malformedLines;
     if (evidenceFile.values.length === 0) continue;
