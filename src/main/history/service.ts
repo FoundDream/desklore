@@ -418,8 +418,7 @@ export class HistoryService extends EventEmitter {
 
   async configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot> {
     const next = {
-      enabled: input.enabled,
-      memorySynthesisEnabled: input.memorySynthesisEnabled,
+      ...this.llmSettings,
       protocol: input.protocol,
       model: input.model.trim(),
       endpoint: input.endpoint.trim(),

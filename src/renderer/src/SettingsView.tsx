@@ -312,8 +312,6 @@ export function SettingsView({
     setFeedback(undefined);
     const saved = await run(() =>
       window.computerHistory.configureLLM({
-        enabled: history.llm.enabled,
-        memorySynthesisEnabled: history.llm.memorySynthesisEnabled,
         protocol,
         model,
         endpoint,

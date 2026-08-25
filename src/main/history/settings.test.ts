@@ -411,4 +411,40 @@ describe("History settings", () => {
     expect(reloaded.model).toBe("custom-model");
     expect(reloaded.endpoint).toBe("https://example.com/v1/chat/completions");
   });
+
+  it("keeps feature toggles unchanged when the model connection changes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-model-connection-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const settingsStore = new HistorySettingsStore(layout);
+    await settingsStore.saveLLMSettings({
+      enabled: true,
+      memorySynthesisEnabled: false,
+      protocol: "responses",
+      model: "original-model",
+      endpoint: "https://example.com/v1/responses",
+    });
+
+    const collector = Object.assign(new EventEmitter(), {
+      current: () => ({ connectionState: "disconnected" as const }),
+    }) as unknown as CollectorClient;
+    const service = new HistoryService(collector, root);
+    await (service as unknown as { initialize(): Promise<void> }).initialize();
+
+    await service.configureLLM({
+      protocol: "chat_completions",
+      model: "replacement-model",
+      endpoint: "https://example.com/v1/chat/completions",
+      apiKey: "",
+    });
+
+    await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
+      enabled: true,
+      memorySynthesisEnabled: false,
+      protocol: "chat_completions",
+      model: "replacement-model",
+      endpoint: "https://example.com/v1/chat/completions",
+    });
+  });
 });

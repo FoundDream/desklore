@@ -306,8 +306,6 @@ function registerIPC(): void {
     assertRenderer(event);
     if (
       !input ||
-      typeof input.enabled !== "boolean" ||
-      typeof input.memorySynthesisEnabled !== "boolean" ||
       !["responses", "chat_completions"].includes(input.protocol) ||
       typeof input.model !== "string" ||
       input.model.length > 200 ||

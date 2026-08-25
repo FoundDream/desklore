@@ -170,8 +170,6 @@ export interface DesktopSnapshot {
 }
 
 export interface LLMConfigurationInput {
-  enabled: boolean;
-  memorySynthesisEnabled: boolean;
   protocol: ModelProtocol;
   model: string;
   endpoint: string;
