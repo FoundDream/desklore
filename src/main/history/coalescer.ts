@@ -144,6 +144,7 @@ export class EventCoalescer {
     if (event.kind === "window.changed" && previous) {
       if (
         event.captureReason !== "application_activation" &&
+        event.captureReason === previous.captureReason &&
         elapsed <= 2 &&
         windowIdentity(event) === windowIdentity(previous)
       ) {
@@ -228,11 +229,22 @@ export class EventCoalescer {
 function burstWindow(event: HistoryEvent): number | undefined {
   if (event.kind === "mouse.click") return 0.8;
   if (event.kind === "window.changed") {
-    if (event.captureReason === "application_activation") return undefined;
     if (event.captureReason === "title_change") return 2;
-    return 0.75;
+    return 1;
   }
   return undefined;
+}
+
+function shouldCoalesceBurst(previous: HistoryEvent, latest: HistoryEvent): boolean {
+  const elapsed = elapsedSeconds(latest, previous);
+  if (elapsed < 0) return false;
+  if (latest.kind !== "window.changed" || previous.kind !== "window.changed") {
+    const window = burstWindow(latest);
+    return window !== undefined && elapsed <= window;
+  }
+  if (latest.captureReason !== previous.captureReason) return elapsed <= 1;
+  if (latest.captureReason === "title_change") return elapsed <= 2;
+  return elapsed <= 0.75 && windowIdentity(latest) === windowIdentity(previous);
 }
 
 export class EventBurstCoalescer {
@@ -247,7 +259,7 @@ export class EventBurstCoalescer {
       this.pendingByStream.set(key, event);
       return { ready: [], coalescedCount: 0 };
     }
-    if (elapsedSeconds(event, previous) <= window) {
+    if (shouldCoalesceBurst(previous, event)) {
       this.pendingByStream.set(key, this.merge(previous, event));
       return { ready: [], coalescedCount: event.occurrenceCount ?? 1 };
     }
@@ -285,10 +297,8 @@ export class EventBurstCoalescer {
   private streamKey(event: HistoryEvent): string {
     const components = [event.kind, event.application.bundleIdentifier];
     if (event.kind === "window.changed") {
-      components.push(event.captureReason ?? "");
-      if (event.captureReason !== "title_change") {
-        components.push(event.window?.title ?? "", event.window?.url ?? "");
-      }
+      // All reasons for the same application share one pending transition. The
+      // coalescing predicate still protects distinct same-reason window events.
     } else {
       components.push(event.window?.title ?? "", event.window?.url ?? "");
     }
@@ -318,8 +328,17 @@ export class EventBurstCoalescer {
         text: `${previousAX.text}\n${latestAX.text}`.slice(0, 48_000),
       };
     }
+    const captureReasons = [
+      ...(previous.coalescedCaptureReasons ?? [previous.captureReason]),
+      ...(latest.coalescedCaptureReasons ?? [latest.captureReason]),
+    ].filter(
+      (reason): reason is NonNullable<HistoryEvent["captureReason"]> => reason !== undefined,
+    );
+    const uniqueCaptureReasons = [...new Set(captureReasons)];
     return {
       ...latest,
+      coalescedCaptureReasons:
+        uniqueCaptureReasons.length > 1 ? uniqueCaptureReasons : latest.coalescedCaptureReasons,
       occurrenceCount: (previous.occurrenceCount ?? 1) + (latest.occurrenceCount ?? 1),
       accessibility,
     };

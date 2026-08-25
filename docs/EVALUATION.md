@@ -44,9 +44,21 @@ settings, copy source events into the repository, or make model requests. An exp
 history root and `CODEX_COMPUTER_HISTORY_ROOT` remain supported for automation.
 
 The report uses bundle-aware, one-to-one timestamp matching and reports precision, recall, F1,
-semantic agreement, latency, duplicate-burst, and per-kind diagnostics. Headline precision and
-recall retain their original kind/application/time definition; semantic diagnostics are a separate
-layer and do not redefine those scores.
+semantic agreement, latency, duplicate-burst, per-kind, complete app-by-kind, active-bucket
+sensitivity, and privacy-safe Return-key context diagnostics. Headline precision and recall retain
+their original kind/application/time definition; diagnostics are a separate layer and do not
+redefine those scores.
+
+To rerun an exact frozen cohort, pass a previous evaluator report, a JSON object with
+`segmentIDs`, or a JSON array of segment IDs. The evaluator fails if any selected segment is missing
+or incomplete instead of silently shrinking the cohort:
+
+```bash
+pnpm eval:history -- \
+  --reference codex-local \
+  --segment-ids-file /path/to/frozen-report.json \
+  --output .eval-data/history-frozen
+```
 
 A passing code test or an old retained bucket is not evidence of current live capture recall.
 Collector changes require a fresh baseline of at least 30 complete paired ten-minute buckets before

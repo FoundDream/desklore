@@ -997,6 +997,30 @@ function DiagnosticsView({
             <span>{t("health.eventsCoalesced")}</span>
             <strong>{health?.burstCoalescedEventCount ?? 0}</strong>
           </div>
+          <div>
+            <span>{t("health.axValueTargets")}</span>
+            <strong>{health?.axValueNotificationTargets ?? 0}</strong>
+          </div>
+          <div>
+            <span>{t("health.axSelectionTargets")}</span>
+            <strong>{health?.axSelectionNotificationTargets ?? 0}</strong>
+          </div>
+          <div>
+            <span>{t("health.returnKeys")}</span>
+            <strong>{health?.returnKeyEventCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>{t("health.submitEvents")}</span>
+            <strong>{health?.keyboardSubmitCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>{t("health.textInputEvents")}</span>
+            <strong>{health?.textInputEventCount ?? 0}</strong>
+          </div>
+          <div>
+            <span>{t("health.selectionEvents")}</span>
+            <strong>{health?.selectionEventCount ?? 0}</strong>
+          </div>
         </div>
       </section>
     </>

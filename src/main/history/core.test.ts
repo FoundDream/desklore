@@ -588,32 +588,65 @@ describe("TypeScript history core", () => {
     ).toBeUndefined();
   });
 
-  it("keeps activations immediate and coalesces title churn to the latest window", () => {
+  it("coalesces activation, focus, and title callbacks into one window transition", () => {
     const bursts = new EventBurstCoalescer();
     const activation = event({ captureReason: "application_activation" }, 1);
-    expect(bursts.ingest(activation)).toEqual({ ready: [activation], coalescedCount: 0 });
+    expect(bursts.ingest(activation)).toEqual({ ready: [], coalescedCount: 0 });
 
-    const firstTitle = event(
+    const focus = event(
       {
-        captureReason: "title_change",
-        window: { title: "Loading", isPrivateBrowsing: false },
+        timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 2)).toISOString(),
+        captureReason: "window_focus",
       },
       2,
     );
-    const settledTitle = event(
+    expect(bursts.ingest(focus)).toEqual({ ready: [], coalescedCount: 1 });
+
+    const firstTitle = event(
       {
         timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 3)).toISOString(),
         captureReason: "title_change",
-        window: { title: "Settled", isPrivateBrowsing: false },
+        window: { title: "Loading", isPrivateBrowsing: false },
       },
       3,
     );
-    expect(bursts.ingest(firstTitle).ready).toEqual([]);
+    const settledTitle = event(
+      {
+        timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 4)).toISOString(),
+        captureReason: "title_change",
+        window: { title: "Settled", isPrivateBrowsing: false },
+      },
+      4,
+    );
+    expect(bursts.ingest(firstTitle)).toEqual({ ready: [], coalescedCount: 1 });
     expect(bursts.ingest(settledTitle)).toEqual({ ready: [], coalescedCount: 1 });
     expect(bursts.flushAll()[0]).toMatchObject({
       window: { title: "Settled" },
-      occurrenceCount: 2,
+      occurrenceCount: 4,
+      coalescedCaptureReasons: ["application_activation", "window_focus", "title_change"],
     });
+  });
+
+  it("does not merge distinct same-reason window transitions", () => {
+    const bursts = new EventBurstCoalescer();
+    const first = event(
+      {
+        captureReason: "window_focus",
+        window: { title: "First", isPrivateBrowsing: false },
+      },
+      1,
+    );
+    const second = event(
+      {
+        timestamp: new Date(Date.UTC(2026, 7, 20, 13, 40, 1, 500)).toISOString(),
+        captureReason: "window_focus",
+        window: { title: "Second", isPrivateBrowsing: false },
+      },
+      2,
+    );
+    expect(bursts.ingest(first).ready).toEqual([]);
+    expect(bursts.ingest(second)).toEqual({ ready: [first], coalescedCount: 0 });
+    expect(bursts.flushAll()).toEqual([second]);
   });
 
   it("classifies Return semantics in TypeScript using the captured AX target", () => {
@@ -639,12 +672,36 @@ describe("TypeScript history core", () => {
         interaction: { keyEquivalent: "return", modifiers: [] },
       }),
     );
+    const cursorComposer = classifyKeyboardEvent(
+      event({
+        kind: "keyboard.shortcut",
+        application: {
+          bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+          name: "Cursor",
+        },
+        target: { role: "AXTextArea", placeholder: "Send a message" },
+        interaction: { keyEquivalent: "return", modifiers: [] },
+      }),
+    );
+    const cursorEditor = classifyKeyboardEvent(
+      event({
+        kind: "keyboard.shortcut",
+        application: {
+          bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+          name: "Cursor",
+        },
+        target: { role: "AXTextArea" },
+        interaction: { keyEquivalent: "return", modifiers: [] },
+      }),
+    );
     expect(submit.kind).toBe("keyboard.submit");
     expect(multiline.kind).toBe("keyboard.shortcut");
     expect(chatWithoutTarget.kind).toBe("keyboard.submit");
+    expect(cursorComposer.kind).toBe("keyboard.submit");
+    expect(cursorEditor.kind).toBe("keyboard.shortcut");
   });
 
-  it("drops duplicate focus callbacks but preserves later and activation events", () => {
+  it("routes cross-reason focus callbacks to burst coalescing and drops same-reason duplicates", () => {
     const coalescer = new EventCoalescer();
     expect(coalescer.process(event({ captureReason: "window_focus" }, 1))).toBeDefined();
     expect(coalescer.process(event({ captureReason: "window_focus" }, 2))).toBeUndefined();
@@ -658,7 +715,7 @@ describe("TypeScript history core", () => {
           3,
         ),
       ),
-    ).toBeUndefined();
+    ).toBeDefined();
     expect(
       coalescer.process(
         event(
@@ -669,7 +726,7 @@ describe("TypeScript history core", () => {
           4,
         ),
       ),
-    ).toBeDefined();
+    ).toBeUndefined();
     expect(coalescer.process(event({ captureReason: "application_activation" }, 5))).toBeDefined();
   });
 

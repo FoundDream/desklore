@@ -204,6 +204,7 @@ void test("full paired run records provenance and scores only complete shared bu
   const candidate = path.join(root, "candidate");
   const reference = path.join(root, "reference");
   const output = path.join(root, "output");
+  const segmentSelection = path.join(root, "segment-selection.json");
   const segmentID = "2026-08-20T12-00-00Z";
   const candidateDirectory = path.join(candidate, "segments", segmentID);
   const referenceDirectory = path.join(reference, "segments", segmentID);
@@ -250,6 +251,7 @@ void test("full paired run records provenance and scores only complete shared bu
       }),
     ),
     writeFile(path.join(referenceDirectory, "events.jsonl"), `${JSON.stringify(referenceEvent)}\n`),
+    writeFile(segmentSelection, JSON.stringify({ overall: { segmentIDs: [segmentID] } })),
   ]);
 
   const report = await runHistoryEvaluation([
@@ -259,16 +261,21 @@ void test("full paired run records provenance and scores only complete shared bu
     reference,
     "--output",
     output,
+    "--segment-ids-file",
+    segmentSelection,
     "--candidate-settings",
     "fixture",
   ]);
 
   assert.equal(report.schemaVersion, 2);
+  assert.equal(report.evaluatorVersion, "history-paired-v3");
   assert.equal(report.overall.commonCompletedSegments, 1);
   assert.equal(report.overall.matches.tolerant.matches, 1);
   assert.equal(report.provenance.candidate.recorderSettings, "fixture");
   assert.equal(report.provenance.reference.adapter, "skysight-flex-v1");
   assert.equal(report.provenance.reference.origin, "configured-path");
+  assert.equal(report.segmentSelection.mode, "explicit_file");
+  assert.equal(report.segmentSelection.requestedCount, 1);
   assert.equal((await stat(path.join(output, "report.json"))).mode & 0o777, 0o600);
 });
 
@@ -289,11 +296,40 @@ void test("diagnostics preserve headline scoring while exposing segment and stre
 
   const diagnostics = diagnosticSummary(candidate, reference, 1_000);
   assert.equal(diagnostics.perSegment.length, 2);
+  assert.equal(diagnostics.activeSegmentSensitivity.commonCompletedSegments, 0);
+  assert.equal(diagnostics.applicationKinds.length, 3);
   assert.equal(diagnostics.perSegment[0].matches, 1);
   assert.equal(diagnostics.largestStreamGaps[0].difference, 1);
   assert.equal(diagnostics.captureReasons.candidate["selection.changed / ax_selection"], 1);
   assert.equal(diagnostics.unstableApplications.candidate["pid.42 / Preview"], 1);
   assert.equal(diagnostics.referenceOnlyKinds["session.started"], 1);
+});
+
+void test("diagnostics expose privacy-safe Return contexts without target labels", () => {
+  const candidate = [
+    {
+      ...event("2026-08-20T12:00:00.000Z", "keyboard.shortcut", "com.cursor.test"),
+      semantics: {
+        keyEquivalent: "return",
+        modifiers: [],
+        targetRole: "AXTextArea",
+        targetLabelPresent: true,
+      },
+      raw: { target: { placeholder: "private prompt" } },
+    },
+  ];
+  const diagnostics = diagnosticSummary(candidate, [], 1_000);
+  assert.deepEqual(diagnostics.returnKeyContexts.candidate, [
+    {
+      application: "com.cursor.test",
+      classifiedKind: "keyboard.shortcut",
+      targetRole: "AXTextArea",
+      targetLabelPresent: true,
+      modifiers: [],
+      count: 1,
+    },
+  ]);
+  assert.equal(JSON.stringify(diagnostics.returnKeyContexts).includes("private prompt"), false);
 });
 
 void test("tolerant matching is one-to-one within each kind and app stream", () => {

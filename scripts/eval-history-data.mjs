@@ -13,7 +13,7 @@ const sensitiveSystemBundles = new Set([
 ]);
 const defaultExcludedBundles = new Set(["com.github.Electron", "com.desklore.desktop"]);
 const reportSchemaVersion = 2;
-const evaluatorVersion = "history-paired-v2";
+const evaluatorVersion = "history-paired-v3";
 const segmentDurationMilliseconds = 10 * 60 * 1_000;
 const segmentBoundaryToleranceMilliseconds = 2_000;
 const segmentStatuses = [
@@ -208,6 +208,9 @@ export function normalizedEvent(value, source) {
       ? currentEvent?.occurrenceCount
       : finiteNumber(reference?.occurrenceCount),
     captureReason: typeof captureReason === "string" ? captureReason : undefined,
+    coalescedCaptureReasons: candidate
+      ? currentEvent?.coalescedCaptureReasons
+      : normalizedStringArray(reference?.coalescedCaptureReasons),
     url:
       typeof (currentEvent?.window?.url ?? record(reference?.window)?.url) === "string"
         ? (currentEvent?.window?.url ?? record(reference?.window)?.url)
@@ -731,8 +734,28 @@ export function diagnosticSummary(candidateEvents, referenceEvents, toleranceMil
       };
     });
 
+  const activeSegmentIDs = new Set(
+    perSegment
+      .filter((segment) => segment.candidate >= 20 && segment.reference >= 20)
+      .map((segment) => segment.segmentID),
+  );
+  const activeCandidateEvents = candidateEvents.filter((event) =>
+    activeSegmentIDs.has(event.segmentID),
+  );
+  const activeReferenceEvents = referenceEvents.filter((event) =>
+    activeSegmentIDs.has(event.segmentID),
+  );
+  const activeSegmentSensitivity = {
+    minimumEventsPerSide: 20,
+    commonCompletedSegments: activeSegmentIDs.size,
+    segmentIDs: [...activeSegmentIDs].sort((lhs, rhs) => lhs.localeCompare(rhs)),
+    candidate: activeCandidateEvents.length,
+    reference: activeReferenceEvents.length,
+    ...evaluateEvents(activeCandidateEvents, activeReferenceEvents, toleranceMilliseconds).tolerant,
+  };
+
   const streamKeys = new Set([...candidateEvents.map(eventKey), ...referenceEvents.map(eventKey)]);
-  const largestStreamGaps = [...streamKeys]
+  const applicationKinds = [...streamKeys]
     .map((key) => {
       const separator = key.indexOf("\u001f");
       const kind = key.slice(0, separator);
@@ -753,16 +776,46 @@ export function diagnosticSummary(candidateEvents, referenceEvents, toleranceMil
       (lhs, rhs) =>
         Math.abs(rhs.difference) - Math.abs(lhs.difference) ||
         rhs.candidate + rhs.reference - (lhs.candidate + lhs.reference),
-    )
-    .slice(0, 20);
+    );
+  const largestStreamGaps = applicationKinds.slice(0, 20);
 
   const captureReasons = { candidate: new Map(), reference: new Map() };
   for (const event of candidateEvents) {
-    increment(captureReasons.candidate, `${event.kind} / ${event.captureReason ?? "<missing>"}`);
+    const reasons = event.coalescedCaptureReasons?.length
+      ? event.coalescedCaptureReasons
+      : [event.captureReason ?? "<missing>"];
+    for (const reason of reasons) {
+      increment(captureReasons.candidate, `${event.kind} / ${reason}`);
+    }
   }
   for (const event of referenceEvents) {
     increment(captureReasons.reference, `${event.kind} / ${event.captureReason ?? "<missing>"}`);
   }
+
+  const returnKeyContexts = (events) => {
+    const contexts = new Map();
+    for (const event of events) {
+      if (!["return", "enter", "numpad-enter"].includes(event.semantics?.keyEquivalent ?? "")) {
+        continue;
+      }
+      const context = {
+        application: appIdentity(event),
+        classifiedKind: event.kind,
+        targetRole: event.semantics?.targetRole ?? "<missing>",
+        targetLabelPresent: event.semantics?.targetLabelPresent === true,
+        modifiers: event.semantics?.modifiers ?? [],
+      };
+      const key = JSON.stringify(context);
+      const previous = contexts.get(key);
+      contexts.set(key, { ...context, count: (previous?.count ?? 0) + 1 });
+    }
+    return [...contexts.values()].sort(
+      (lhs, rhs) =>
+        rhs.count - lhs.count ||
+        lhs.application.localeCompare(rhs.application) ||
+        lhs.classifiedKind.localeCompare(rhs.classifiedKind),
+    );
+  };
   const unstableApplications = { candidate: new Map(), reference: new Map() };
   for (const event of candidateEvents) {
     if (isUnstableBundleIdentifier(event.bundleIdentifier)) {
@@ -782,6 +835,8 @@ export function diagnosticSummary(candidateEvents, referenceEvents, toleranceMil
 
   return {
     perSegment,
+    activeSegmentSensitivity,
+    applicationKinds,
     largestStreamGaps,
     captureReasons: {
       candidate: objectFromCounts(captureReasons.candidate),
@@ -792,6 +847,10 @@ export function diagnosticSummary(candidateEvents, referenceEvents, toleranceMil
       reference: objectFromCounts(unstableApplications.reference),
     },
     referenceOnlyKinds: objectFromCounts(referenceOnlyKinds),
+    returnKeyContexts: {
+      candidate: returnKeyContexts(candidateEvents),
+      reference: returnKeyContexts(referenceEvents),
+    },
     paired: pairedDiagnostics(candidateEvents, referenceEvents, toleranceMilliseconds),
   };
 }
@@ -873,6 +932,14 @@ function sliceMarkdown(title, slice, toleranceMilliseconds) {
     .join("\n");
   const latency = slice.diagnostics.paired.latencyMilliseconds;
   const duplicateBursts = slice.diagnostics.paired.duplicateBursts;
+  const active = slice.diagnostics.activeSegmentSensitivity;
+  const returnKeyRows = slice.diagnostics.returnKeyContexts.candidate
+    .slice(0, 20)
+    .map(
+      (value) =>
+        `| ${markdownCell(value.application)} | ${markdownCell(value.classifiedKind)} | ${markdownCell(value.targetRole)} | ${value.targetLabelPresent ? "yes" : "no"} | ${markdownCell(value.modifiers.join(", ") || "none")} | ${value.count} |`,
+    )
+    .join("\n");
   return (
     `## ${title}\n\n` +
     `- Common completed segments: ${slice.commonCompletedSegments}\n` +
@@ -880,6 +947,7 @@ function sliceMarkdown(title, slice, toleranceMilliseconds) {
     `- Reference events: ${slice.reference.events}\n` +
     `- Exact timestamp/kind/app matches: ${slice.matches.exact.matches} (F1 ${percent(slice.matches.exact.f1)})\n` +
     `- ±${toleranceMilliseconds} ms kind/app matches: ${slice.matches.tolerant.matches} (precision ${percent(slice.matches.tolerant.precision)}, recall ${percent(slice.matches.tolerant.recall)}, F1 ${percent(slice.matches.tolerant.f1)})\n\n` +
+    `- Active paired sensitivity (at least ${active.minimumEventsPerSide} events per side): ${active.commonCompletedSegments} segments, precision ${percent(active.precision)}, recall ${percent(active.recall)}, F1 ${percent(active.f1)}\n\n` +
     `| Event kind | Candidate | Reference | ± tolerance matches | Precision | Recall | F1 |\n` +
     `| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n${rows}\n\n` +
     `### Per-segment diagnostics\n\n` +
@@ -900,8 +968,33 @@ function sliceMarkdown(title, slice, toleranceMilliseconds) {
     `| Field | Compared | Agreed | Agreement |\n` +
     `| --- | ---: | ---: | ---: |\n${semanticRows}\n\n` +
     `| Kind | Application identity | Field | Mismatches |\n` +
-    `| --- | --- | --- | ---: |\n${semanticMismatchRows}\n`
+    `| --- | --- | --- | ---: |\n${semanticMismatchRows}\n` +
+    `\n### Privacy-safe Return-key contexts (candidate)\n\n` +
+    `This table contains only application identity, event classification, role, metadata presence, modifiers, and counts. It never emits target labels or typed text.\n\n` +
+    `| Application identity | Classified kind | Target role | Target metadata | Modifiers | Count |\n` +
+    `| --- | --- | --- | --- | --- | ---: |\n${returnKeyRows}\n`
   );
+}
+
+async function requestedSegmentIDsFromFile(filePath) {
+  const resolved = path.resolve(filePath);
+  const value = JSON.parse(await readFile(resolved, "utf8"));
+  const ids = Array.isArray(value) ? value : (value?.segmentIDs ?? value?.overall?.segmentIDs);
+  if (
+    !Array.isArray(ids) ||
+    !ids.length ||
+    ids.length > 2_000 ||
+    ids.some(
+      (id) =>
+        typeof id !== "string" ||
+        id.length > 128 ||
+        path.basename(id) !== id ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/.test(id),
+    )
+  ) {
+    throw new Error("Invalid --segment-ids-file; expected a JSON array or report segmentIDs");
+  }
+  return { source: resolved, ids: [...new Set(ids)] };
 }
 
 function dataQualityMarkdown(report) {
@@ -1006,6 +1099,12 @@ export async function run(argv = process.argv.slice(2)) {
   if (sinceValue && !Number.isFinite(since)) {
     throw new Error(`Invalid --since value: ${sinceValue}`);
   }
+  const segmentSelection = args.get("segment-ids-file")
+    ? await requestedSegmentIDsFromFile(args.get("segment-ids-file"))
+    : undefined;
+  if (segmentSelection && sinceValue) {
+    throw new Error("Use either --segment-ids-file or --since, not both");
+  }
 
   const [candidateDataset, referenceDataset] = await Promise.all([
     readDataset(candidateRoot, "candidate"),
@@ -1013,8 +1112,16 @@ export async function run(argv = process.argv.slice(2)) {
   ]);
   const candidateCompleted = completedSegmentIDs(candidateDataset);
   const referenceCompleted = completedSegmentIDs(referenceDataset);
-  const commonIDs = [...candidateCompleted]
-    .filter((id) => referenceCompleted.has(id))
+  const availableCommonIDs = [...candidateCompleted].filter((id) => referenceCompleted.has(id));
+  const missingRequestedIDs = segmentSelection?.ids.filter(
+    (id) => !candidateCompleted.has(id) || !referenceCompleted.has(id),
+  );
+  if (missingRequestedIDs?.length) {
+    throw new Error(
+      `Selected segments are missing or incomplete: ${missingRequestedIDs.join(", ")}`,
+    );
+  }
+  const commonIDs = (segmentSelection?.ids ?? availableCommonIDs)
     .filter(
       (id) =>
         !Number.isFinite(since) ||
@@ -1048,6 +1155,13 @@ export async function run(argv = process.argv.slice(2)) {
       semantic: "field agreement on headline-matched pairs",
       referenceRole: "observational comparator, not ground truth",
     },
+    segmentSelection: segmentSelection
+      ? {
+          mode: "explicit_file",
+          source: segmentSelection.source,
+          requestedCount: segmentSelection.ids.length,
+        }
+      : { mode: Number.isFinite(since) ? "since" : "all_complete_shared" },
     toleranceMilliseconds,
     excludedBundles: [...excludedBundles].sort((lhs, rhs) => lhs.localeCompare(rhs)),
     since: Number.isFinite(since) ? new Date(since).toISOString() : undefined,

@@ -31,6 +31,7 @@ export interface HistoryEvent {
   timestamp: string;
   kind: HistoryEventKind;
   captureReason?: HistoryCaptureReason;
+  coalescedCaptureReasons?: HistoryCaptureReason[];
   occurrenceCount?: number;
   application: HistoryApplication;
   window?: {
@@ -231,6 +232,9 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
   const timestamp = string(source?.timestamp);
   const kind = string(source?.kind) as HistoryEventKind | undefined;
   const captureReason = string(source?.captureReason) as HistoryCaptureReason | undefined;
+  const coalescedCaptureReasons = stringArray(source?.coalescedCaptureReasons) as
+    | HistoryCaptureReason[]
+    | undefined;
   const bundleIdentifier = string(application?.bundleIdentifier);
   const name = string(application?.name);
   const kinds: HistoryEventKind[] = [
@@ -260,6 +264,9 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
     !kind ||
     !kinds.includes(kind) ||
     (captureReason !== undefined && !captureReasons.includes(captureReason)) ||
+    (source?.coalescedCaptureReasons !== undefined &&
+      (coalescedCaptureReasons === undefined ||
+        coalescedCaptureReasons.some((reason) => !captureReasons.includes(reason)))) ||
     !bundleIdentifier ||
     !name
   ) {
@@ -293,6 +300,7 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
     timestamp,
     kind,
     captureReason,
+    coalescedCaptureReasons,
     occurrenceCount: number(source?.occurrenceCount),
     application: { bundleIdentifier, name },
     window: window
@@ -460,6 +468,7 @@ export function eventForDisk(event: HistoryEvent): UnknownRecord {
     timestamp: event.timestamp,
     kind: event.kind,
     captureReason: event.captureReason,
+    coalescedCaptureReasons: event.coalescedCaptureReasons,
     occurrenceCount: event.occurrenceCount,
     application: {
       bundleIdentifier: event.application.bundleIdentifier,
