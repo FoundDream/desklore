@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteOwnedFile } from "./owned-file.js";
 import type { StorageLayout } from "./storage.js";
 
 const jobsFile = "timeline-agent-jobs.json";
@@ -104,14 +105,6 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
   };
 }
 
-async function atomicWrite(filePath: string, contents: string): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, filePath);
-  await chmod(filePath, 0o600);
-}
-
 export class TimelineAgentJobRepository {
   private work: Promise<unknown> = Promise.resolve();
 
@@ -209,7 +202,8 @@ export class TimelineAgentJobRepository {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") jobs = [];
       }
       const result = operation(jobs);
-      await atomicWrite(this.filePath(), `${JSON.stringify(jobs, null, 2)}\n`);
+      await mkdir(path.dirname(this.filePath()), { recursive: true, mode: 0o700 });
+      await atomicWriteOwnedFile(this.filePath(), `${JSON.stringify(jobs, null, 2)}\n`);
       return result;
     });
     this.work = next.then(

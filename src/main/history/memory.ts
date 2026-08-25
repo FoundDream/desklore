@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { chmod, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
 import { outputLanguageName, translate } from "../../shared/i18n.js";
 import { ensureStorage, type StorageLayout } from "./storage.js";
 import { generateStructuredText, type ModelRuntime } from "./model-client.js";
+import { atomicWriteOwnedFile } from "./owned-file.js";
 import type {
   HistoryApplication,
   HistorySearchMatch,
@@ -403,13 +404,6 @@ function decode(markdown: string, filePath: string): MemoryRollupRecord {
   };
 }
 
-async function atomicWrite(filePath: string, contents: string): Promise<void> {
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, filePath);
-  await chmod(filePath, 0o600);
-}
-
 function searchTokens(query: string): string[] {
   const normalized = query.toLocaleLowerCase();
   const words = normalized.match(/[\p{L}\p{N}_.+#-]+/gu) ?? [];
@@ -534,7 +528,7 @@ export class MemoryRepository {
       const next = { ...record, filePath };
       const contents = encode(next);
       const previous = await readFile(filePath, "utf8").catch(() => undefined);
-      if (previous !== contents) await atomicWrite(filePath, contents);
+      if (previous !== contents) await atomicWriteOwnedFile(filePath, contents);
     }
     const currentIDs = new Set(records.map((record) => record.id));
     for (const record of existing) {

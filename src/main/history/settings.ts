@@ -1,10 +1,11 @@
 import { safeStorage } from "electron";
-import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
 import { isAppLocale, translate } from "../../shared/i18n.js";
 import { isModelProtocol } from "../../shared/model.js";
 import { defaultObservationPolicy, normalizeObservationPolicy } from "./policy.js";
+import { atomicWriteOwnedFile } from "./owned-file.js";
 import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "./types.js";
 import type { StorageLayout } from "./storage.js";
 
@@ -20,13 +21,6 @@ export const defaultVisualSettings: VisualSettings = {
   captureMode: "off",
   understandingMode: "off",
 };
-async function atomicWrite(filePath: string, contents: string | Uint8Array): Promise<void> {
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents, { mode: 0o600 });
-  await rename(temporary, filePath);
-  await chmod(filePath, 0o600);
-}
-
 async function readJSON(filePath: string): Promise<unknown> {
   try {
     return JSON.parse(await readFile(filePath, "utf8"));
@@ -71,7 +65,7 @@ export class HistorySettingsStore {
   }
 
   async saveLocale(locale: AppLocale): Promise<void> {
-    await atomicWrite(
+    await atomicWriteOwnedFile(
       this.interfacePath,
       `${JSON.stringify({ schemaVersion: 1, locale }, null, 2)}\n`,
     );
@@ -118,7 +112,7 @@ export class HistorySettingsStore {
 
   async savePolicy(policy: ObservationPolicy): Promise<void> {
     const normalized = normalizeObservationPolicy(policy);
-    await atomicWrite(
+    await atomicWriteOwnedFile(
       this.policyPath,
       `${JSON.stringify({ schemaVersion: 2, ...normalized }, null, 2)}\n`,
     );
@@ -159,7 +153,7 @@ export class HistorySettingsStore {
   }
 
   async saveLLMSettings(settings: TimelineLLMSettings): Promise<void> {
-    await atomicWrite(
+    await atomicWriteOwnedFile(
       this.llmPath,
       `${JSON.stringify({ schemaVersion: 2, ...settings }, null, 2)}\n`,
     );
@@ -186,7 +180,7 @@ export class HistorySettingsStore {
   }
 
   async saveVisualSettings(settings: VisualSettings): Promise<void> {
-    await atomicWrite(
+    await atomicWriteOwnedFile(
       this.visualPath,
       `${JSON.stringify({ schemaVersion: 1, ...settings }, null, 2)}\n`,
     );
@@ -213,8 +207,7 @@ export class HistorySettingsStore {
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error(translate(locale, "error.secureStorageUnavailable"));
     }
-    await atomicWrite(this.apiKeyPath, safeStorage.encryptString(apiKey));
-    await chmod(this.apiKeyPath, 0o600);
+    await atomicWriteOwnedFile(this.apiKeyPath, safeStorage.encryptString(apiKey));
   }
 
   async removeAPIKey(): Promise<void> {
@@ -229,7 +222,7 @@ export class HistorySettingsStore {
   }
 
   async grantRecordingConsent(date = new Date()): Promise<void> {
-    await atomicWrite(
+    await atomicWriteOwnedFile(
       this.recordingConsentPath,
       `${JSON.stringify(
         {

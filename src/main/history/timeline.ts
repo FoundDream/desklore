@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
 import { translate } from "../../shared/i18n.js";
 import { decodeTimelineMarkdown, encodeTimelineMarkdown } from "./markdown.js";
 import type { ModelRuntime } from "./model-client.js";
+import { atomicWriteOwnedFile } from "./owned-file.js";
 import { sanitizeEvent } from "./policy.js";
 import { segmentDurationMilliseconds, type SegmentStore, type StorageLayout } from "./storage.js";
 import {
@@ -317,13 +318,6 @@ function runRecord(
   };
 }
 
-async function atomicWrite(filePath: string, contents: string): Promise<void> {
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, filePath);
-  await chmod(filePath, 0o600);
-}
-
 const timelineAgentRuntimeVersion = 3;
 
 function runtimeFingerprint(
@@ -437,7 +431,7 @@ export class TimelineRepository {
       const refreshed = await this.loadDocuments();
       if (refreshed.some((item) => item.sourceSegmentID === segment.metadata.id)) return undefined;
       const destination = path.join(this.layout.timeline, this.filename(document));
-      await atomicWrite(destination, encodeTimelineMarkdown(document));
+      await atomicWriteOwnedFile(destination, encodeTimelineMarkdown(document));
       const saved = { ...document, filePath: destination };
       await this.ensureJob(segment, saved, runtime);
       return saved;
@@ -614,7 +608,7 @@ export class TimelineRepository {
           },
           body: semanticBody(step.result, this.locale()),
         };
-        await atomicWrite(document.filePath, encodeTimelineMarkdown(upgraded));
+        await atomicWriteOwnedFile(document.filePath, encodeTimelineMarkdown(upgraded));
         await this.jobs.update(
           job.id,
           {

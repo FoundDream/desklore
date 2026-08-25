@@ -1,6 +1,7 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ModelProtocol } from "../../shared/model.js";
+import { atomicWriteOwnedFile } from "./owned-file.js";
 import type { StorageLayout } from "./storage.js";
 
 const diagnosticsFile = "timeline-agent-runs.jsonl";
@@ -91,13 +92,6 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
   };
 }
 
-async function atomicWrite(filePath: string, contents: string): Promise<void> {
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, filePath);
-  await chmod(filePath, 0o600);
-}
-
 export function timelineAgentProvider(endpoint: string): "openai" | "custom" {
   try {
     return new URL(endpoint).hostname === "api.openai.com" ? "openai" : "custom";
@@ -145,7 +139,7 @@ export class TimelineAgentDiagnosticsRepository {
         .filter((item) => Date.parse(item.finishedAt) >= cutoff)
         .concat(normalized)
         .slice(-maximumRetainedRuns);
-      await atomicWrite(
+      await atomicWriteOwnedFile(
         this.filePath(),
         `${retained.map((item) => JSON.stringify(item)).join("\n")}\n`,
       );

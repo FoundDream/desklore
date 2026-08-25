@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteOwnedFile } from "./owned-file.js";
 import {
   eventForDisk,
   evidenceEnrichmentForDisk,
@@ -310,13 +311,6 @@ export function segmentIdentifier(date: Date): string {
     .replace(/:/g, "-");
 }
 
-async function atomicWrite(filePath: string, contents: string | Uint8Array): Promise<void> {
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, contents, { mode: 0o600 });
-  await rename(temporary, filePath);
-  await chmod(filePath, 0o600);
-}
-
 export type SegmentMetric = "captured" | "policyBlocked" | "deduplicated" | "burstCoalesced";
 
 export class SegmentStore {
@@ -521,7 +515,7 @@ export class SegmentStore {
         retained.push(JSON.stringify(evidenceEnrichmentForDisk(enrichment)));
       }
       if (!changed) continue;
-      if (retained.length) await atomicWrite(filePath, `${retained.join("\n")}\n`);
+      if (retained.length) await atomicWriteOwnedFile(filePath, `${retained.join("\n")}\n`);
       else await rm(filePath, { force: true });
     }
     return removed;
@@ -604,7 +598,7 @@ export class SegmentStore {
   private async writeMetadata(metadata: SegmentMetadata): Promise<void> {
     const directoryPath = path.join(this.layout.segments, metadata.id);
     await mkdir(directoryPath, { recursive: true });
-    await atomicWrite(
+    await atomicWriteOwnedFile(
       path.join(directoryPath, "metadata.json"),
       `${JSON.stringify(metadataForDisk(metadata), null, 2)}\n`,
     );
