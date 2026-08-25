@@ -181,25 +181,13 @@ export interface MemoryRollupRecord {
   filePath?: string;
 }
 
-export interface HistorySearchMatch {
-  id: string;
-  kind: "10min" | MemoryBucketKind;
-  startedAt: string;
-  endedAt: string;
-  title: string;
-  description: string;
-  score: number;
-  sourceDocumentIDs: string[];
-  sourceSegmentIDs: string[];
-}
-
-export interface HistorySearchResponse {
-  query: string;
-  answer: string;
-  matches: HistorySearchMatch[];
-}
-
-export type { ObservationPolicy, WindowTitleExclusionRule } from "../../shared/contracts.js";
+export type {
+  HistorySearchMatch,
+  HistorySearchResponse,
+  ObservationPolicy,
+  VisualSettings,
+  WindowTitleExclusionRule,
+} from "../../shared/contracts.js";
 
 export interface TimelineLLMSettings {
   enabled: boolean;
@@ -207,12 +195,6 @@ export interface TimelineLLMSettings {
   protocol: ModelProtocol;
   model: string;
   endpoint: string;
-}
-
-export interface VisualSettings {
-  axJudge: "rules" | "luna";
-  captureMode: "off" | "fallback";
-  understandingMode: "off" | "ocr" | "luna";
 }
 
 type UnknownRecord = Record<string, unknown>;
