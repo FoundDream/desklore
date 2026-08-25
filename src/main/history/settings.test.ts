@@ -438,6 +438,7 @@ describe("History settings", () => {
       endpoint: "https://example.com/v1/chat/completions",
       apiKey: "",
     });
+    await (service as unknown as { timelineWork: Promise<unknown> }).timelineWork;
 
     await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
       enabled: true,
