@@ -1,7 +1,7 @@
 # DeskLore privacy boundary
 
 DeskLore is designed to keep computer-history data on the user's Mac. This document describes the
-behavior of version 0.1.0. It is a technical product boundary, not a promise that local files are
+behavior of version 0.2.0. It is a technical product boundary, not a promise that local files are
 safe from every process or user with access to the same Mac.
 
 ## Consent and permissions
@@ -31,6 +31,10 @@ and password-like fields. Native sanitization also filters common credentials, a
 payment-card patterns, email addresses, and sensitive URL components before events leave the Swift
 collector. These controls reduce risk; they cannot guarantee that every application labels
 sensitive UI correctly or that every private value matches a known pattern.
+
+Users can also exclude installed applications, domains, and exact or partial window titles in
+Settings. Window-title rules may optionally be limited to one application. These policies are
+enforced before retained history is produced.
 
 ## Storage
 

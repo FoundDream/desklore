@@ -14,7 +14,7 @@
 DeskLore 把日常 Mac 活动整理成可搜索的时间线和分层记忆。它优先使用 macOS
 Accessibility 语义，而不是持续录制屏幕。项目提供可选视觉补充，但默认关闭。
 
-> **当前状态：** [`0.1.0`](https://github.com/FoundDream/desklore/releases/tag/v0.1.0) 是面向
+> **当前状态：** [`0.2.0`](https://github.com/FoundDream/desklore/releases/tag/v0.2.0) 是面向
 > macOS 14+、Apple Silicon 的早期源码版本，暂不提供官方签名安装包。
 
 ## 为什么是 DeskLore
@@ -103,8 +103,8 @@ Bundle ID，让 macOS 独立完成原生采集边界的签名和权限识别。
 DeskLore 尽可能使用仅所有者可访问的目录和文件权限，但不会对 timeline/memory 额外做应用层加密。
 如需磁盘静态保护，请开启 macOS FileVault。
 
-DeskLore 0.1.0 使用全新且带版本号的本地格式，不导入预发布 Computer History 构建产生的数据或
-无版本设置。
+DeskLore 的公开版本使用全新且带版本号的本地格式，不导入预发布 Computer History 构建产生的
+数据或无版本设置。
 
 ## 可选模型与视觉能力
 

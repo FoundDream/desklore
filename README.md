@@ -15,7 +15,7 @@ DeskLore turns ordinary Mac activity into a searchable timeline and layered pers
 uses macOS Accessibility semantics instead of continuously recording the screen. An optional
 visual fallback exists for gaps in Accessibility evidence, but it is disabled by default.
 
-> **Status:** [`0.1.0`](https://github.com/FoundDream/desklore/releases/tag/v0.1.0) is an early
+> **Status:** [`0.2.0`](https://github.com/FoundDream/desklore/releases/tag/v0.2.0) is an early
 > source release for macOS 14+ on Apple Silicon. There is no official signed binary yet.
 
 ## Why DeskLore
@@ -115,7 +115,7 @@ Files are created with owner-only permissions where supported. DeskLore does not
 level encryption to timeline or memory files; use macOS FileVault if disk-at-rest protection is
 required.
 
-DeskLore 0.1.0 intentionally starts with a new, versioned local schema. It does not import data or
+DeskLore's public release line uses a new, versioned local schema. It does not import data or
 unversioned settings created by pre-release Computer History builds.
 
 ## Optional model features
