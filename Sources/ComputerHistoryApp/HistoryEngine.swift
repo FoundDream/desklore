@@ -35,6 +35,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     @Published private(set) var lastError: String?
 
     var onEvent: ((HistoryEvent) -> Void)?
+    var onUsageState: ((UsageStateEvent) -> Void)?
 
     private let workspaceMonitor = WorkspaceMonitor()
     private let axNotificationMonitor = AXNotificationMonitor()
@@ -48,6 +49,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     private var lastNativeWindowCaptureByStream: [String: Date] = [:]
     private var observationPolicy: ObservationPolicy?
     private var activeContextAllowed = false
+    private var usageAvailable = true
     private let hostBundleIdentifier = ProcessInfo.processInfo.environment[
         "DESKLORE_HOST_BUNDLE_ID"
     ]
@@ -117,11 +119,26 @@ final class HistoryEngine: NSObject, ObservableObject {
                 self.axNotificationMonitor.stop()
             }
             self.refreshSemanticListenerHealth()
+            self.emitUsageState(
+                for: application,
+                reason: .applicationActivation
+            )
             self.capture(
                 application,
                 kind: .windowChanged,
                 reason: .applicationActivation
             )
+        }
+        workspaceMonitor.onAvailabilityChanged = { [weak self] available, reason in
+            guard let self else { return }
+            self.usageAvailable = available
+            if available {
+                self.emitCurrentUsageState(reason: reason)
+            } else if self.state == .running {
+                self.onUsageState?(
+                    UsageStateEvent(state: .unavailable, reason: reason)
+                )
+            }
         }
         workspaceMonitor.start()
 
@@ -141,12 +158,14 @@ final class HistoryEngine: NSObject, ObservableObject {
         axNotificationMonitor.setSemanticCaptureEnabled(false)
         if state == .running {
             pollFrontmostApplication()
+            emitCurrentUsageState(reason: .policyChanged)
             captureFrontmostApplication(kind: .windowChanged, reason: .poll)
         }
     }
 
     func pause() {
         guard state == .running else { return }
+        onUsageState?(UsageStateEvent(state: .unavailable, reason: .pause))
         state = .paused
         activeContextAllowed = false
         axNotificationMonitor.setSemanticCaptureEnabled(false)
@@ -158,6 +177,7 @@ final class HistoryEngine: NSObject, ObservableObject {
         state = .running
         activeContextAllowed = false
         pollFrontmostApplication()
+        emitCurrentUsageState(reason: .resume)
         captureFrontmostApplication(kind: .windowChanged, reason: .poll)
     }
 
@@ -409,6 +429,35 @@ final class HistoryEngine: NSObject, ObservableObject {
                 ?? "pid.\(application.processIdentifier)",
             name: application.localizedName ?? "Unknown application"
         )
+    }
+
+    private func emitCurrentUsageState(reason: UsageStateEvent.Reason) {
+        guard state == .running else { return }
+        guard usageAvailable,
+              let application = NSWorkspace.shared.frontmostApplication else {
+            onUsageState?(UsageStateEvent(state: .unavailable, reason: reason))
+            return
+        }
+        emitUsageState(for: application, reason: reason)
+    }
+
+    private func emitUsageState(
+        for application: NSRunningApplication,
+        reason: UsageStateEvent.Reason
+    ) {
+        guard state == .running, usageAvailable else { return }
+        let value = Self.application(from: application)
+        if allowsApplication(application) {
+            onUsageState?(
+                UsageStateEvent(
+                    state: .foreground,
+                    reason: reason,
+                    application: value
+                )
+            )
+        } else {
+            onUsageState?(UsageStateEvent(state: .excluded, reason: reason))
+        }
     }
 
     private func allowsApplication(_ application: NSRunningApplication) -> Bool {

@@ -9,7 +9,12 @@ import type {
   RecorderState,
   TimelineApplication,
 } from "../shared/contracts.js";
-import { normalizeHistoryEvent, type HistoryEvent } from "./history/types.js";
+import {
+  normalizeHistoryEvent,
+  normalizeUsageStateEvent,
+  type HistoryEvent,
+  type UsageStateEvent,
+} from "./history/types.js";
 
 export interface CollectorSnapshot {
   recorderState: RecorderState;
@@ -26,10 +31,11 @@ export interface CollectorConnection {
 }
 
 interface CollectorMessage {
-  type: "snapshot" | "event" | "response" | "error";
+  type: "snapshot" | "event" | "usage_state" | "response" | "error";
   requestID?: string;
   snapshot?: CollectorSnapshot;
   event?: unknown;
+  usageState?: unknown;
   payload?: unknown;
   error?: string;
 }
@@ -217,6 +223,18 @@ export class CollectorClient extends EventEmitter {
       } catch (error) {
         this.connectionError = error instanceof Error ? error.message : "Invalid native event";
         console.error("[desklore] Rejected an invalid native event:", error);
+        this.emit("snapshot", this.current());
+      }
+    }
+    if (message.type === "usage_state" && message.usageState) {
+      try {
+        this.emit(
+          "usage-state",
+          normalizeUsageStateEvent(message.usageState) satisfies UsageStateEvent,
+        );
+      } catch (error) {
+        this.connectionError = error instanceof Error ? error.message : "Invalid usage state";
+        console.error("[desklore] Rejected an invalid usage state:", error);
         this.emit("snapshot", this.current());
       }
     }

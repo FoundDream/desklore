@@ -99,6 +99,7 @@ describe("history storage deletion and retention", () => {
       mode: 0o600,
     });
     await writeFile(path.join(layout.memoryDay, "example.md"), "memory", { mode: 0o600 });
+    await writeFile(path.join(layout.usage, "2026-08-24.json"), "usage\n", { mode: 0o600 });
     await writeFile(path.join(layout.state, "recording-consent.json"), "{}", { mode: 0o600 });
 
     const archive = await clearHistoryData(
@@ -125,11 +126,17 @@ describe("history storage deletion and retention", () => {
     await expect(stat(path.join(layout.memoryDay, "example.md"))).rejects.toMatchObject({
       code: "ENOENT",
     });
+    await expect(stat(path.join(layout.usage, "2026-08-24.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(
       stat(path.join(layout.trash, archive.id, "timeline", "example.md")),
     ).resolves.toBeDefined();
     await expect(
       stat(path.join(layout.trash, archive.id, "timeline", "timeline-agent-runs.jsonl")),
+    ).resolves.toBeDefined();
+    await expect(
+      stat(path.join(layout.trash, archive.id, "usage", "2026-08-24.json")),
     ).resolves.toBeDefined();
 
     await expect(restoreHistoryData(layout, archive.id)).resolves.toEqual(archive);
@@ -141,6 +148,9 @@ describe("history storage deletion and retention", () => {
     ).resolves.toBe("diagnostic\n");
     await expect(readFile(path.join(layout.memoryDay, "example.md"), "utf8")).resolves.toBe(
       "memory",
+    );
+    await expect(readFile(path.join(layout.usage, "2026-08-24.json"), "utf8")).resolves.toBe(
+      "usage\n",
     );
     await expect(latestHistoryArchive(layout)).resolves.toBeUndefined();
   });

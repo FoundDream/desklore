@@ -26,6 +26,30 @@ export interface HistoryApplication {
   name: string;
 }
 
+export type UsageState = "foreground" | "excluded" | "unavailable";
+
+export type UsageStateReason =
+  | "application_activation"
+  | "policy_changed"
+  | "pause"
+  | "resume"
+  | "screen_sleep"
+  | "screen_wake"
+  | "system_sleep"
+  | "system_wake"
+  | "session_inactive"
+  | "session_active"
+  | "screen_saver_started"
+  | "screen_saver_stopped"
+  | "collector_disconnected";
+
+export interface UsageStateEvent {
+  timestamp: string;
+  state: UsageState;
+  reason: UsageStateReason;
+  application?: HistoryApplication;
+}
+
 export interface HistoryEvent {
   id: string;
   timestamp: string;
@@ -341,6 +365,51 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
         }
       : undefined,
     evidence: normalizeEventEvidence(evidence),
+  };
+}
+
+export function normalizeUsageStateEvent(value: unknown): UsageStateEvent {
+  const source = record(value);
+  const application = record(source?.application);
+  const timestamp = string(source?.timestamp);
+  const state = string(source?.state) as UsageState | undefined;
+  const reason = string(source?.reason) as UsageStateReason | undefined;
+  const states: UsageState[] = ["foreground", "excluded", "unavailable"];
+  const reasons: UsageStateReason[] = [
+    "application_activation",
+    "policy_changed",
+    "pause",
+    "resume",
+    "screen_sleep",
+    "screen_wake",
+    "system_sleep",
+    "system_wake",
+    "session_inactive",
+    "session_active",
+    "screen_saver_started",
+    "screen_saver_stopped",
+    "collector_disconnected",
+  ];
+  const bundleIdentifier = string(application?.bundleIdentifier);
+  const name = string(application?.name);
+  if (
+    !timestamp ||
+    !Number.isFinite(Date.parse(timestamp)) ||
+    !state ||
+    !states.includes(state) ||
+    !reason ||
+    !reasons.includes(reason) ||
+    (state === "foreground" && (!bundleIdentifier || !name)) ||
+    (state !== "foreground" && source?.application !== undefined)
+  ) {
+    throw new Error("Invalid usage state event");
+  }
+  return {
+    timestamp,
+    state,
+    reason,
+    application:
+      state === "foreground" && bundleIdentifier && name ? { bundleIdentifier, name } : undefined,
   };
 }
 

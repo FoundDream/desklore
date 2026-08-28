@@ -34,6 +34,7 @@ export interface StorageLayout {
   memory: string;
   memorySixHour: string;
   memoryDay: string;
+  usage: string;
   state: string;
   trash: string;
 }
@@ -57,6 +58,7 @@ export function makeStorageLayout(root: string): StorageLayout {
     memory,
     memorySixHour: path.join(memory, "6h"),
     memoryDay: path.join(memory, "day"),
+    usage: path.join(root, "usage"),
     state: path.join(root, "state"),
     trash: path.join(root, ".trash"),
   };
@@ -71,6 +73,7 @@ export async function ensureStorage(layout: StorageLayout): Promise<void> {
       layout.memory,
       layout.memorySixHour,
       layout.memoryDay,
+      layout.usage,
       layout.state,
       layout.trash,
     ].map(async (directory) => {
@@ -206,7 +209,7 @@ export async function clearHistoryData(
   };
   const moved: Array<{ source: string; destination: string }> = [];
   try {
-    for (const source of [layout.segments, layout.timeline, layout.memory]) {
+    for (const source of [layout.segments, layout.timeline, layout.memory, layout.usage]) {
       const normalized = assertApplicationOwnedHistoryDirectory(layout, source);
       const stats = await lstat(normalized);
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -243,6 +246,7 @@ async function historyDirectoriesAreEmpty(layout: StorageLayout): Promise<boolea
     if (!entry.isDirectory() || !["6h", "day"].includes(entry.name)) return false;
     if ((await readdir(path.join(layout.memory, entry.name))).length) return false;
   }
+  if ((await readdir(layout.usage)).length) return false;
   return true;
 }
 
@@ -260,10 +264,15 @@ export async function restoreHistoryData(
   const directory = archiveDirectory(layout, id);
   const restored: Array<{ source: string; destination: string }> = [];
   try {
-    for (const destination of [layout.segments, layout.timeline, layout.memory]) {
+    for (const destination of [layout.segments, layout.timeline, layout.memory, layout.usage]) {
       const normalized = assertApplicationOwnedHistoryDirectory(layout, destination);
       const source = path.join(directory, path.basename(normalized));
-      const stats = await lstat(source);
+      const stats = await lstat(source).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" && normalized === path.normalize(layout.usage))
+          return undefined;
+        throw error;
+      });
+      if (!stats) continue;
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
         throw new Error("History recovery archive is incomplete");
       }

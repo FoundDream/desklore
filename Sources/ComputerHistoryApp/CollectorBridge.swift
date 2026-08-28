@@ -68,6 +68,11 @@ private struct CollectorEventMessage: Encodable {
     let event: HistoryEvent
 }
 
+private struct CollectorUsageStateMessage: Encodable {
+    let type = "usage_state"
+    let usageState: UsageStateEvent
+}
+
 private struct CollectorIconPayload: Encodable {
     let iconPaths: [String: String]
 }
@@ -162,6 +167,9 @@ final class CollectorBridge {
         engine.onEvent = { [weak self] event in
             self?.write(CollectorEventMessage(event: event))
         }
+        engine.onUsageState = { [weak self] event in
+            self?.write(CollectorUsageStateMessage(usageState: event))
+        }
         engine.objectWillChange
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] in self?.sendSnapshot() }
@@ -172,6 +180,7 @@ final class CollectorBridge {
 
     func stop() {
         engine.onEvent = nil
+        engine.onUsageState = nil
         inputReader.stop()
         cancellables.removeAll()
     }

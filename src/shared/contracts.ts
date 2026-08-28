@@ -11,6 +11,22 @@ export interface TimelineApplication {
   iconPath?: string;
 }
 
+export interface ApplicationUsage {
+  application: TimelineApplication;
+  durationMilliseconds: number;
+}
+
+export interface DailyApplicationUsage {
+  date: string;
+  totalDurationMilliseconds: number;
+  applications: ApplicationUsage[];
+}
+
+export interface ApplicationUsageSummary {
+  today: DailyApplicationUsage;
+  last7Days: DailyApplicationUsage[];
+}
+
 export interface InstalledApplication {
   bundleIdentifier: string;
   name: string;
@@ -146,6 +162,7 @@ export interface HistorySnapshot {
   activeDomainAllowed?: boolean;
   documents: TimelineDocument[];
   memories: MemoryRollup[];
+  usage: ApplicationUsageSummary;
   health: CaptureHealth;
   llm: LLMSettings;
   visual: VisualSettings & VisualHealth;

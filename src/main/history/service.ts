@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { shell } from "electron";
 import type {
+  ApplicationUsageSummary,
   HistorySnapshot,
   DesktopSnapshot,
   HistoryRecovery,
@@ -38,6 +39,7 @@ import {
 import { TimelineRepository, type LLMRuntime, type LLMUnavailable } from "./timeline.js";
 import type { TimelineAgentSessionFactory } from "./timeline-agent-runtime.js";
 import { MemoryRepository } from "./memory.js";
+import { UsageTracker } from "./usage.js";
 import type {
   HistorySearchResponse,
   MemoryRollupRecord,
@@ -47,6 +49,7 @@ import type {
   TimelineLLMSettings,
   VisualEvidence,
   VisualSettings,
+  UsageStateEvent,
   EventEvidenceEnrichment,
 } from "./types.js";
 import {
@@ -111,6 +114,7 @@ export class HistoryService extends EventEmitter {
   private readonly settingsStore;
   private readonly timeline;
   private readonly memory;
+  private readonly usage;
   private readonly coalescer = new EventCoalescer();
   private readonly burstCoalescer = new EventBurstCoalescer();
   private readonly applicationIconPaths = new Map<string, string>();
@@ -206,7 +210,16 @@ export class HistoryService extends EventEmitter {
       },
       () => this.locale,
     );
-    collector.on("snapshot", () => this.emitSnapshot());
+    this.usage = new UsageTracker(this.layout);
+    collector.on("snapshot", () => {
+      if (this.initialized && collector.current().connectionState !== "connected") {
+        void this.enqueueCapture(async () => {
+          await this.usage.end(new Date(), "collector_disconnected");
+          this.emitSnapshot();
+        }).catch((error) => this.captureError(error));
+      }
+      this.emitSnapshot();
+    });
     collector.on("event", (event: HistoryEvent) => {
       if (!this.receivedNativeEvent) {
         this.receivedNativeEvent = true;
@@ -215,6 +228,15 @@ export class HistoryService extends EventEmitter {
       void this.enqueueCapture(async () => this.processEvent(event)).catch((error) =>
         this.captureError(error),
       );
+    });
+    collector.on("usage-state", (event: UsageStateEvent) => {
+      void this.enqueueCapture(async () => {
+        await this.usage.transition(event);
+        if (event.application) {
+          await this.resolveApplicationIcons([event.application.bundleIdentifier]);
+        }
+        this.emitSnapshot();
+      }).catch((error) => this.captureError(error));
     });
   }
 
@@ -234,6 +256,7 @@ export class HistoryService extends EventEmitter {
             : undefined,
           documents: this.documents.map((document) => this.publicDocument(document)),
           memories: this.memories.map((record) => this.publicMemory(record)),
+          usage: this.publicUsageSummary(this.usage.summary()),
           health: { ...native.snapshot.health, ...this.semanticHealth },
           llm: { ...this.llmSettings, apiKeyConfigured: this.apiKeyConfigured },
           visual: {
@@ -266,6 +289,7 @@ export class HistoryService extends EventEmitter {
     await this.collector.start();
     await this.syncObservationPolicyToCollector();
     await this.collector.request("start");
+    await this.captureWork;
     this.timelineAgentEnabled = true;
     this.startTimers();
     await this.refreshDocuments();
@@ -304,6 +328,7 @@ export class HistoryService extends EventEmitter {
       this.collector.current().snapshot?.recorderState === "running"
     ) {
       await this.collector.request("pause").catch(() => undefined);
+      await this.captureWork;
     }
     await this.enqueueCapture(async () => {
       for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
@@ -338,11 +363,13 @@ export class HistoryService extends EventEmitter {
     });
     await this.visualWork;
     await this.collector.request("pause");
+    await this.captureWork;
     return this.current();
   }
 
   async resume(): Promise<DesktopSnapshot> {
     await this.collector.request("resume");
+    await this.captureWork;
     return this.current();
   }
 
@@ -392,6 +419,7 @@ export class HistoryService extends EventEmitter {
     if (this.collector.current().connectionState === "connected") {
       try {
         await this.syncObservationPolicyToCollector();
+        await this.captureWork;
       } catch (error) {
         await this.collector.request("pause").catch(() => undefined);
         this.lastError =
@@ -544,6 +572,7 @@ export class HistoryService extends EventEmitter {
       documentCount: this.documents.length,
       memoryCount: this.memories.length,
     });
+    await this.usage.reload();
     this.segments.reset();
     this.coalescer.reset();
     this.burstCoalescer.reset();
@@ -582,6 +611,7 @@ export class HistoryService extends EventEmitter {
       await this.timelineAgentWork;
       await this.timelineWork;
       await restoreHistoryData(this.layout, id);
+      await this.usage.reload();
       this.segments.reset();
       this.coalescer.reset();
       this.burstCoalescer.reset();
@@ -638,6 +668,7 @@ export class HistoryService extends EventEmitter {
       this.settingsStore.hasRecordingConsent(),
     ]);
     this.apiKeyConfigured = await this.settingsStore.hasAPIKey();
+    await this.usage.initialize();
     this.historyRecovery = await latestHistoryArchive(this.layout);
     this.documents = await this.timeline.loadDocuments();
     this.memories = await this.memory.refresh(this.documents);
@@ -705,6 +736,7 @@ export class HistoryService extends EventEmitter {
 
   private async maintenance(): Promise<void> {
     for (const event of this.burstCoalescer.flushExpired()) await this.persist(event);
+    await this.usage.checkpoint();
     const closed = await this.segments.closeExpired();
     if (closed) this.scheduleTimeline(closed);
     const recovered = await this.segments.recoverExpiredSegments();
@@ -714,6 +746,7 @@ export class HistoryService extends EventEmitter {
     await this.segments.pruneSegments(new Date(Date.now() - 48 * 60 * 60 * 1_000));
     await pruneHistoryArchives(this.layout, new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000));
     this.historyRecovery = await latestHistoryArchive(this.layout);
+    this.emitSnapshot();
     void this.enqueueTimeline(async () => {
       for (const segment of completed) await this.timeline.generateIfNeeded(segment);
       await this.refreshDocuments();
@@ -726,17 +759,29 @@ export class HistoryService extends EventEmitter {
     this.memories = await this.memory.refresh(this.documents);
     const bundleIdentifiers = [
       ...new Set(
-        this.documents
-          .flatMap((document) => document.applications)
+        [
+          ...this.documents.flatMap((document) => document.applications),
+          ...this.usage
+            .summary()
+            .last7Days.flatMap((day) => day.applications.map((item) => item.application)),
+        ]
           .map((application) => application.bundleIdentifier)
           .filter((id) => !this.applicationIconPaths.has(id)),
       ),
     ];
-    if (bundleIdentifiers.length && this.collector.current().connectionState === "connected") {
+    await this.resolveApplicationIcons(bundleIdentifiers);
+    this.emitSnapshot();
+  }
+
+  private async resolveApplicationIcons(bundleIdentifiers: string[]): Promise<void> {
+    const unresolved = [...new Set(bundleIdentifiers)].filter(
+      (id) => !this.applicationIconPaths.has(id),
+    );
+    if (unresolved.length && this.collector.current().connectionState === "connected") {
       try {
         const payload = await this.collector.requestPayload<{ iconPaths?: Record<string, string> }>(
           "resolveApplicationIcons",
-          { bundleIdentifiers },
+          { bundleIdentifiers: unresolved },
         );
         for (const [id, iconPath] of Object.entries(payload?.iconPaths ?? {})) {
           this.applicationIconPaths.set(id, iconPath);
@@ -745,7 +790,6 @@ export class HistoryService extends EventEmitter {
         // Timeline content remains usable when an application bundle is no longer installed.
       }
     }
-    this.emitSnapshot();
   }
 
   private publicDocument(document: TimelineDocumentRecord): TimelineDocument {
@@ -778,6 +822,23 @@ export class HistoryService extends EventEmitter {
         iconPath: this.applicationIconPaths.get(application.bundleIdentifier),
       })),
       sourceDocumentIDs: record.sourceDocumentIDs,
+    };
+  }
+
+  private publicUsageSummary(summary: ApplicationUsageSummary): ApplicationUsageSummary {
+    const mapDay = (day: ApplicationUsageSummary["today"]): ApplicationUsageSummary["today"] => ({
+      ...day,
+      applications: day.applications.map((item) => ({
+        ...item,
+        application: {
+          ...item.application,
+          iconPath: this.applicationIconPaths.get(item.application.bundleIdentifier),
+        },
+      })),
+    });
+    return {
+      today: mapDay(summary.today),
+      last7Days: summary.last7Days.map(mapDay),
     };
   }
 
