@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { utilityProcess, type UtilityProcess } from "electron";
-import { TimelineAgentError } from "./timeline-agent.js";
+import { TimelineAgentError } from "../../server/history/timeline-agent.js";
 import type {
   TimelineAgentRuntimeSession,
   TimelineAgentRuntimeStep,
   TimelineAgentSessionFactory,
   TimelineAgentSessionInput,
-} from "./timeline-agent-runtime.js";
+} from "../../server/history/timeline-agent-runtime.js";
 
 interface WorkerReply {
   id: string;

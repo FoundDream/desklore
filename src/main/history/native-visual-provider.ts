@@ -4,7 +4,7 @@ import type {
   VisualCapturePayload,
   VisualCaptureProvider,
   VisualCaptureProviderStatus,
-} from "./visual.js";
+} from "../../server/history/visual.js";
 
 export class CollectorVisualCaptureProvider implements VisualCaptureProvider {
   readonly id = "macos-screencapturekit";

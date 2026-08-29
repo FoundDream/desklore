@@ -1,27 +1,14 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  Menu,
-  nativeImage,
-  Tray,
-  type IpcMainInvokeEvent,
-} from "electron";
+import { app, BrowserWindow, Menu, nativeImage, Tray } from "electron";
 import path from "node:path";
-import type {
-  DesktopSnapshot,
-  InstalledApplication,
-  LLMConfigurationInput,
-  ObservationPolicy,
-  VisualConfigurationInput,
-} from "../shared/contracts.js";
-import type { AppLocale } from "../shared/i18n.js";
-import { isAppLocale, translate } from "../shared/i18n.js";
+import type { DesktopSnapshot } from "../shared/contracts.js";
+import { translate } from "../shared/i18n.js";
+import { ServerCore } from "../server/server-core.js";
 import { CollectorClient, collectorExecutableCandidates } from "./collector-client.js";
-import { discoverInstalledApplications, readICNSIconDataURL } from "./applications.js";
+import { ElectronCredentialStore } from "./electron-credential-store.js";
+import { ElectronDesktopShell } from "./electron-desktop-shell.js";
 import { CollectorVisualCaptureProvider } from "./history/native-visual-provider.js";
-import { HistoryService } from "./history/service.js";
 import { TimelineAgentUtilityProcessClient } from "./history/timeline-agent-worker-client.js";
+import { registerHistoryIPC } from "./ipc-server.js";
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -36,84 +23,17 @@ const collector = new CollectorClient(
   app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
 );
 const timelineAgentWorker = new TimelineAgentUtilityProcessClient();
-const history = new HistoryService(
-  collector,
-  path.join(app.getPath("userData"), "history"),
-  new CollectorVisualCaptureProvider(collector),
-  timelineAgentWorker,
+const historyRoot = path.join(app.getPath("userData"), "history");
+const history = new ServerCore(
+  { storageRoot: historyRoot },
+  {
+    collector,
+    credentials: new ElectronCredentialStore(historyRoot),
+    desktopShell: new ElectronDesktopShell(),
+    visualCapture: new CollectorVisualCaptureProvider(collector),
+    timelineAgentSessions: timelineAgentWorker,
+  },
 );
-const applicationIconCache = new Map<string, Promise<string | undefined>>();
-
-function assertRenderer(event: IpcMainInvokeEvent): void {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
-    throw new Error("Rejected IPC call from an untrusted renderer");
-  }
-}
-
-function documentID(value: unknown): string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 128) {
-    throw new Error("Invalid timeline document ID");
-  }
-  return value;
-}
-
-function historyArchiveID(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.length < 1 ||
-    value.length > 128 ||
-    path.basename(value) !== value ||
-    !/^[a-zA-Z0-9-]+$/.test(value)
-  ) {
-    throw new Error("Invalid history archive ID");
-  }
-  return value;
-}
-
-function historyQuery(value: unknown): string {
-  if (typeof value !== "string" || !value.trim() || value.length > 500) {
-    throw new Error("Invalid history query");
-  }
-  return value.trim();
-}
-
-function validatedApplicationIconPath(value: unknown): string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 4_096) {
-    throw new Error("Invalid application icon path");
-  }
-  const normalized = path.normalize(value);
-  const resourcesSegment = `${path.sep}Contents${path.sep}Resources${path.sep}`;
-  if (
-    !path.isAbsolute(normalized) ||
-    path.extname(normalized).toLowerCase() !== ".icns" ||
-    !normalized.includes(resourcesSegment)
-  ) {
-    throw new Error("Invalid application icon path");
-  }
-  return normalized;
-}
-
-function applicationIconDataURL(iconPath: string): Promise<string | undefined> {
-  const cached = applicationIconCache.get(iconPath);
-  if (cached) return cached;
-
-  const request = readICNSIconDataURL(iconPath).catch(() => undefined);
-  applicationIconCache.set(iconPath, request);
-  return request;
-}
-
-async function installedApplications(): Promise<InstalledApplication[]> {
-  const applications = await discoverInstalledApplications();
-  return Promise.all(
-    applications.map(async (application) => ({
-      bundleIdentifier: application.bundleIdentifier,
-      name: application.name,
-      iconDataURL: application.iconPath
-        ? await applicationIconDataURL(application.iconPath)
-        : undefined,
-    })),
-  );
-}
 
 function showWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -197,145 +117,6 @@ async function createWindow(): Promise<void> {
   }
 }
 
-function registerIPC(): void {
-  ipcMain.handle("history:get-snapshot", (event) => {
-    assertRenderer(event);
-    return history.current();
-  });
-  ipcMain.handle("history:list-installed-applications", async (event) => {
-    assertRenderer(event);
-    return installedApplications();
-  });
-  ipcMain.handle("history:set-locale", async (event, locale: AppLocale) => {
-    assertRenderer(event);
-    if (!isAppLocale(locale)) throw new Error("Invalid interface language");
-    return history.setLocale(locale);
-  });
-  ipcMain.handle("history:grant-recording-consent", async (event) => {
-    assertRenderer(event);
-    return history.grantRecordingConsent();
-  });
-  ipcMain.handle("history:get-application-icon", (event, value: unknown) => {
-    assertRenderer(event);
-    return applicationIconDataURL(validatedApplicationIconPath(value));
-  });
-  ipcMain.handle("history:search-memory", (event, value: unknown) => {
-    assertRenderer(event);
-    return history.searchMemory(historyQuery(value));
-  });
-  ipcMain.handle("history:start-collector", async (event) => {
-    assertRenderer(event);
-    return history.start();
-  });
-  ipcMain.handle("history:stop-collector", async (event) => {
-    assertRenderer(event);
-    return history.stop();
-  });
-  ipcMain.handle("history:pause", async (event) => {
-    assertRenderer(event);
-    return history.pause();
-  });
-  ipcMain.handle("history:resume", async (event) => {
-    assertRenderer(event);
-    return history.resume();
-  });
-  ipcMain.handle("history:refresh-permissions", async (event) => {
-    assertRenderer(event);
-    return history.requestNative("refreshPermissions");
-  });
-  ipcMain.handle("history:request-permissions", async (event) => {
-    assertRenderer(event);
-    return history.requestNative("requestPermissions");
-  });
-  ipcMain.handle("history:allow-active-application", async (event) => {
-    assertRenderer(event);
-    return history.setActiveApplicationAllowed(true);
-  });
-  ipcMain.handle("history:block-active-application", async (event) => {
-    assertRenderer(event);
-    return history.setActiveApplicationAllowed(false);
-  });
-  ipcMain.handle("history:allow-active-domain", async (event) => {
-    assertRenderer(event);
-    return history.setActiveDomainAllowed(true);
-  });
-  ipcMain.handle("history:block-active-domain", async (event) => {
-    assertRenderer(event);
-    return history.setActiveDomainAllowed(false);
-  });
-  ipcMain.handle("history:update-observation-policy", async (event, input: ObservationPolicy) => {
-    assertRenderer(event);
-    return history.updateObservationPolicy(input);
-  });
-  ipcMain.handle("history:remove-llm-key", async (event) => {
-    assertRenderer(event);
-    return history.removeLLMAPIKey();
-  });
-  ipcMain.handle("history:set-llm-enabled", async (event, enabled: unknown) => {
-    assertRenderer(event);
-    if (typeof enabled !== "boolean") throw new Error("Invalid model summary setting");
-    return history.setLLMEnabled(enabled);
-  });
-  ipcMain.handle("history:set-memory-synthesis-enabled", async (event, enabled: unknown) => {
-    assertRenderer(event);
-    if (typeof enabled !== "boolean") throw new Error("Invalid memory synthesis setting");
-    return history.setMemorySynthesisEnabled(enabled);
-  });
-  ipcMain.handle("history:configure-visual", async (event, input: VisualConfigurationInput) => {
-    assertRenderer(event);
-    if (
-      !input ||
-      !["rules", "luna"].includes(input.axJudge) ||
-      !["off", "fallback"].includes(input.captureMode) ||
-      !["off", "ocr", "luna"].includes(input.understandingMode)
-    ) {
-      throw new Error("Invalid visual configuration");
-    }
-    return history.configureVisual(input);
-  });
-  ipcMain.handle("history:request-screen-capture-permission", async (event) => {
-    assertRenderer(event);
-    return history.requestScreenCapturePermission();
-  });
-  ipcMain.handle("history:reveal-storage", async (event) => {
-    assertRenderer(event);
-    return history.revealStorage();
-  });
-
-  ipcMain.handle("history:configure-llm", async (event, input: LLMConfigurationInput) => {
-    assertRenderer(event);
-    if (
-      !input ||
-      !["responses", "chat_completions"].includes(input.protocol) ||
-      typeof input.model !== "string" ||
-      input.model.length > 200 ||
-      typeof input.endpoint !== "string" ||
-      input.endpoint.length > 2_000 ||
-      typeof input.apiKey !== "string" ||
-      input.apiKey.length > 8_000
-    ) {
-      throw new Error("Invalid LLM configuration");
-    }
-    return history.configureLLM(input);
-  });
-  ipcMain.handle("history:open-document", async (event, id: unknown) => {
-    assertRenderer(event);
-    return history.openDocument(documentID(id));
-  });
-  ipcMain.handle("history:delete-document", async (event, id: unknown) => {
-    assertRenderer(event);
-    return history.deleteDocument(documentID(id));
-  });
-  ipcMain.handle("history:clear", async (event) => {
-    assertRenderer(event);
-    return history.clearHistory();
-  });
-  ipcMain.handle("history:restore", async (event, id: unknown) => {
-    assertRenderer(event);
-    return history.restoreHistory(historyArchiveID(id));
-  });
-}
-
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
@@ -347,7 +128,7 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       setDevelopmentDockIcon();
-      registerIPC();
+      registerHistoryIPC({ core: history, getTrustedWindow: () => mainWindow });
       await createWindow();
       tray = new Tray(trayIcon());
       tray.on("click", showWindow);

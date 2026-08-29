@@ -3,21 +3,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CollectorClient } from "../collector-client.js";
-import { HistoryService } from "./service.js";
+import type { CollectorClient } from "../../main/collector-client.js";
+import { HistoryService } from "../../main/history/service.js";
 import { HistorySettingsStore } from "./settings.js";
 import { defaultObservationPolicy } from "./policy.js";
 import { ensureStorage, makeStorageLayout } from "./storage.js";
 import type { HistoryEvent, TimelineDocumentRecord } from "./types.js";
-
-vi.mock("electron", () => ({
-  safeStorage: {
-    decryptString: vi.fn(),
-    encryptString: vi.fn(),
-    isEncryptionAvailable: vi.fn(() => false),
-  },
-  shell: { openPath: vi.fn() },
-}));
 
 const temporaryDirectories: string[] = [];
 

@@ -1,8 +1,7 @@
-import { safeStorage } from "electron";
-import { readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppLocale } from "../../shared/i18n.js";
-import { isAppLocale, translate } from "../../shared/i18n.js";
+import { isAppLocale } from "../../shared/i18n.js";
 import { isModelProtocol } from "../../shared/model.js";
 import { defaultObservationPolicy, normalizeObservationPolicy } from "./policy.js";
 import { atomicWriteOwnedFile } from "./owned-file.js";
@@ -39,7 +38,6 @@ function stringArray(value: unknown): string[] | undefined {
 export class HistorySettingsStore {
   private readonly policyPath: string;
   private readonly llmPath: string;
-  private readonly apiKeyPath: string;
   private readonly visualPath: string;
   private readonly recordingConsentPath: string;
   private readonly interfacePath: string;
@@ -47,7 +45,6 @@ export class HistorySettingsStore {
   constructor(layout: StorageLayout) {
     this.policyPath = path.join(layout.state, "observation-policy.json");
     this.llmPath = path.join(layout.state, "llm-settings.json");
-    this.apiKeyPath = path.join(layout.state, "llm-api-key.bin");
     this.visualPath = path.join(layout.state, "visual-settings.json");
     this.recordingConsentPath = path.join(layout.state, "recording-consent.json");
     this.interfacePath = path.join(layout.state, "interface-settings.json");
@@ -184,34 +181,6 @@ export class HistorySettingsStore {
       this.visualPath,
       `${JSON.stringify({ schemaVersion: 1, ...settings }, null, 2)}\n`,
     );
-  }
-
-  async hasAPIKey(): Promise<boolean> {
-    if (process.env.OPENAI_API_KEY) return true;
-    return (await this.loadAPIKey()) !== undefined;
-  }
-
-  async loadAPIKey(): Promise<string | undefined> {
-    if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
-    try {
-      const encrypted = await readFile(this.apiKeyPath);
-      if (!safeStorage.isEncryptionAvailable()) return undefined;
-      return safeStorage.decryptString(encrypted);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-  }
-
-  async saveAPIKey(apiKey: string, locale: AppLocale = "en"): Promise<void> {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error(translate(locale, "error.secureStorageUnavailable"));
-    }
-    await atomicWriteOwnedFile(this.apiKeyPath, safeStorage.encryptString(apiKey));
-  }
-
-  async removeAPIKey(): Promise<void> {
-    await rm(this.apiKeyPath, { force: true });
   }
 
   async hasRecordingConsent(): Promise<boolean> {

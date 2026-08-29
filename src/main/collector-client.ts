@@ -3,32 +3,21 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
+import type { CollectorConnectionState } from "../shared/contracts.js";
 import type {
-  CaptureHealth,
-  CollectorConnectionState,
-  RecorderState,
-  TimelineApplication,
-} from "../shared/contracts.js";
+  CollectorCommand,
+  CollectorConnection,
+  CollectorPort,
+  CollectorSnapshot,
+} from "../server/ports.js";
 import {
   normalizeHistoryEvent,
   normalizeUsageStateEvent,
   type HistoryEvent,
   type UsageStateEvent,
-} from "./history/types.js";
+} from "../server/history/types.js";
 
-export interface CollectorSnapshot {
-  recorderState: RecorderState;
-  activeApplication?: TimelineApplication;
-  activeDomain?: string;
-  health: CaptureHealth;
-  lastError?: string;
-}
-
-export interface CollectorConnection {
-  connectionState: CollectorConnectionState;
-  snapshot?: CollectorSnapshot;
-  connectionError?: string;
-}
+export type { CollectorConnection, CollectorSnapshot } from "../server/ports.js";
 
 interface CollectorMessage {
   type: "snapshot" | "event" | "usage_state" | "response" | "error";
@@ -46,7 +35,7 @@ interface PendingRequest {
   timeout: NodeJS.Timeout;
 }
 
-export class CollectorClient extends EventEmitter {
+export class CollectorClient extends EventEmitter implements CollectorPort {
   private process?: ChildProcessWithoutNullStreams;
   private state: CollectorConnectionState = "stopped";
   private snapshot?: CollectorSnapshot;
@@ -146,7 +135,7 @@ export class CollectorClient extends EventEmitter {
   }
 
   async request(
-    command: string,
+    command: CollectorCommand,
     payload: Record<string, unknown> = {},
   ): Promise<CollectorConnection> {
     await this.requestMessage(command, payload);
@@ -154,14 +143,14 @@ export class CollectorClient extends EventEmitter {
   }
 
   async requestPayload<T>(
-    command: string,
+    command: CollectorCommand,
     payload: Record<string, unknown> = {},
   ): Promise<T | undefined> {
     return (await this.requestMessage(command, payload)).payload as T | undefined;
   }
 
   private async requestMessage(
-    command: string,
+    command: CollectorCommand,
     payload: Record<string, unknown>,
   ): Promise<CollectorMessage> {
     if (!this.process || this.process.exitCode === null) await this.start();

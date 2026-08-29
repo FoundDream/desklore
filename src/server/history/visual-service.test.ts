@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CollectorClient } from "../collector-client.js";
-import { HistoryService } from "./service.js";
+import type { CollectorClient } from "../../main/collector-client.js";
+import { HistoryService } from "../../main/history/service.js";
 import type { HistoryEvent } from "./types.js";
 import type { VisualCaptureProvider } from "./visual.js";
 

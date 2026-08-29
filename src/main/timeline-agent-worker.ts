@@ -1,6 +1,6 @@
-import { InProcessTimelineAgentSessionFactory } from "./history/timeline-agent-runtime.js";
-import type { TimelineAgentRuntimeSession } from "./history/timeline-agent-runtime.js";
-import { TimelineAgentError } from "./history/timeline-agent.js";
+import { InProcessTimelineAgentSessionFactory } from "../server/history/timeline-agent-runtime.js";
+import type { TimelineAgentRuntimeSession } from "../server/history/timeline-agent-runtime.js";
+import { TimelineAgentError } from "../server/history/timeline-agent.js";
 
 const parentPort = process.parentPort;
 if (!parentPort) {
