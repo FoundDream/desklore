@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, utilityProcess } from "electron";
 
-const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const processPath =
   process.env.DESKLORE_SERVER_CORE_PROCESS_PATH ??
   path.join(repositoryRoot, "out/main/server-core-process.js");

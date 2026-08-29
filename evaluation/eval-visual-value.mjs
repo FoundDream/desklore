@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
-import { sanitizeEvent } from "../../src/server/history/policy/policy.ts";
+import { sanitizeEvent } from "../src/server/history/policy/policy.ts";
 import {
   normalizeEventEvidenceEnrichment,
   normalizeHistoryEvent,
   normalizeMetadata,
-} from "../../src/server/history/contracts.ts";
+} from "../src/server/history/contracts.ts";
 import {
   argumentsFrom,
   countBy,
@@ -19,7 +19,7 @@ import {
 } from "./eval-utils.mjs";
 
 const jiti = createJiti(import.meta.url);
-const { runTimelineAgent } = await jiti.import("../../src/server/history/timeline/agent/runner.ts");
+const { runTimelineAgent } = await jiti.import("../src/server/history/timeline/agent/runner.ts");
 
 const defaultInputRoot = path.join(os.homedir(), "Library/Application Support/DeskLore/history");
 const defaultEndpoint = "https://api.openai.com/v1/responses";

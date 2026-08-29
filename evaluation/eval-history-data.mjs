@@ -2,7 +2,7 @@ import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { normalizeHistoryEvent, normalizeMetadata } from "../../src/server/history/contracts.ts";
+import { normalizeHistoryEvent, normalizeMetadata } from "../src/server/history/contracts.ts";
 
 const secretPattern =
   /\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{12,}|\b(?:password|passwd|pwd|secret|token|api[_ -]?key)\b\s*[:=]\s*[^\s,;]+/gi;

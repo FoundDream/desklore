@@ -6,12 +6,12 @@ import { pathToFileURL } from "node:url";
 import {
   VisualCapturePolicyScheduler,
   visualCaptureLimits,
-} from "../../src/server/history/visual/policy.ts";
+} from "../src/server/history/visual/policy.ts";
 import {
   normalizeEventEvidenceEnrichment,
   normalizeHistoryEvent,
   normalizeMetadata,
-} from "../../src/server/history/contracts.ts";
+} from "../src/server/history/contracts.ts";
 import {
   argumentsFrom,
   countBy,

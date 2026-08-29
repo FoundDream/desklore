@@ -10,7 +10,8 @@ directory structure; the detailed design is in `docs/ARCHITECTURE.md`.
 - `src/shared/`: structured-cloneable DTOs, defaults, i18n, and model validation.
 - `src/platform/`: reusable Node platform primitives with no Electron dependency.
 - `native/collector/`: independent Swift package for macOS capture and native redaction.
-- `tools/`: build, packaging, smoke, and evaluation tooling.
+- `evaluation/`: offline evaluators and their tests; outputs stay under private `.eval-data/`.
+- `scripts/`: build, packaging, and process-smoke entrypoints.
 - `resources/branding/`: application icon sources and derived assets.
 
 ## Boundaries

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 GIT_TOP_LEVEL="$(git -C "$PROJECT_ROOT" rev-parse --path-format=absolute --show-toplevel)"
 NATIVE_ROOT="$PROJECT_ROOT/native/collector"
 

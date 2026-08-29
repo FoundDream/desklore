@@ -47,8 +47,9 @@ process boundary must be structured-cloneable and represented here or in `src/se
 `src/platform` contains runtime primitives that are reusable but intentionally not domain logic.
 
 `native/collector` is a standalone Swift package with an executable target and a pure native-core
-library target. It can be built and tested without loading the Electron project. `tools` contains
-repository automation grouped by purpose; branding inputs are isolated under `resources`.
+library target. It can be built and tested without loading the Electron project. `evaluation`
+contains offline measurement code and tests, while `scripts` contains repository lifecycle
+entrypoints. Branding inputs are isolated under `resources`.
 
 ## Data ownership and flow
 
