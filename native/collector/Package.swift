@@ -8,10 +8,6 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
-        .library(
-            name: "DeskLoreNativeCore",
-            targets: ["DeskLoreNativeCore"]
-        ),
         .executable(
             name: "DeskLoreCollector",
             targets: ["DeskLoreCollector"]

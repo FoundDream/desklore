@@ -90,11 +90,7 @@ export interface CaptureHealth {
   policyBlockedEventCount: number;
   deduplicatedEventCount: number;
   burstCoalescedEventCount: number;
-  lastAXSnapshotNodeCount: number;
-  lastAXVisitedNodeCount: number;
   lastAXCaptureDurationMilliseconds: number;
-  axSlowCaptureCount: number;
-  axTruncatedCaptureCount: number;
   axCaptureBacklog: number;
   screenCaptureGranted: boolean;
 }
@@ -201,7 +197,6 @@ export interface DeskLoreAPI {
   setLocale(locale: AppLocale): Promise<DesktopSnapshot>;
   grantRecordingConsent(): Promise<DesktopSnapshot>;
   startCollector(): Promise<DesktopSnapshot>;
-  stopCollector(): Promise<DesktopSnapshot>;
   pause(): Promise<DesktopSnapshot>;
   resume(): Promise<DesktopSnapshot>;
   refreshPermissions(): Promise<DesktopSnapshot>;

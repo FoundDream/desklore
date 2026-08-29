@@ -24,11 +24,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     @Published private(set) var axObserverActive = false
     @Published private(set) var axValueNotificationTargets = 0
     @Published private(set) var axSelectionNotificationTargets = 0
-    @Published private(set) var lastAXSnapshotNodeCount = 0
-    @Published private(set) var lastAXVisitedNodeCount = 0
     @Published private(set) var lastAXCaptureDurationMilliseconds = 0.0
-    @Published private(set) var axSlowCaptureCount = 0
-    @Published private(set) var axTruncatedCaptureCount = 0
     @Published private(set) var axCaptureBacklog = 0
     @Published private(set) var activeApplication: HistoryEvent.Application?
     @Published private(set) var activeDomain: String?
@@ -383,10 +379,6 @@ final class HistoryEngine: NSObject, ObservableObject {
 
     private func processCapturedEvent(_ result: AXCaptureResult) {
         lastAXCaptureDurationMilliseconds = result.durationMilliseconds
-        lastAXSnapshotNodeCount = result.snapshotNodeCount
-        lastAXVisitedNodeCount = result.visitedNodeCount
-        if result.durationMilliseconds > 250 { axSlowCaptureCount += 1 }
-        if result.snapshotWasTruncated { axTruncatedCaptureCount += 1 }
         activeDomain = result.event.window?.url.flatMap(Self.domain(from:))
         recordSemanticCaptureHealth(result.event)
         refreshSemanticListenerHealth()

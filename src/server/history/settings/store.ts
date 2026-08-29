@@ -9,7 +9,7 @@ import { atomicWriteOwnedFile } from "../../../platform/node/atomic-owned-file.j
 import type { ObservationPolicy, TimelineLLMSettings, VisualSettings } from "../contracts.js";
 import type { StorageLayout } from "../storage/repository.js";
 
-const defaultLLMSettings: TimelineLLMSettings = {
+export const defaultLLMSettings: TimelineLLMSettings = {
   enabled: false,
   memorySynthesisEnabled: false,
   protocol: "responses",

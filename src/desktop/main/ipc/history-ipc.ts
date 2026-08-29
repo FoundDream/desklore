@@ -119,10 +119,6 @@ export function registerHistoryIPC({ core, getTrustedWindow }: HistoryIPCServerO
     assertRenderer(event);
     return core.start();
   });
-  ipcMain.handle("history:stop-collector", async (event) => {
-    assertRenderer(event);
-    return core.stop();
-  });
   ipcMain.handle("history:pause", async (event) => {
     assertRenderer(event);
     return core.pause();

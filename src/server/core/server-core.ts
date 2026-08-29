@@ -33,7 +33,11 @@ import {
   normalizeObservationPolicy,
   observationDecision,
 } from "../history/policy/policy.js";
-import { defaultVisualSettings, HistorySettingsStore } from "../history/settings/store.js";
+import {
+  defaultLLMSettings,
+  defaultVisualSettings,
+  HistorySettingsStore,
+} from "../history/settings/store.js";
 import {
   clearHistoryData,
   ensureStorage,
@@ -80,14 +84,6 @@ function publicContinuationHint(value: string | undefined): string | undefined {
   return normalized;
 }
 
-export type ServerCoreLifecycleState =
-  | "created"
-  | "starting"
-  | "ready"
-  | "stopping"
-  | "stopped"
-  | "failed";
-
 export class ServerCore extends EventEmitter {
   private readonly layout;
   private readonly segments;
@@ -98,19 +94,12 @@ export class ServerCore extends EventEmitter {
   private readonly collector: CollectorPort;
   private readonly credentials: CredentialStore;
   private readonly visual;
-  private lifecycleState: ServerCoreLifecycleState = "created";
   private shutdownWork?: Promise<void>;
   private readonly coalescer = new EventCoalescer();
   private readonly burstCoalescer = new EventBurstCoalescer();
   private readonly applicationIconPaths = new Map<string, string>();
   private policy: ObservationPolicy = structuredClone(defaultObservationPolicy);
-  private llmSettings: TimelineLLMSettings = {
-    enabled: false,
-    memorySynthesisEnabled: false,
-    protocol: "responses",
-    model: "gpt-5.6-luna",
-    endpoint: "https://api.openai.com/v1/responses",
-  };
+  private llmSettings: TimelineLLMSettings = { ...defaultLLMSettings };
   private apiKeyConfigured = false;
   private visualSettings: VisualSettings = { ...defaultVisualSettings };
   private locale: AppLocale = "en";
@@ -239,45 +228,33 @@ export class ServerCore extends EventEmitter {
     };
   }
 
-  lifecycle(): ServerCoreLifecycleState {
-    return this.lifecycleState;
-  }
-
   async start(): Promise<DesktopSnapshot> {
-    this.lifecycleState = "starting";
-    try {
-      await this.initialize();
-      if (!this.recordingConsentGranted) {
-        this.lifecycleState = "ready";
-        return this.current();
-      }
-      const recovered = await this.segments.recoverExpiredSegments();
-      const completed = await this.segments.pendingClosedSegments();
-      await this.collector.start();
-      await this.syncObservationPolicyToCollector();
-      await this.collector.request("start");
-      await this.captureWork;
-      this.timelineAgentEnabled = true;
-      this.startTimers();
-      await this.refreshDocuments();
-      void this.enqueueTimeline(async () => {
-        const byID = new Map(
-          [...recovered, ...completed].map((segment) => [segment.metadata.id, segment]),
-        );
-        await this.timeline.generatePending(
-          [...byID.values()].sort(
-            (lhs, rhs) => Date.parse(lhs.metadata.startedAt) - Date.parse(rhs.metadata.startedAt),
-          ),
-        );
-        await this.refreshDocuments();
-        this.kickTimelineAgent();
-      }).catch((error) => this.captureError(error));
-      this.lifecycleState = "ready";
+    await this.initialize();
+    if (!this.recordingConsentGranted) {
       return this.current();
-    } catch (error) {
-      this.lifecycleState = "failed";
-      throw error;
     }
+    const recovered = await this.segments.recoverExpiredSegments();
+    const completed = await this.segments.pendingClosedSegments();
+    await this.collector.start();
+    await this.syncObservationPolicyToCollector();
+    await this.collector.request("start");
+    await this.captureWork;
+    this.timelineAgentEnabled = true;
+    this.startTimers();
+    await this.refreshDocuments();
+    void this.enqueueTimeline(async () => {
+      const byID = new Map(
+        [...recovered, ...completed].map((segment) => [segment.metadata.id, segment]),
+      );
+      await this.timeline.generatePending(
+        [...byID.values()].sort(
+          (lhs, rhs) => Date.parse(lhs.metadata.startedAt) - Date.parse(rhs.metadata.startedAt),
+        ),
+      );
+      await this.refreshDocuments();
+      this.kickTimelineAgent();
+    }).catch((error) => this.captureError(error));
+    return this.current();
   }
 
   async grantRecordingConsent(): Promise<DesktopSnapshot> {
@@ -290,7 +267,7 @@ export class ServerCore extends EventEmitter {
     return this.start();
   }
 
-  async stop(): Promise<DesktopSnapshot> {
+  private async stop(): Promise<DesktopSnapshot> {
     this.timelineAgentEnabled = false;
     this.clearTimelineAgentTimer();
     this.timeline.abortAgentJobs();
@@ -317,16 +294,9 @@ export class ServerCore extends EventEmitter {
 
   async shutdown(): Promise<void> {
     if (this.shutdownWork) return this.shutdownWork;
-    this.lifecycleState = "stopping";
     this.shutdownWork = (async () => {
-      try {
-        await this.stop();
-        this.timeline.disposeAgentRuntime();
-        this.lifecycleState = "stopped";
-      } catch (error) {
-        this.lifecycleState = "failed";
-        throw error;
-      }
+      await this.stop();
+      this.timeline.disposeAgentRuntime();
     })();
     return this.shutdownWork;
   }
@@ -338,7 +308,6 @@ export class ServerCore extends EventEmitter {
     this.visual.cancelPending();
     this.stopTimers();
     this.collector.terminate();
-    this.lifecycleState = "stopped";
   }
 
   async pause(): Promise<DesktopSnapshot> {

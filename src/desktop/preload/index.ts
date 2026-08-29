@@ -15,7 +15,6 @@ const api: DeskLoreAPI = {
   setLocale: (locale: AppLocale) => ipcRenderer.invoke("history:set-locale", locale),
   grantRecordingConsent: () => invoke("history:grant-recording-consent"),
   startCollector: () => invoke("history:start-collector"),
-  stopCollector: () => invoke("history:stop-collector"),
   pause: () => invoke("history:pause"),
   resume: () => invoke("history:resume"),
   refreshPermissions: () => invoke("history:refresh-permissions"),

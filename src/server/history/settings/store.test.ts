@@ -135,7 +135,7 @@ describe("History settings", () => {
       observationPolicy: defaultObservationPolicy,
     });
     expect(request).toHaveBeenNthCalledWith(2, "start");
-    await service.stop();
+    await service.shutdown();
     expect(stop).toHaveBeenCalledOnce();
     service.terminate();
     expect(terminate).toHaveBeenCalledOnce();

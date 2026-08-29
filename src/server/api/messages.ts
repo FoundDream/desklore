@@ -3,10 +3,8 @@ import type { DesktopSnapshot } from "../../shared/contracts/index.js";
 export type NativePermissionCommand = "refreshPermissions" | "requestPermissions";
 
 export type ServerCoreMethod =
-  | "current"
   | "start"
   | "grantRecordingConsent"
-  | "stop"
   | "shutdown"
   | "pause"
   | "resume"

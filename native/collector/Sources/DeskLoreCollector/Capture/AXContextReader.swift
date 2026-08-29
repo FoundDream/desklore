@@ -66,9 +66,6 @@ struct RunningApplicationContext: Sendable {
 struct AXCaptureResult: Sendable {
     let event: HistoryEvent
     let durationMilliseconds: Double
-    let snapshotNodeCount: Int
-    let visitedNodeCount: Int
-    let snapshotWasTruncated: Bool
 }
 
 enum AXCaptureOutcome: Sendable {
@@ -228,10 +225,7 @@ final class AXContextReader {
                 event: event,
                 durationMilliseconds: (
                     ProcessInfo.processInfo.systemUptime - captureStartedAt
-                ) * 1_000,
-                snapshotNodeCount: accessibilityCapture?.snapshot.nodes.count ?? 0,
-                visitedNodeCount: accessibilityCapture?.snapshot.visitedNodeCount ?? 0,
-                snapshotWasTruncated: accessibilityCapture?.snapshot.wasTruncated ?? false
+                ) * 1_000
             )
         )
     }

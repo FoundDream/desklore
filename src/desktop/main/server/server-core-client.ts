@@ -69,10 +69,6 @@ export class ServerCoreProcessClient extends EventEmitter {
     return this.request("grantRecordingConsent");
   }
 
-  stop(): Promise<DesktopSnapshot> {
-    return this.request("stop");
-  }
-
   pause(): Promise<DesktopSnapshot> {
     return this.request("pause");
   }

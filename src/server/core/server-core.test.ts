@@ -77,9 +77,7 @@ describe("ServerCore", () => {
     const credentials = new MemoryCredentialStore();
     const core = new ServerCore({ storageRoot }, { collector, credentials });
 
-    expect(core.lifecycle()).toBe("created");
     await expect(core.start()).resolves.toMatchObject({ recordingConsentGranted: false });
-    expect(core.lifecycle()).toBe("ready");
     expect(collector.start).not.toHaveBeenCalled();
 
     await core.grantRecordingConsent();
@@ -103,7 +101,6 @@ describe("ServerCore", () => {
     expect(core.storagePath()).toBe(path.join(storageRoot, "timeline"));
 
     await Promise.all([core.shutdown(), core.shutdown()]);
-    expect(core.lifecycle()).toBe("stopped");
     expect(collector.stop).toHaveBeenCalledOnce();
     core.terminate();
   });

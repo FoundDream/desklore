@@ -40,11 +40,7 @@ private struct CollectorHealthDTO: Encodable {
     let keyboardShortcutCount: Int
     let textInputEventCount: Int
     let selectionEventCount: Int
-    let lastAXSnapshotNodeCount: Int
-    let lastAXVisitedNodeCount: Int
     let lastAXCaptureDurationMilliseconds: Double
-    let axSlowCaptureCount: Int
-    let axTruncatedCaptureCount: Int
     let axCaptureBacklog: Int
     let screenCaptureGranted: Bool
 }
@@ -195,8 +191,6 @@ final class CollectorBridge {
         }
 
         switch command.command {
-        case "snapshot":
-            break
         case "configureObservationPolicy":
             guard let policy = command.observationPolicy else {
                 sendError("Invalid observation policy", requestID: command.id)
@@ -310,12 +304,8 @@ final class CollectorBridge {
                 keyboardShortcutCount: engine.keyboardShortcutCount,
                 textInputEventCount: engine.textInputEventCount,
                 selectionEventCount: engine.selectionEventCount,
-                lastAXSnapshotNodeCount: engine.lastAXSnapshotNodeCount,
-                lastAXVisitedNodeCount: engine.lastAXVisitedNodeCount,
                 lastAXCaptureDurationMilliseconds:
                     engine.lastAXCaptureDurationMilliseconds,
-                axSlowCaptureCount: engine.axSlowCaptureCount,
-                axTruncatedCaptureCount: engine.axTruncatedCaptureCount,
                 axCaptureBacklog: engine.axCaptureBacklog,
                 screenCaptureGranted: visualCaptureProvider.isScreenCaptureGranted
             ),

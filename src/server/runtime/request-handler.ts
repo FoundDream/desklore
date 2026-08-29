@@ -14,14 +14,10 @@ export async function dispatchServerCoreRequest(
 ): Promise<unknown> {
   const [first] = request.parameters;
   switch (request.method) {
-    case "current":
-      return core.current();
     case "start":
       return core.start();
     case "grantRecordingConsent":
       return core.grantRecordingConsent();
-    case "stop":
-      return core.stop();
     case "shutdown":
       return core.shutdown();
     case "pause":
