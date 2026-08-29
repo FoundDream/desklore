@@ -1,0 +1,209 @@
+.sidebar {
+  -webkit-app-region: drag;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 44px 10px 12px;
+  background: var(--sidebar);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.brand-mark {
+  display: none;
+}
+
+.brand > div {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.brand strong {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+nav {
+  -webkit-app-region: no-drag;
+  display: grid;
+  gap: 1px;
+  margin-top: 20px;
+}
+
+nav::before {
+  display: none;
+}
+
+nav button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #27272a;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+nav button:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+nav button.active {
+  border-color: rgba(71, 125, 171, 0.08);
+  color: var(--selection-foreground);
+  background: var(--selection);
+  box-shadow: none;
+}
+
+nav button .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
+nav button span {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+nav button b {
+  min-width: 16px;
+  padding: 0;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 9px;
+  font-weight: 550;
+  text-align: center;
+}
+
+nav button.active b {
+  color: var(--selection-foreground);
+}
+
+nav button > i {
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--muted-soft);
+}
+
+nav button > i.ok {
+  background: #22c55e;
+}
+
+nav button > i.warn {
+  background: #f59e0b;
+}
+
+.sidebar-bottom {
+  -webkit-app-region: no-drag;
+  display: grid;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.record-control {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.record-control:hover {
+  background: var(--accent);
+}
+
+.record-control > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.record-control strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.record-orbit {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+}
+
+.record-orbit i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted-soft);
+}
+
+.record-control.running .record-orbit i {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px #fee2e2;
+}
+
+.content {
+  position: relative;
+  min-width: 0;
+  margin: 8px 8px 8px 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.content-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  min-height: 112px;
+  padding: 44px 22px 20px;
+}
+
+.section-kicker {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.content-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 670;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}

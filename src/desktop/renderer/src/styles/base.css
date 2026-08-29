@@ -1,0 +1,73 @@
+:root {
+  color: #303033;
+  background: #f1f1f1;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  font-synthesis: none;
+  --background: #f1f1f1;
+  --surface: #ffffff;
+  --sidebar: var(--background);
+  --foreground: #303033;
+  --muted: #6f7075;
+  --muted-soft: #9c9da2;
+  --border: #e2e2e4;
+  --border-soft: #ececee;
+  --accent: #f3f3f4;
+  --accent-strong: #e9e9eb;
+  --selection: #eaf3fc;
+  --selection-strong: #dcecfb;
+  --selection-foreground: #477dab;
+  --primary: #18181b;
+  --success: #15803d;
+  --success-bg: #f0fdf4;
+  --warning: #a16207;
+  --warning-bg: #fffbeb;
+  --danger: #b91c1c;
+  --danger-bg: #fef2f2;
+  --ring: rgba(24, 24, 27, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 760px;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--background);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ui-icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

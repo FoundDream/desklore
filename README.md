@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="build/icon.png" width="128" alt="DeskLore app icon">
+  <img src="resources/branding/icon.png" width="128" alt="DeskLore app icon">
   <h1>DeskLore</h1>
   <p><strong>Open-source Computer History for macOS.</strong></p>
   <p>Semantic activity events first. No continuous screen recording. Local by default.</p>
@@ -77,8 +77,8 @@ Useful commands:
 
 ```bash
 pnpm check           # format, lint, and TypeScript checks
-pnpm test            # renderer/main tests and evaluator tests
-swift test          # native collector/core tests
+pnpm test            # TypeScript, evaluator, and Swift tests
+pnpm native:test     # Swift collector/core tests only
 pnpm build           # production Electron and Swift build
 pnpm package:mac     # local DMG and ZIP; signing depends on your keychain
 ```
@@ -89,16 +89,20 @@ pnpm package:mac     # local DMG and ZIP; signing depends on your keychain
 React renderer
   -> narrow preload API and validated IPC
   -> Electron main process
-     -> policy, coalescing, storage, timeline, memory, optional model calls
-     -> NDJSON over stdio
-        -> DeskLore Collector (Swift)
-           -> Accessibility, AXObserver, NSWorkspace, global interaction events
-           -> native redaction, optional ScreenCaptureKit fallback
+     -> ServerCore utility process
+        -> policy, coalescing, storage, timeline, memory, optional model calls
+        -> NDJSON over stdio
+           -> DeskLore Collector (Swift)
+              -> Accessibility, AXObserver, NSWorkspace, global interaction events
+              -> native redaction, optional ScreenCaptureKit fallback
 ```
 
 The renderer receives sanitized DTOs only. API keys and raw JSONL never enter the renderer.
 Collector and UI have separate bundle identifiers so macOS can sign and authorize the native
 capture boundary independently.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the source layout, dependency rules, process
+boundary, and data ownership model.
 
 Local data lives at:
 

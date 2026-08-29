@@ -16,7 +16,8 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "native:build": "./scripts/build-collector.sh",
+    "native:build": "./tools/build/build-collector.sh",
+    "native:test": "swift test --package-path native/collector",
     "dev": "pnpm native:build && electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
     "dev:ui": "electron-vite-plus dev -- -ApplePersistenceIgnoreState YES",
     "site:dev": "vp -C website dev",
@@ -24,15 +25,18 @@
     "site:preview": "vp -C website preview",
     "build": "pnpm native:build && electron-vite-plus build && pnpm smoke:server-core",
     "check": "vp check",
-    "test": "vp test run && node --test scripts/*.test.mjs",
-    "smoke:server-core": "electron scripts/server-core-process-smoke.mjs",
-    "eval:history": "node scripts/eval-history-data.mjs",
-    "eval:timeline": "node scripts/eval-timeline.mjs",
-    "eval:visual": "node scripts/eval-visual-policy.mjs",
-    "eval:visual-value": "node scripts/eval-visual-value.mjs",
+    "test:app": "vp test run",
+    "test:tools": "node --test tools/evaluation/*.test.mjs",
+    "test": "pnpm test:app && pnpm test:tools && pnpm native:test",
+    "smoke:server-core": "electron tools/smoke/server-core-process.mjs",
+    "eval:history": "node tools/evaluation/eval-history-data.mjs",
+    "eval:timeline": "node tools/evaluation/eval-timeline.mjs",
+    "eval:visual": "node tools/evaluation/eval-visual-policy.mjs",
+    "eval:visual-value": "node tools/evaluation/eval-visual-value.mjs",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
-    "package:mac": "pnpm build && electron-builder --mac"
+    "package:mac": "pnpm build && electron-builder --mac",
+    "verify": "pnpm check && pnpm test && pnpm build && pnpm site:build"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -65,7 +69,7 @@
   "build": {
     "appId": "com.desklore.desktop",
     "productName": "DeskLore",
-    "afterPack": "scripts/after-pack.cjs",
+    "afterPack": "tools/packaging/after-pack.cjs",
     "directories": {
       "output": "release"
     },
@@ -81,7 +85,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "build/icon.icns",
+      "icon": "resources/branding/icon.icns",
       "minimumSystemVersion": "14.0",
       "target": [
         "dmg",

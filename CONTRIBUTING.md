@@ -19,7 +19,6 @@ Requirements are macOS 14+, Apple Silicon, Node.js 24+, pnpm 11+, and Swift 6.2+
 pnpm install --frozen-lockfile
 pnpm check
 pnpm test
-swift test
 pnpm build
 ```
 
@@ -39,7 +38,7 @@ data, evaluation output, or credentials.
 - Do not claim capture quality from a manifest, mocked judge, or one automatic model run.
 
 CI is intentionally not a prerequisite for the first source release. Contributors should include
-local results for `pnpm check`, `pnpm test`, and `swift test`; maintainers may request a packaged
+local results for `pnpm check`, `pnpm test`, and `pnpm build`; maintainers may request a packaged
 macOS verification for changes to signing, permissions, icons, or the Collector bundle.
 
 ## Privacy review checklist

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="build/icon.png" width="128" alt="DeskLore 应用图标">
+  <img src="resources/branding/icon.png" width="128" alt="DeskLore 应用图标">
   <h1>DeskLore</h1>
   <p><strong>开源的 macOS Computer History。</strong></p>
   <p>优先记录语义事件，不持续录屏，默认本地运行。</p>
@@ -67,8 +67,8 @@ pnpm dev
 
 ```bash
 pnpm check           # 格式、lint 与 TypeScript 检查
-pnpm test            # Electron 主进程、渲染层和 evaluator 测试
-swift test          # Swift Collector/Core 测试
+pnpm test            # TypeScript、evaluator 与 Swift 测试
+pnpm native:test     # 仅运行 Swift Collector/Core 测试
 pnpm build           # 生产构建
 pnpm package:mac     # 本地 DMG 与 ZIP；是否签名取决于本机 Keychain
 ```
@@ -79,15 +79,19 @@ pnpm package:mac     # 本地 DMG 与 ZIP；是否签名取决于本机 Keychain
 React renderer
   -> 狭窄 preload API 与经过验证的 IPC
   -> Electron main
-     -> policy、coalescing、storage、timeline、memory、可选模型调用
-     -> stdio NDJSON
-        -> DeskLore Collector（Swift）
-           -> Accessibility、AXObserver、NSWorkspace、全局交互事件
-           -> 原生脱敏、可选 ScreenCaptureKit 补充
+     -> ServerCore utility process
+        -> policy、coalescing、storage、timeline、memory、可选模型调用
+        -> stdio NDJSON
+           -> DeskLore Collector（Swift）
+              -> Accessibility、AXObserver、NSWorkspace、全局交互事件
+              -> 原生脱敏、可选 ScreenCaptureKit 补充
 ```
 
 渲染层只接收脱敏 DTO；API Key 和原始 JSONL 不进入 renderer。Collector 与主应用使用不同
 Bundle ID，让 macOS 独立完成原生采集边界的签名和权限识别。
+
+源码布局、依赖规则、进程边界与数据所有权详见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 本地数据目录：
 

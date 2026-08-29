@@ -12,8 +12,8 @@ closed event segment
   -> atomically write a raw-baseline timeline document
   -> persist an owner-only Timeline Agent job
   -> fair scheduler grants one model turn
-  -> Electron utility process runs Pi with read-only evidence tools
-  -> main process validates every returned citation
+  -> ServerCore utility process runs Pi with read-only evidence tools
+  -> ServerCore validates every returned citation
   -> atomically upgrade the same document to generator: agent
 ```
 
@@ -65,9 +65,9 @@ otherwise configuration-blocked or stalled job. App shutdown aborts active work 
 runnable jobs as paused. On restart, a job is reconstructed from its retained source segment; the
 ephemeral model transcript is intentionally not persisted.
 
-Worker startup and IPC failures are tracked separately from provider requests. They use a shorter,
-five-minute-capped retry schedule so a local runtime defect cannot masquerade as a provider outage
-or inflate provider retry counters.
+Local agent-session failures are tracked separately from provider requests. They use a shorter,
+five-minute-capped retry schedule so a runtime defect cannot masquerade as a provider outage or
+inflate provider retry counters.
 
 ## Submission and evidence contract
 
@@ -78,7 +78,7 @@ an independent field.
 
 Duplicate citations are normalized. Empty claims and citations that were not inspected return
 structured repair information to the model, allowing a later turn to correct the submission. On a
-successful worker response, Electron main independently checks that every document and claim
+successful model response, ServerCore independently checks that every document and claim
 citation is both:
 
 1. reported as inspected by the evidence session; and
@@ -88,17 +88,17 @@ Only then may the baseline be upgraded.
 
 ## Process boundary
 
-Production model work runs in an Electron utility process. The worker receives a minimal
-allowlisted environment and a structured-cloneable input containing sanitized events, bounded prior
-summaries, locale, and the selected model runtime. It is not given the history storage root or a
-write-capable application service. A small command protocol allows only session creation, one-turn
-advance, abort, and disposal. Worker exit rejects pending requests as retryable failures, leaving the
-baseline and persistent job intact.
+Production history and model work runs inside the ServerCore Electron utility process. Electron
+main starts it through a small request/response protocol and forwards snapshots to the renderer.
+ServerCore owns the history storage root, persistent jobs, and the API key in memory; its in-process
+Timeline Agent receives sanitized events, bounded prior summaries, locale, and the selected model
+runtime. The model-facing tool set remains read-only except for the structured `submit_timeline`
+result handled and validated by ServerCore.
 
 This boundary protects Electron main from model-loop crashes and long-running provider work. It is
-not an operating-system sandbox: the worker ships with application code, and the API key exists in
-worker memory while its session is active. Prompt-level access is constrained by the Pi tool
-allowlist, sanitization, citation validation, and the absence of write-capable tools.
+not an operating-system sandbox: the utility process ships with application code and can access the
+history it owns. Prompt-level access is constrained by sanitization, the Pi tool allowlist, citation
+validation, and the absence of general write or shell tools.
 
 ## Diagnostics and recovery
 
@@ -108,8 +108,8 @@ latency, terminal state, and normalized failure reason. They retain no observed 
 continue to use the existing bounded 30-day/2,000-run retention policy.
 
 History deletion removes the corresponding job. Clear and restore archive the job file together
-with timeline state. Provider and worker failures preserve the readable baseline and retry from
-retained evidence. A non-retryable invalid worker result remains stalled until its runtime
+with timeline state. Provider and agent-session failures preserve the readable baseline and retry
+from retained evidence. A non-retryable invalid result remains stalled until its runtime
 fingerprint changes or the record is otherwise regenerated.
 
 ## Remaining M3 gates

@@ -1,0 +1,243 @@
+.empty-state {
+  display: grid;
+  justify-items: center;
+  padding: 82px 20px;
+  border: 1px dashed #d4d4d8;
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state h2 {
+  margin: 14px 0 4px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.empty-clock {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.empty-clock::before,
+.empty-clock::after {
+  content: "";
+  position: absolute;
+  background: var(--muted);
+}
+
+.empty-clock::before {
+  top: 9px;
+  left: 18px;
+  width: 1px;
+  height: 10px;
+}
+
+.empty-clock::after {
+  top: 19px;
+  left: 18px;
+  width: 8px;
+  height: 1px;
+  transform: rotate(30deg);
+  transform-origin: left;
+}
+
+.health-layout {
+  width: 100%;
+  margin: 0;
+  padding: 0 16px 20px;
+}
+
+.health-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(270px, 0.8fr);
+  gap: 16px;
+}
+
+.health-primary,
+.metric-grid {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.health-primary {
+  padding: 0 20px;
+}
+
+.health-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  min-height: 69px;
+  border-bottom: 1px solid var(--border);
+}
+
+.health-row:last-of-type {
+  border-bottom: 0;
+}
+
+.health-row strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.health-row > b {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 550;
+}
+
+.health-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.health-icon.ok {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.health-icon.warn {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.permission-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid #fde68a;
+  border-radius: 7px;
+  color: #713f12;
+  background: var(--warning-bg);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.permission-callout:hover {
+  background: #fef3c7;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  align-self: start;
+}
+
+.metric-grid > div {
+  min-width: 0;
+  min-height: 92px;
+  padding: 17px 18px;
+}
+
+.metric-grid > div:nth-child(even) {
+  border-left: 1px solid var(--border);
+}
+
+.metric-grid > div:nth-child(n + 3) {
+  border-top: 1px solid var(--border);
+}
+
+.metric-grid span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-grid strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 14px;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-grid strong small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #d4d4d8;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.switch span::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 150ms ease;
+}
+
+.switch input:checked + span {
+  background: var(--primary);
+}
+
+.switch input:checked + span::after {
+  transform: translateX(16px);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+button.text-danger {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: var(--danger);
+  background: var(--danger-bg);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+button.text-danger:hover {
+  background: #fee2e2;
+}

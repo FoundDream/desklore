@@ -6,8 +6,8 @@ export default defineConfig({
   electron: {
     main: {
       entry: {
-        index: "src/main/index.ts",
-        "server-core-process": "src/server/server-core-process.ts",
+        index: "src/desktop/main/index.ts",
+        "server-core-process": "src/server/runtime/process-entry.ts",
       },
       ssr: {
         noExternal: [
@@ -19,8 +19,8 @@ export default defineConfig({
         ],
       },
     },
-    preload: { entry: "src/preload/index.ts" },
-    renderer: { root: "src/renderer" },
+    preload: { entry: "src/desktop/preload/index.ts" },
+    renderer: { root: "src/desktop/renderer" },
   },
   lint: {
     options: {
