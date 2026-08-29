@@ -8,11 +8,11 @@ import type {
 } from "../shared/contracts.js";
 import type { AppLocale } from "../shared/i18n.js";
 import { isAppLocale } from "../shared/i18n.js";
-import type { ServerCore } from "../server/server-core.js";
 import { discoverInstalledApplications, readICNSIconDataURL } from "./applications.js";
+import type { ServerCoreProcessClient } from "./server-core-process-client.js";
 
 export interface HistoryIPCServerOptions {
-  core: ServerCore;
+  core: ServerCoreProcessClient;
   getTrustedWindow: () => BrowserWindow | undefined;
 }
 

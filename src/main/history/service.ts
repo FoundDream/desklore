@@ -1,7 +1,7 @@
-import type { CredentialStore, DesktopShellPort } from "../../server/ports.js";
+import type { CredentialStore } from "../../server/ports.js";
 import { ServerCore } from "../../server/server-core.js";
 import type { AppLocale } from "../../shared/i18n.js";
-import type { CollectorClient } from "../collector-client.js";
+import type { CollectorClient } from "../../server/collector-client.js";
 import type { TimelineAgentSessionFactory } from "../../server/history/timeline-agent-runtime.js";
 import type { VisualCaptureProvider } from "../../server/history/visual.js";
 
@@ -21,12 +21,6 @@ class EnvironmentCredentialStore implements CredentialStore {
   async remove(): Promise<void> {}
 }
 
-const unsupportedDesktopShell: DesktopShellPort = {
-  async openPath() {
-    throw new Error("Desktop shell integration is unavailable");
-  },
-};
-
 /** @deprecated Use ServerCore with explicit platform dependencies. */
 export class HistoryService extends ServerCore {
   constructor(
@@ -40,7 +34,6 @@ export class HistoryService extends ServerCore {
       {
         collector,
         credentials: new EnvironmentCredentialStore(),
-        desktopShell: unsupportedDesktopShell,
         visualCapture: visualCaptureProvider,
         timelineAgentSessions: timelineAgentSessionFactory,
       },

@@ -73,7 +73,6 @@ export interface ServerCoreConfig {
 export interface ServerCoreDependencies {
   collector: CollectorPort;
   credentials: CredentialStore;
-  desktopShell: DesktopShellPort;
   timelineAgentSessions?: TimelineAgentSessionFactory;
   visualCapture?: VisualCaptureProvider;
 }

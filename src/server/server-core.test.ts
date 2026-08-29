@@ -9,7 +9,6 @@ import type {
   CollectorConnection,
   CollectorPort,
   CredentialStore,
-  DesktopShellPort,
 } from "./ports.js";
 import { ServerCore } from "./server-core.js";
 
@@ -76,9 +75,7 @@ describe("ServerCore", () => {
     temporaryDirectories.push(storageRoot);
     const collector = new FakeCollector();
     const credentials = new MemoryCredentialStore();
-    const openPath = vi.fn(async () => "");
-    const desktopShell: DesktopShellPort = { openPath };
-    const core = new ServerCore({ storageRoot }, { collector, credentials, desktopShell });
+    const core = new ServerCore({ storageRoot }, { collector, credentials });
 
     expect(core.lifecycle()).toBe("created");
     await expect(core.start()).resolves.toMatchObject({ recordingConsentGranted: false });
@@ -103,8 +100,7 @@ describe("ServerCore", () => {
     });
     expect(credentials.save).toHaveBeenCalledWith("test-key", "en");
 
-    await core.revealStorage();
-    expect(openPath).toHaveBeenCalledWith(path.join(storageRoot, "timeline"));
+    expect(core.storagePath()).toBe(path.join(storageRoot, "timeline"));
 
     await Promise.all([core.shutdown(), core.shutdown()]);
     expect(core.lifecycle()).toBe("stopped");

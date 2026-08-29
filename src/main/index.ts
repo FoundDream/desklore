@@ -2,13 +2,11 @@ import { app, BrowserWindow, Menu, nativeImage, Tray } from "electron";
 import path from "node:path";
 import type { DesktopSnapshot } from "../shared/contracts.js";
 import { translate } from "../shared/i18n.js";
-import { ServerCore } from "../server/server-core.js";
-import { CollectorClient, collectorExecutableCandidates } from "./collector-client.js";
+import { collectorExecutableCandidates } from "../server/collector-client.js";
 import { ElectronCredentialStore } from "./electron-credential-store.js";
 import { ElectronDesktopShell } from "./electron-desktop-shell.js";
-import { CollectorVisualCaptureProvider } from "./history/native-visual-provider.js";
-import { TimelineAgentUtilityProcessClient } from "./history/timeline-agent-worker-client.js";
 import { registerHistoryIPC } from "./ipc-server.js";
+import { ServerCoreProcessClient } from "./server-core-process-client.js";
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -18,22 +16,18 @@ app.setName("DeskLore");
 app.setPath("userData", path.join(app.getPath("appData"), "DeskLore"));
 
 const projectRoot = process.cwd();
-const collector = new CollectorClient(
-  collectorExecutableCandidates(app.getAppPath(), process.resourcesPath, projectRoot),
-  app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
-);
-const timelineAgentWorker = new TimelineAgentUtilityProcessClient();
 const historyRoot = path.join(app.getPath("userData"), "history");
-const history = new ServerCore(
-  { storageRoot: historyRoot },
-  {
-    collector,
-    credentials: new ElectronCredentialStore(historyRoot),
-    desktopShell: new ElectronDesktopShell(),
-    visualCapture: new CollectorVisualCaptureProvider(collector),
-    timelineAgentSessions: timelineAgentWorker,
-  },
-);
+const history = new ServerCoreProcessClient({
+  storageRoot: historyRoot,
+  collectorExecutableCandidates: collectorExecutableCandidates(
+    app.getAppPath(),
+    process.resourcesPath,
+    projectRoot,
+  ),
+  hostBundleIdentifier: app.isPackaged ? "com.desklore.desktop" : "com.github.Electron",
+  credentials: new ElectronCredentialStore(historyRoot),
+  desktopShell: new ElectronDesktopShell(),
+});
 
 function showWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -128,6 +122,7 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       setDevelopmentDockIcon();
+      await history.connect();
       registerHistoryIPC({ core: history, getTrustedWindow: () => mainWindow });
       await createWindow();
       tray = new Tray(trayIcon());

@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   type CollectorPort,
   type CredentialStore,
-  type DesktopShellPort,
   type NativePermissionCommand,
   type ServerCoreConfig,
   type ServerCoreDependencies,
@@ -134,7 +133,6 @@ export class ServerCore extends EventEmitter {
   private readonly usage;
   private readonly collector: CollectorPort;
   private readonly credentials: CredentialStore;
-  private readonly desktopShell: DesktopShellPort;
   private readonly visualCaptureProvider?: VisualCaptureProvider;
   private lifecycleState: ServerCoreLifecycleState = "created";
   private shutdownWork?: Promise<void>;
@@ -211,7 +209,6 @@ export class ServerCore extends EventEmitter {
     super();
     this.collector = dependencies.collector;
     this.credentials = dependencies.credentials;
-    this.desktopShell = dependencies.desktopShell;
     this.visualCaptureProvider = dependencies.visualCapture;
     this.layout = makeStorageLayout(config.storageRoot);
     this.segments = new SegmentStore(this.layout);
@@ -574,13 +571,10 @@ export class ServerCore extends EventEmitter {
     return this.current();
   }
 
-  async openDocument(id: string): Promise<DesktopSnapshot> {
+  documentPath(id: string): string {
     const document = this.documents.find((item) => item.id === id);
     if (!document?.filePath) throw new Error("Timeline document not found");
-    const error = await this.desktopShell.openPath(document.filePath);
-    if (error) this.lastError = error;
-    this.emitSnapshot();
-    return this.current();
+    return document.filePath;
   }
 
   async deleteDocument(id: string): Promise<DesktopSnapshot> {
@@ -687,11 +681,8 @@ export class ServerCore extends EventEmitter {
     return this.current();
   }
 
-  async revealStorage(): Promise<DesktopSnapshot> {
-    const error = await this.desktopShell.openPath(this.layout.timeline);
-    if (error) this.lastError = error;
-    this.emitSnapshot();
-    return this.current();
+  storagePath(): string {
+    return this.layout.timeline;
   }
 
   searchMemory(query: string): HistorySearchResponse {

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CollectorClient } from "../../main/collector-client.js";
+import type { CollectorClient } from "../collector-client.js";
 import { HistoryService } from "../../main/history/service.js";
 import { HistorySettingsStore } from "./settings.js";
 import { defaultObservationPolicy } from "./policy.js";

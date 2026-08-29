@@ -9,15 +9,15 @@ import type {
   CollectorConnection,
   CollectorPort,
   CollectorSnapshot,
-} from "../server/ports.js";
+} from "./ports.js";
 import {
   normalizeHistoryEvent,
   normalizeUsageStateEvent,
   type HistoryEvent,
   type UsageStateEvent,
-} from "../server/history/types.js";
+} from "./history/types.js";
 
-export type { CollectorConnection, CollectorSnapshot } from "../server/ports.js";
+export type { CollectorConnection, CollectorSnapshot } from "./ports.js";
 
 interface CollectorMessage {
   type: "snapshot" | "event" | "usage_state" | "response" | "error";
