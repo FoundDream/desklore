@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,17 @@ const processPath =
   path.join(repositoryRoot, "out/main/server-core-process.js");
 const temporaryUserData = mkdtempSync(path.join(os.tmpdir(), "desklore-server-core-smoke-"));
 const historyRoot = path.join(temporaryUserData, "history");
+const stateRoot = path.join(historyRoot, "state");
+
+mkdirSync(stateRoot, { recursive: true });
+writeFileSync(
+  path.join(stateRoot, "recording-consent.json"),
+  `${JSON.stringify({
+    schemaVersion: 1,
+    granted: true,
+    grantedAt: "2026-08-30T00:00:00.000Z",
+  })}\n`,
+);
 
 app.setPath("userData", temporaryUserData);
 
@@ -49,16 +60,20 @@ app
     });
     child.on("message", (message) => {
       if (message?.type === "ready") {
+        if (message.snapshot?.recordingConsentGranted !== true) {
+          finish(1, "ServerCore process became ready before loading recording consent.");
+          return;
+        }
         child.postMessage({
           type: "request",
-          id: "start",
-          method: "start",
+          id: "storage-path",
+          method: "storagePath",
           parameters: [],
         });
         return;
       }
-      if (message?.type === "response" && message.id === "start") {
-        if (!message.ok || message.value?.recordingConsentGranted !== false) {
+      if (message?.type === "response" && message.id === "storage-path") {
+        if (!message.ok || message.value !== path.join(historyRoot, "timeline")) {
           finish(1, "ServerCore process returned an invalid startup response.");
           return;
         }

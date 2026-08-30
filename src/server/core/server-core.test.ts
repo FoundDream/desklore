@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultObservationPolicy } from "../../shared/defaults.js";
+import { HistorySettingsStore } from "../history/settings/store.js";
+import { ensureStorage, makeStorageLayout } from "../history/storage/repository.js";
 import type {
   CollectorCommand,
   CollectorConnection,
@@ -70,6 +72,28 @@ afterEach(async () => {
 });
 
 describe("ServerCore", () => {
+  it("prepares an authoritative consent snapshot without starting the collector", async () => {
+    const storageRoot = await mkdtemp(path.join(os.tmpdir(), "desklore-server-core-ready-"));
+    temporaryDirectories.push(storageRoot);
+    const layout = makeStorageLayout(storageRoot);
+    await ensureStorage(layout);
+    await new HistorySettingsStore(layout).grantRecordingConsent(
+      new Date("2026-08-30T00:00:00.000Z"),
+    );
+    const collector = new FakeCollector();
+    const core = new ServerCore(
+      { storageRoot },
+      { collector, credentials: new MemoryCredentialStore() },
+    );
+
+    await expect(core.prepare()).resolves.toMatchObject({
+      recordingConsentGranted: true,
+      connectionState: "stopped",
+    });
+    expect(collector.start).not.toHaveBeenCalled();
+    core.terminate();
+  });
+
   it("runs headlessly with injected platform ports and an idempotent shutdown", async () => {
     const storageRoot = await mkdtemp(path.join(os.tmpdir(), "desklore-server-core-"));
     temporaryDirectories.push(storageRoot);

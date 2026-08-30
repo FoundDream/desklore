@@ -35,7 +35,7 @@ export interface ServerCoreProcessClientOptions {
 }
 
 const requestTimeoutMilliseconds = 60_000;
-const startupTimeoutMilliseconds = 10_000;
+const startupTimeoutMilliseconds = 60_000;
 
 export class ServerCoreProcessClient extends EventEmitter {
   private child?: UtilityProcess;

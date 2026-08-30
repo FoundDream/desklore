@@ -26,7 +26,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function initialize(message: ServerCoreInitializeMessage): void {
+async function initialize(message: ServerCoreInitializeMessage): Promise<void> {
   if (core) return;
   const collector = new CollectorClient(
     message.collectorExecutableCandidates,
@@ -43,7 +43,8 @@ function initialize(message: ServerCoreInitializeMessage): void {
   );
   next.on("snapshot", (snapshot) => post({ type: "snapshot", snapshot }));
   core = next;
-  post({ type: "ready", snapshot: next.current() });
+  const snapshot = await next.prepare();
+  post({ type: "ready", snapshot });
 }
 
 async function handleRequest(request: ServerCoreRequestMessage): Promise<void> {
@@ -62,11 +63,9 @@ async function handleRequest(request: ServerCoreRequestMessage): Promise<void> {
 parentPort.on("message", (event) => {
   const message = event.data as ServerCoreInboundMessage;
   if (message.type === "initialize") {
-    try {
-      initialize(message);
-    } catch (error) {
+    void initialize(message).catch((error: unknown) => {
       post({ type: "startup-error", error: errorMessage(error) });
-    }
+    });
     return;
   }
   if (message.type === "request") void handleRequest(message);

@@ -228,6 +228,11 @@ export class ServerCore extends EventEmitter {
     };
   }
 
+  async prepare(): Promise<DesktopSnapshot> {
+    await this.initialize();
+    return this.current();
+  }
+
   async start(): Promise<DesktopSnapshot> {
     await this.initialize();
     if (!this.recordingConsentGranted) {
