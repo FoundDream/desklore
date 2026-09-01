@@ -69,6 +69,13 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
     typeof source.documentID !== "string" ||
     typeof source.fingerprint !== "string" ||
     !statuses.has(source.status as TimelineAgentJobStatus) ||
+    typeof source.totalTurns !== "number" ||
+    typeof source.totalToolCalls !== "number" ||
+    typeof source.totalSubmissions !== "number" ||
+    typeof source.totalProviderRequests !== "number" ||
+    typeof source.totalRuntimeFailures !== "number" ||
+    typeof source.consecutiveFailures !== "number" ||
+    typeof source.noProgressStreak !== "number" ||
     typeof source.createdAt !== "string" ||
     typeof source.updatedAt !== "string" ||
     !Number.isFinite(Date.parse(source.createdAt)) ||
@@ -80,15 +87,6 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
     typeof source.nextEligibleAt === "string" && Number.isFinite(Date.parse(source.nextEligibleAt))
       ? source.nextEligibleAt
       : undefined;
-  const legacyFailureState =
-    source.consecutiveFailures === undefined &&
-    ["waiting_runtime", "waiting_provider", "stalled"].includes(source.status as string);
-  const missingAgentStallRetry =
-    source.status === "stalled" && source.failureClass === "agent_stalled" && !parsedNextEligibleAt;
-  const nextEligibleAt =
-    (legacyFailureState && parsedNextEligibleAt) || missingAgentStallRetry
-      ? source.updatedAt
-      : parsedNextEligibleAt;
   return {
     schemaVersion: 1,
     id: source.id.slice(0, 80),
@@ -108,9 +106,9 @@ function normalizeJob(value: unknown): TimelineAgentJob | undefined {
     totalSubmissions: count(source.totalSubmissions),
     totalProviderRequests: count(source.totalProviderRequests),
     totalRuntimeFailures: count(source.totalRuntimeFailures),
-    consecutiveFailures: legacyFailureState ? 1 : count(source.consecutiveFailures),
+    consecutiveFailures: count(source.consecutiveFailures),
     noProgressStreak: count(source.noProgressStreak),
-    nextEligibleAt,
+    nextEligibleAt: parsedNextEligibleAt,
     createdAt: source.createdAt,
     updatedAt: source.updatedAt,
   };

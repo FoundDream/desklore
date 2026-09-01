@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,7 +15,7 @@ afterEach(async () => {
 
 function record(id: string, finishedAt: string): TimelineAgentRunRecord {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     sourceSegmentID: "2026-08-24T08-00-00Z",
     startedAt: finishedAt,
@@ -30,12 +30,31 @@ function record(id: string, finishedAt: string): TimelineAgentRunRecord {
     evidenceBytes: 200,
     inputTokens: 100,
     outputTokens: 20,
+    estimatedInputTokens: 120,
+    submissionAttempts: 1,
+    normalizedDuplicateCount: 0,
+    uninspectedEvidenceCount: 0,
     latencyMilliseconds: 10,
     terminalState: "succeeded",
   };
 }
 
 describe("timeline agent diagnostics", () => {
+  it("rejects schema v1 records", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-agent-diagnostics-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    const repository = new TimelineAgentDiagnosticsRepository(layout);
+    await writeFile(
+      repository.filePath(),
+      `${JSON.stringify({ ...record("old-schema", "2026-08-24T00:00:00.000Z"), schemaVersion: 1 })}\n`,
+      { mode: 0o600 },
+    );
+
+    await expect(repository.load()).resolves.toEqual([]);
+  });
+
   it("keeps owner-only structured metrics and prunes runs older than 30 days", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-agent-diagnostics-"));
     temporaryDirectories.push(root);

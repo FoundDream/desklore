@@ -1590,6 +1590,6 @@ describe("TypeScript history core", () => {
     const raw = rawActivityRecord(segment, [input]);
     expect(raw.title).toBe(input.window?.title);
     expect(raw.continuationHint).toBeUndefined();
-    expect(raw.generator.type).toBe("raw");
+    expect(raw.generator.type).toBe("raw-baseline");
   });
 });

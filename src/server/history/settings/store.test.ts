@@ -153,43 +153,44 @@ describe("History settings", () => {
     await expect(settingsStore.hasRecordingConsent()).resolves.toBe(true);
   });
 
-  it("migrates observation policy v1 and persists title exclusions in v2", async () => {
+  it("persists observation policy title exclusions in schema v2", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-policy-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     await ensureStorage(layout);
-    const policyPath = path.join(layout.state, "observation-policy.json");
-    await writeFile(
-      policyPath,
-      JSON.stringify({
-        schemaVersion: 1,
-        defaultApplicationBehavior: "observe",
-        defaultURLBehavior: "observe",
-        allowedBundleIdentifiers: [],
-        blockedBundleIdentifiers: ["com.example.private"],
-        allowedDomains: [],
-        blockedDomains: ["secret.example.com"],
-      }),
-    );
     const settingsStore = new HistorySettingsStore(layout);
-
-    await expect(settingsStore.loadPolicy()).resolves.toMatchObject({
-      blockedBundleIdentifiers: ["com.example.private"],
-      blockedDomains: ["secret.example.com"],
-      blockedWindowTitles: [],
-    });
-    expect(JSON.parse(await readFile(policyPath, "utf8"))).toMatchObject({
-      schemaVersion: 2,
-      blockedWindowTitles: [],
-    });
 
     await settingsStore.savePolicy({
       ...structuredClone(defaultObservationPolicy),
       blockedWindowTitles: [{ id: "private-window", pattern: "Payroll", match: "contains" }],
     });
+    expect(
+      JSON.parse(await readFile(path.join(layout.state, "observation-policy.json"), "utf8")),
+    ).toMatchObject({
+      schemaVersion: 2,
+      blockedWindowTitles: [{ id: "private-window", pattern: "Payroll", match: "contains" }],
+    });
     await expect(settingsStore.loadPolicy()).resolves.toMatchObject({
       blockedWindowTitles: [{ id: "private-window", pattern: "Payroll", match: "contains" }],
     });
+  });
+
+  it("rejects observation policy schema v1", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-policy-settings-"));
+    temporaryDirectories.push(root);
+    const layout = makeStorageLayout(root);
+    await ensureStorage(layout);
+    await writeFile(
+      path.join(layout.state, "observation-policy.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        ...structuredClone(defaultObservationPolicy),
+      }),
+    );
+
+    await expect(new HistorySettingsStore(layout).loadPolicy()).rejects.toThrow(
+      "Unsupported observation policy schema",
+    );
   });
 
   it("never appends an event excluded by observation policy", async () => {

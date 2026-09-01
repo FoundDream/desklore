@@ -1,44 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { TimelineApplication, TimelineDocument } from "../../../../shared/contracts/index.js";
-import type { MessageKey } from "../../../../shared/i18n/index.js";
 import { Icon } from "./Icon.js";
 import { useI18n } from "../app/i18n.js";
-
-const summaryFailureLabels: Record<string, MessageKey> = {
-  api_key_missing: "summary.apiKeyMissing",
-  invalid_json: "summary.invalidJson",
-  invalid_fields: "summary.invalidFields",
-  invalid_evidence_ids: "summary.invalidEvidenceIds",
-  agent_invalid_evidence_ids: "summary.invalidEvidenceIds",
-  agent_invalid_claims: "summary.invalidEvidenceIds",
-  empty_fields: "summary.emptyFields",
-  agent_empty_fields: "summary.emptyFields",
-  content_too_long: "summary.contentTooLong",
-  agent_content_too_long: "summary.contentTooLong",
-  agent_missing_final: "summary.incomplete",
-  agent_turn_limit: "summary.incomplete",
-  missing_output: "summary.missingOutput",
-  incomplete_max_output_tokens: "summary.maxOutputTokens",
-  incomplete_content_filter: "summary.contentFilter",
-  incomplete_unknown: "summary.incomplete",
-  model_refusal: "summary.refusal",
-  response_failed: "summary.responseFailed",
-  network_timeout: "summary.networkTimeout",
-  network_dns_failed: "summary.dnsFailed",
-  network_cannot_connect: "summary.cannotConnect",
-  network_request_failed: "summary.networkFailed",
-  unexpected_error: "summary.unexpectedError",
-};
 
 export type Translate = ReturnType<typeof useI18n>["t"];
 
 export function summaryFailureLabel(reason: string, t: Translate): string {
-  if (reason.startsWith("http_status_")) {
-    return t("summary.httpStatus", { status: reason.slice("http_status_".length) });
-  }
-  if (reason.startsWith("quality_gate_failed:")) return t("summary.legacyQualityGate");
-  const key = summaryFailureLabels[reason];
-  return key ? t(key) : t("summary.failed");
+  return reason === "api_key_missing" ? t("summary.apiKeyMissing") : t("summary.failed");
 }
 
 const applicationIconCache = new Map<string, string | null>();

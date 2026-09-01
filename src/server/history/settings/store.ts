@@ -80,11 +80,9 @@ export class HistorySettingsStore {
     const blockedDomains = stringArray(stored.blockedDomains);
     const blockedWindowTitles = Array.isArray(stored.blockedWindowTitles)
       ? stored.blockedWindowTitles
-      : stored.schemaVersion === 1
-        ? []
-        : undefined;
+      : undefined;
     if (
-      ![1, 2].includes(stored.schemaVersion as number) ||
+      stored.schemaVersion !== 2 ||
       !["observe", "do_not_observe"].includes(stored.defaultApplicationBehavior ?? "") ||
       !["observe", "do_not_observe"].includes(stored.defaultURLBehavior ?? "") ||
       !allowedBundleIdentifiers ||
@@ -104,7 +102,6 @@ export class HistorySettingsStore {
       blockedDomains,
       blockedWindowTitles: blockedWindowTitles as ObservationPolicy["blockedWindowTitles"],
     });
-    if (stored.schemaVersion === 1) await this.savePolicy(policy);
     return policy;
   }
 

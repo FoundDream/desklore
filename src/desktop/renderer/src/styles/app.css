@@ -207,9 +207,3 @@
   margin: 0;
   transform: translateX(-50%);
 }
-
-.danger-confirm {
-  border-color: var(--danger);
-  color: #fff;
-  background: var(--danger);
-}

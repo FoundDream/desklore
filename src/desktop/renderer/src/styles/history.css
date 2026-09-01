@@ -123,11 +123,6 @@
   padding: 0 16px 20px;
 }
 
-.rollup-day {
-  display: grid;
-  gap: 18px;
-}
-
 .daily-rollup {
   padding: 21px 22px 18px;
   border: 1px solid var(--border);

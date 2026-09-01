@@ -159,7 +159,7 @@ export function rawActivityRecord(
     claims: [],
     applications,
     evidenceEventIDs: [],
-    generator: { type: "raw", version: 1 },
+    generator: { type: "raw-baseline", version: 1 },
     createdAt: new Date().toISOString(),
     body,
   };
@@ -807,17 +807,6 @@ export class TimelineRepository {
     await this.jobs.deleteBySegment(sourceSegmentID);
   }
 
-  /** Compatibility shim for callers migrating to the turn-based scheduler. */
-  async retryFallbackDocuments(
-    segments: ClosedSegment[],
-    date = new Date(),
-    _cooldownMilliseconds?: number,
-    _maximumDocuments?: number,
-  ): Promise<number> {
-    const outcome = await this.advanceNextAgentJob(segments, date);
-    return outcome.upgraded ? 1 : 0;
-  }
-
   async loadDocuments(): Promise<TimelineDocumentRecord[]> {
     const entries = await readdir(this.layout.timeline, { withFileTypes: true });
     const decoded: TimelineDocumentRecord[] = [];
@@ -872,12 +861,7 @@ export class TimelineRepository {
   }
 
   private isRawDocument(document: TimelineDocumentRecord): boolean {
-    return (
-      document.generator.type === "raw" ||
-      document.generator.type === "rules" ||
-      document.generator.type.startsWith("raw-") ||
-      document.generator.type.startsWith("rules-")
-    );
+    return document.generator.type === "raw-baseline";
   }
 
   private async ensureJob(

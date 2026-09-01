@@ -9,7 +9,7 @@ const retentionMilliseconds = 30 * 24 * 60 * 60 * 1_000;
 const maximumRetainedRuns = 2_000;
 
 export interface TimelineAgentRunRecord {
-  schemaVersion: 1 | 2;
+  schemaVersion: 2;
   id: string;
   sourceSegmentID: string;
   startedAt: string;
@@ -24,10 +24,10 @@ export interface TimelineAgentRunRecord {
   evidenceBytes: number;
   inputTokens: number;
   outputTokens: number;
-  estimatedInputTokens?: number;
-  submissionAttempts?: number;
-  normalizedDuplicateCount?: number;
-  uninspectedEvidenceCount?: number;
+  estimatedInputTokens: number;
+  submissionAttempts: number;
+  normalizedDuplicateCount: number;
+  uninspectedEvidenceCount: number;
   latencyMilliseconds: number;
   terminalState: "succeeded" | "fallback";
   failureReason?: string;
@@ -45,7 +45,7 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
   if (!value || typeof value !== "object") return undefined;
   const source = value as Partial<TimelineAgentRunRecord>;
   if (
-    ![1, 2].includes(source.schemaVersion ?? 0) ||
+    source.schemaVersion !== 2 ||
     typeof source.id !== "string" ||
     typeof source.sourceSegmentID !== "string" ||
     typeof source.startedAt !== "string" ||
@@ -56,6 +56,10 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
     !["openai", "custom", "unavailable"].includes(source.provider ?? "") ||
     !["responses", "chat_completions"].includes(source.protocol ?? "") ||
     typeof source.retry !== "boolean" ||
+    typeof source.estimatedInputTokens !== "number" ||
+    typeof source.submissionAttempts !== "number" ||
+    typeof source.normalizedDuplicateCount !== "number" ||
+    typeof source.uninspectedEvidenceCount !== "number" ||
     !["succeeded", "fallback"].includes(source.terminalState ?? "")
   ) {
     return undefined;
@@ -66,7 +70,7 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
       .map(([name, value]) => [name, count(value)]),
   );
   return {
-    schemaVersion: source.schemaVersion as 1 | 2,
+    schemaVersion: 2,
     id: bounded(source.id, 80),
     sourceSegmentID: bounded(source.sourceSegmentID, 80),
     startedAt: source.startedAt,
@@ -81,10 +85,10 @@ function normalizeRun(value: unknown): TimelineAgentRunRecord | undefined {
     evidenceBytes: count(source.evidenceBytes ?? 0),
     inputTokens: count(source.inputTokens ?? 0),
     outputTokens: count(source.outputTokens ?? 0),
-    estimatedInputTokens: count(source.estimatedInputTokens ?? 0),
-    submissionAttempts: count(source.submissionAttempts ?? 0),
-    normalizedDuplicateCount: count(source.normalizedDuplicateCount ?? 0),
-    uninspectedEvidenceCount: count(source.uninspectedEvidenceCount ?? 0),
+    estimatedInputTokens: count(source.estimatedInputTokens),
+    submissionAttempts: count(source.submissionAttempts),
+    normalizedDuplicateCount: count(source.normalizedDuplicateCount),
+    uninspectedEvidenceCount: count(source.uninspectedEvidenceCount),
     latencyMilliseconds: count(source.latencyMilliseconds ?? 0),
     terminalState: source.terminalState as TimelineAgentRunRecord["terminalState"],
     failureReason:
