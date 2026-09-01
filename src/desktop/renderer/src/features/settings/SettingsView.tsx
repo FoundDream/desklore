@@ -5,8 +5,7 @@ import type {
   ObservationPolicy,
 } from "../../../../../shared/contracts/index.js";
 import { defaultModelEndpoints, type ModelProtocol } from "../../../../../shared/model.js";
-import appIcon from "../../assets/app-icon.png";
-import { Icon } from "../../components/Icon.js";
+import { Icon, type IconName } from "../../components/Icon.js";
 import { useI18n } from "../../app/i18n.js";
 import {
   applicationIsExcluded,
@@ -19,6 +18,7 @@ import {
 } from "./components.js";
 
 type SettingsTab = "general" | "ai" | "visual" | "privacy" | "data";
+type SettingsNavigationGroup = "features" | "local";
 type SettingsDialogName = "clear-history" | "discard-changes" | "remove-key";
 type RunAction = (action: () => Promise<DesktopSnapshot>) => Promise<boolean>;
 
@@ -44,6 +44,7 @@ export function SettingsView({
   const { locale, t } = useI18n();
   const history = desktop.history;
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [settingsSearch, setSettingsSearch] = useState("");
   const [dialog, setDialog] = useState<SettingsDialogName>();
   const [feedback, setFeedback] = useState<string>();
   const [protocol, setProtocol] = useState<ModelProtocol>(history?.llm.protocol ?? "responses");
@@ -105,13 +106,6 @@ export function SettingsView({
     }
   }, [installedApplications, installedApplicationsLoading, loadInstalledApplications, tab]);
 
-  const tabs: Array<{ id: SettingsTab; label: string }> = [
-    { id: "general", label: t("settings.tabGeneral") },
-    { id: "ai", label: t("settings.tabAI") },
-    { id: "visual", label: t("settings.tabVisual") },
-    { id: "privacy", label: t("settings.tabPrivacy") },
-    { id: "data", label: t("settings.tabData") },
-  ];
   const pageCopy = {
     general: [t("settings.tabGeneral"), t("settings.generalDescription")],
     ai: [t("settings.tabAI"), t("settings.aiDescription")],
@@ -119,6 +113,36 @@ export function SettingsView({
     privacy: [t("settings.tabPrivacy"), t("settings.privacyDescription")],
     data: [t("settings.tabData"), t("settings.dataDescription")],
   } satisfies Record<SettingsTab, [string, string]>;
+  const tabs: Array<{
+    id: SettingsTab;
+    label: string;
+    icon: IconName;
+    group: SettingsNavigationGroup;
+  }> = [
+    { id: "general", label: t("settings.tabGeneral"), icon: "settings", group: "features" },
+    { id: "ai", label: t("settings.tabAI"), icon: "sparkles", group: "features" },
+    { id: "visual", label: t("settings.tabVisual"), icon: "eye", group: "features" },
+    { id: "privacy", label: t("settings.tabPrivacy"), icon: "shield", group: "local" },
+    { id: "data", label: t("settings.tabData"), icon: "database", group: "local" },
+  ];
+  const normalizedSettingsSearch = settingsSearch
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase(locale);
+  const filteredTabs = tabs.filter((item) => {
+    if (!normalizedSettingsSearch) return true;
+    return `${item.label} ${pageCopy[item.id][1]}`
+      .normalize("NFKC")
+      .toLocaleLowerCase(locale)
+      .includes(normalizedSettingsSearch);
+  });
+  const navigationGroups: Array<{
+    id: SettingsNavigationGroup;
+    label: string;
+  }> = [
+    { id: "features", label: t("settings.navigationFeatures") },
+    { id: "local", label: t("settings.navigationLocal") },
+  ];
   const modelDirty =
     Boolean(history) &&
     (protocol !== history?.llm.protocol ||
@@ -335,21 +359,42 @@ export function SettingsView({
           <Icon name="arrow-left" />
           <span>{t("settings.backToDeskLore")}</span>
         </button>
-        <div className="settings-brand">
-          <img src={appIcon} alt="" />
-          <strong>{t("settings.title")}</strong>
-        </div>
+        <label className="settings-search">
+          <Icon name="search" />
+          <input
+            type="search"
+            aria-label={t("settings.searchPlaceholder")}
+            placeholder={t("settings.searchPlaceholder")}
+            value={settingsSearch}
+            onChange={(event) => setSettingsSearch(event.target.value)}
+          />
+        </label>
         <nav aria-label={t("settings.title")}>
-          {tabs.map((item) => (
-            <button
-              key={item.id}
-              className={tab === item.id ? "active" : ""}
-              aria-current={tab === item.id ? "page" : undefined}
-              onClick={() => changeTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+          {navigationGroups.map((group) => {
+            const items = filteredTabs.filter((item) => item.group === group.id);
+            if (items.length === 0) return null;
+            return (
+              <section className="settings-nav-group" key={group.id}>
+                <span className="settings-nav-label">{group.label}</span>
+                <div>
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      className={tab === item.id ? "active" : ""}
+                      aria-current={tab === item.id ? "page" : undefined}
+                      onClick={() => changeTab(item.id)}
+                    >
+                      <Icon name={item.icon} />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+          {filteredTabs.length === 0 && (
+            <span className="settings-nav-empty">{t("settings.noSearchResults")}</span>
+          )}
         </nav>
         <span className="settings-shortcut">⌘,</span>
       </aside>
@@ -358,7 +403,6 @@ export function SettingsView({
         <div className="settings-content-inner">
           <header className="settings-page-header">
             <h1>{pageCopy[tab][0]}</h1>
-            <p>{pageCopy[tab][1]}</p>
           </header>
 
           {error && (

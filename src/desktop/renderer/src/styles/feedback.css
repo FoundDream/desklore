@@ -80,7 +80,7 @@
   }
 
   .settings-shell {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
   }
 
   .settings-content-inner {
