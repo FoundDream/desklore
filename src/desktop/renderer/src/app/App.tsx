@@ -3,22 +3,16 @@ import appIcon from "../assets/app-icon.png";
 import { Icon } from "../components/Icon.js";
 import { I18nProvider, useI18n } from "./i18n.js";
 import { SettingsView as SettingsPage } from "../features/settings/SettingsView.js";
-import type {
-  DesktopSnapshot,
-  HistorySnapshot,
-  MemoryRollup,
-} from "../../../../shared/contracts/index.js";
+import type { DesktopSnapshot, HistorySnapshot } from "../../../../shared/contracts/index.js";
 import type { MessageKey } from "../../../../shared/i18n/index.js";
 import { translate } from "../../../../shared/i18n/index.js";
-import { dateKey } from "../components/HistoryComponents.js";
 import { DiagnosticsView } from "../features/diagnostics/DiagnosticsView.js";
-import { MemoryView } from "../features/memory/MemoryView.js";
 import { TimelineView } from "../features/timeline/TimelineView.js";
 import { UsageView } from "../features/usage/UsageView.js";
 import type { RunAction } from "./types.js";
 
-type View = "timeline" | "usage" | "memory" | "diagnostics" | "settings";
-type PrimaryView = "timeline" | "usage" | "memory";
+type View = "timeline" | "usage" | "diagnostics" | "settings";
+type PrimaryView = "timeline" | "usage";
 
 function ConnectionNotice({
   desktop,
@@ -231,11 +225,6 @@ function Sidebar({
           <span>{t("sidebar.timeline")}</span>
           <b>{history?.documents.length ?? "—"}</b>
         </button>
-        <button className={view === "memory" ? "active" : ""} onClick={() => onView("memory")}>
-          <Icon name="memory" />
-          <span>{t("sidebar.memory")}</span>
-          <b>{history ? history.memories.filter((memory) => memory.kind === "day").length : "—"}</b>
-        </button>
         <button className={view === "usage" ? "active" : ""} onClick={() => onView("usage")}>
           <Icon name="usage" />
           <span>{t("sidebar.usage")}</span>
@@ -271,8 +260,6 @@ export function App() {
   const [desktop, setDesktop] = useState<DesktopSnapshot>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [selectedTimelineDate, setSelectedTimelineDate] = useState<string>();
-  const [referencedDocumentIDs, setReferencedDocumentIDs] = useState<string[]>([]);
 
   useEffect(() => {
     void window.desklore
@@ -303,7 +290,7 @@ export function App() {
 
   const navigate = useCallback(
     (next: View): void => {
-      if (next === "settings" && (view === "timeline" || view === "usage" || view === "memory")) {
+      if (next === "settings" && (view === "timeline" || view === "usage")) {
         setReturnView(view);
       }
       setView(next);
@@ -312,7 +299,7 @@ export function App() {
   );
 
   const openDiagnostics = useCallback((): void => {
-    if (view === "timeline" || view === "usage" || view === "memory") setReturnView(view);
+    if (view === "timeline" || view === "usage") setReturnView(view);
     setView("diagnostics");
   }, [view]);
 
@@ -339,36 +326,6 @@ export function App() {
       void run(() => window.desklore.resume());
     }
   };
-
-  const selectTimelineDate = useCallback((date?: string): void => {
-    setSelectedTimelineDate(date);
-    setReferencedDocumentIDs([]);
-  }, []);
-
-  const openMemoryTimeline = useCallback(
-    (memory: MemoryRollup): void => {
-      const sourceIDs = new Set(memory.sourceDocumentIDs);
-      const documents = desktop?.history?.documents ?? [];
-      const firstSource = [...documents]
-        .filter((document) => sourceIDs.has(document.id))
-        .sort((lhs, rhs) => Date.parse(lhs.startedAt) - Date.parse(rhs.startedAt))[0];
-      const targetDate = dateKey(firstSource?.startedAt ?? memory.startedAt);
-      const targetDayDocuments = documents.filter(
-        (document) => dateKey(document.startedAt) === targetDate,
-      );
-      const referencedOnTargetDay = targetDayDocuments.filter((document) =>
-        sourceIDs.has(document.id),
-      );
-      setSelectedTimelineDate(targetDate);
-      setReferencedDocumentIDs(
-        referencedOnTargetDay.length === targetDayDocuments.length
-          ? []
-          : referencedOnTargetDay.map((document) => document.id),
-      );
-      setView("timeline");
-    },
-    [desktop?.history?.documents],
-  );
 
   const locale = desktop?.locale ?? "en";
   const t = (key: MessageKey, values?: Record<string, string | number>): string =>
@@ -440,17 +397,9 @@ export function App() {
             </div>
           )}
           {view === "timeline" ? (
-            <TimelineView
-              history={desktop?.history}
-              run={run}
-              selectedDate={selectedTimelineDate}
-              referencedDocumentIDs={referencedDocumentIDs}
-              onSelectDate={selectTimelineDate}
-            />
+            <TimelineView history={desktop?.history} run={run} />
           ) : view === "usage" ? (
             <UsageView usage={desktop?.history?.usage} />
-          ) : view === "memory" ? (
-            <MemoryView history={desktop?.history} run={run} onOpenTimeline={openMemoryTimeline} />
           ) : (
             <DiagnosticsView
               history={desktop?.history}

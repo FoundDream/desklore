@@ -17,7 +17,7 @@ React renderer (sandboxed)
   -> Electron structured-clone messages
   -> ServerCore utility process
        - policy and event coalescing
-       - local storage, timeline, memory, and usage
+       - local storage, timeline, rollups, and usage
        - model and visual-enrichment orchestration
        - Collector adapter
   -> NDJSON over stdio
@@ -56,8 +56,8 @@ entrypoints. Branding inputs are isolated under `resources`.
 The collector emits sanitized semantic events and usage-state transitions. ServerCore applies the
 persisted observation policy again, coalesces events, and writes owner-only segment data. Closed
 segments receive an immediate deterministic timeline baseline. Optional Timeline Agent work can
-upgrade that same document after validating every claim citation against retained evidence. Memory
-rollups and usage summaries are derived from these local records.
+upgrade that same document after validating every claim citation against retained evidence. Six-hour
+and daily timeline rollups, plus usage summaries, are derived from these local records.
 
 Visual fallback is disabled by default. Its coordinator separately owns AX sufficiency decisions,
 capture settling/coalescing, provider backoff, transient image understanding, and health metrics.
@@ -85,9 +85,9 @@ does not import server implementation files, and Swift does not know the history
 
 ## Durability and deletion
 
-Raw segments are the evidence source; timeline and memory are derived artifacts. Writes that replace
+Raw segments are the evidence source; timeline documents and rollups are derived artifacts. Writes that replace
 state or Markdown use atomic owner-only files. Deleting a timeline document cascades to its source
-segment and visual evidence, then regenerates affected memory. Clear/restore archives history as one
+segment and visual evidence, then regenerates affected rollups. Clear/restore archives history as one
 unit and coordinates collector pause, outstanding visual work, and agent jobs before mutation.
 
 ## Testing strategy

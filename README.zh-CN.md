@@ -11,7 +11,7 @@
 </p>
 <p align="center"><sub>真实 DeskLore 界面，时间线内容全部为合成数据。</sub></p>
 
-DeskLore 把日常 Mac 活动整理成可搜索的时间线和分层记忆。它优先使用 macOS
+DeskLore 把日常 Mac 活动整理成可搜索、可切换粒度的时间线。它优先使用 macOS
 Accessibility 语义，而不是持续录制屏幕。项目提供可选视觉补充，但默认关闭。
 
 > **当前状态：** [`0.2.0`](https://github.com/FoundDream/desklore/releases/tag/v0.2.0) 是面向
@@ -21,26 +21,26 @@ Accessibility 语义，而不是持续录制屏幕。项目提供可选视觉补
 
 - **History 是产品本身。** 目标是可阅读、可检索的个人计算机历史，不是原始录屏仓库或通用 Agent 平台。
 - **语义采集优先。** 应用、窗口、交互、URL 和 Accessibility 上下文会被规范化为带证据的事件。
-- **默认本地。** 原始事件、Markdown 时间线、长期记忆和设置都保存在本机。
+- **默认本地。** 原始事件、Markdown 时间线、聚合总结和设置都保存在本机。
 - **先同意，再记录。** 用户未确认首次记录边界前，原生 Collector 不会启动。
 - **中英文界面。** 默认使用英文，可在首次引导或设置中切换为简体中文。
-- **结果可检查。** 时间线和记忆使用 Markdown，包含来源 ID，并提供确定性规则回退。
+- **结果可检查。** 时间线明细和聚合总结使用 Markdown，包含来源 ID，并提供确定性规则回退。
 
 ## 默认隐私边界
 
 用户明确同意后，DeskLore 默认观察普通应用和 URL。DeskLore 自身、敏感 macOS
 系统界面、隐私浏览窗口和密码字段会被排除，用户可以随时暂停。
 
-| 能力         | 默认状态   | 网络访问                     | 保留期限                     |
-| ------------ | ---------- | ---------------------------- | ---------------------------- |
-| 语义事件     | 同意后开启 | 无                           | 原始 segment 保留 48 小时    |
-| 时间线与记忆 | 开启       | 使用确定性摘要时无网络       | 保留到用户删除               |
-| 视觉补充     | 关闭       | 截图本身无网络；模型理解可选 | 文本证据 24 小时；像素不落盘 |
-| 模型摘要     | 关闭       | 用户配置的 HTTPS endpoint    | 生成的 Markdown 保存在本机   |
-| 遥测         | 不包含     | 无                           | 不适用                       |
+| 能力             | 默认状态   | 网络访问                     | 保留期限                     |
+| ---------------- | ---------- | ---------------------------- | ---------------------------- |
+| 语义事件         | 同意后开启 | 无                           | 原始 segment 保留 48 小时    |
+| 时间线与聚合总结 | 开启       | 使用确定性摘要时无网络       | 保留到用户删除               |
+| 视觉补充         | 关闭       | 截图本身无网络；模型理解可选 | 文本证据 24 小时；像素不落盘 |
+| 模型摘要         | 关闭       | 用户配置的 HTTPS endpoint    | 生成的 Markdown 保存在本机   |
+| 遥测             | 不包含     | 无                           | 不适用                       |
 
-删除单条时间线会同时删除源 segment 和相关视觉证据，受影响的长期记忆会重新生成。
-“清空全部历史”会删除 raw、timeline、memory 和 visual evidence，并保持暂停。完整说明见
+删除单条时间线会同时删除源 segment 和相关视觉证据，受影响的聚合总结会重新生成。
+“清空全部历史”会删除 raw、timeline、rollups 和 visual evidence，并保持暂停。完整说明见
 [PRIVACY.md](PRIVACY.md)。
 
 ## 环境要求
@@ -80,7 +80,7 @@ React renderer
   -> 狭窄 preload API 与经过验证的 IPC
   -> Electron main
      -> ServerCore utility process
-        -> policy、coalescing、storage、timeline、memory、可选模型调用
+        -> policy、coalescing、storage、timeline、rollups、可选模型调用
         -> stdio NDJSON
            -> DeskLore Collector（Swift）
               -> Accessibility、AXObserver、NSWorkspace、全局交互事件
@@ -99,12 +99,12 @@ Bundle ID，让 macOS 独立完成原生采集边界的签名和权限识别。
 ~/Library/Application Support/DeskLore/history/
   segments/       # 十分钟 JSONL 原始桶，保留 48 小时
   timeline/       # 派生时间线 Markdown
-  memory/6h/      # 六小时记忆
-  memory/day/     # 每日记忆
+  rollups/6h/     # 六小时总结
+  rollups/day/    # 当天概览
   state/          # 同意、语言、范围、视觉和模型设置
 ```
 
-DeskLore 尽可能使用仅所有者可访问的目录和文件权限，但不会对 timeline/memory 额外做应用层加密。
+DeskLore 尽可能使用仅所有者可访问的目录和文件权限，但不会对 timeline/rollups 额外做应用层加密。
 如需磁盘静态保护，请开启 macOS FileVault。
 
 DeskLore 的公开版本使用全新且带版本号的本地格式，不导入预发布 Computer History 构建产生的
@@ -112,7 +112,7 @@ DeskLore 的公开版本使用全新且带版本号的本地格式，不导入�
 
 ## 可选模型与视觉能力
 
-DeskLore 不需要 API Key 也能运行，确定性规则会离线生成时间线与长期记忆。只有用户主动开启
+DeskLore 不需要 API Key 也能运行，确定性规则会离线生成时间线明细与聚合总结。只有用户主动开启
 模型摘要时，过滤后的证据才会发送到用户配置的 HTTPS endpoint。API Key 使用 Electron
 `safeStorage` 加密，不进入 renderer。
 模型设置支持 OpenAI Responses 与 Chat Completions 两种线协议，也可以连接兼容的自定义

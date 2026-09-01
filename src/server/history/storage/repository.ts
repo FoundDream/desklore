@@ -31,9 +31,9 @@ export interface StorageLayout {
   root: string;
   segments: string;
   timeline: string;
-  memory: string;
-  memorySixHour: string;
-  memoryDay: string;
+  rollups: string;
+  rollupSixHour: string;
+  rollupDay: string;
   usage: string;
   state: string;
   trash: string;
@@ -43,21 +43,21 @@ export interface HistoryArchive {
   id: string;
   deletedAt: string;
   documentCount: number;
-  memoryCount: number;
+  rollupCount: number;
 }
 
-const historyArchiveSchemaVersion = 1;
+const historyArchiveSchemaVersion = 2;
 const historyArchiveMetadataFile = "archive.json";
 
 export function makeStorageLayout(root: string): StorageLayout {
-  const memory = path.join(root, "memory");
+  const rollups = path.join(root, "rollups");
   return {
     root,
     segments: path.join(root, "segments"),
     timeline: path.join(root, "timeline"),
-    memory,
-    memorySixHour: path.join(memory, "6h"),
-    memoryDay: path.join(memory, "day"),
+    rollups,
+    rollupSixHour: path.join(rollups, "6h"),
+    rollupDay: path.join(rollups, "day"),
     usage: path.join(root, "usage"),
     state: path.join(root, "state"),
     trash: path.join(root, ".trash"),
@@ -70,9 +70,9 @@ export async function ensureStorage(layout: StorageLayout): Promise<void> {
       layout.root,
       layout.segments,
       layout.timeline,
-      layout.memory,
-      layout.memorySixHour,
-      layout.memoryDay,
+      layout.rollups,
+      layout.rollupSixHour,
+      layout.rollupDay,
       layout.usage,
       layout.state,
       layout.trash,
@@ -134,8 +134,8 @@ function normalizeHistoryArchive(value: unknown): HistoryArchive | undefined {
     !Number.isFinite(Date.parse(stored.deletedAt)) ||
     !Number.isInteger(stored.documentCount) ||
     (stored.documentCount ?? -1) < 0 ||
-    !Number.isInteger(stored.memoryCount) ||
-    (stored.memoryCount ?? -1) < 0
+    !Number.isInteger(stored.rollupCount) ||
+    (stored.rollupCount ?? -1) < 0
   ) {
     return undefined;
   }
@@ -143,7 +143,7 @@ function normalizeHistoryArchive(value: unknown): HistoryArchive | undefined {
     id: stored.id,
     deletedAt: stored.deletedAt,
     documentCount: stored.documentCount,
-    memoryCount: stored.memoryCount,
+    rollupCount: stored.rollupCount,
   } as HistoryArchive;
 }
 
@@ -182,7 +182,7 @@ export async function latestHistoryArchive(
 
 export async function clearHistoryData(
   layout: StorageLayout,
-  counts: { documentCount?: number; memoryCount?: number } = {},
+  counts: { documentCount?: number; rollupCount?: number } = {},
   date = new Date(),
 ): Promise<HistoryArchive> {
   await ensureStorage(layout);
@@ -205,11 +205,11 @@ export async function clearHistoryData(
     id,
     deletedAt,
     documentCount: Math.max(0, counts.documentCount ?? 0),
-    memoryCount: Math.max(0, counts.memoryCount ?? 0),
+    rollupCount: Math.max(0, counts.rollupCount ?? 0),
   };
   const moved: Array<{ source: string; destination: string }> = [];
   try {
-    for (const source of [layout.segments, layout.timeline, layout.memory, layout.usage]) {
+    for (const source of [layout.segments, layout.timeline, layout.rollups, layout.usage]) {
       const normalized = assertApplicationOwnedHistoryDirectory(layout, source);
       const stats = await lstat(normalized);
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -241,10 +241,10 @@ async function historyDirectoriesAreEmpty(layout: StorageLayout): Promise<boolea
   if ((await readdir(layout.segments)).length || (await readdir(layout.timeline)).length) {
     return false;
   }
-  const memoryEntries = await readdir(layout.memory, { withFileTypes: true });
-  for (const entry of memoryEntries) {
+  const rollupEntries = await readdir(layout.rollups, { withFileTypes: true });
+  for (const entry of rollupEntries) {
     if (!entry.isDirectory() || !["6h", "day"].includes(entry.name)) return false;
-    if ((await readdir(path.join(layout.memory, entry.name))).length) return false;
+    if ((await readdir(path.join(layout.rollups, entry.name))).length) return false;
   }
   if ((await readdir(layout.usage)).length) return false;
   return true;
@@ -264,7 +264,7 @@ export async function restoreHistoryData(
   const directory = archiveDirectory(layout, id);
   const restored: Array<{ source: string; destination: string }> = [];
   try {
-    for (const destination of [layout.segments, layout.timeline, layout.memory, layout.usage]) {
+    for (const destination of [layout.segments, layout.timeline, layout.rollups, layout.usage]) {
       const normalized = assertApplicationOwnedHistoryDirectory(layout, destination);
       const source = path.join(directory, path.basename(normalized));
       const stats = await lstat(source).catch((error: NodeJS.ErrnoException) => {

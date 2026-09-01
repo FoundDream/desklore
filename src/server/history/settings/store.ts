@@ -11,7 +11,7 @@ import type { StorageLayout } from "../storage/repository.js";
 
 export const defaultLLMSettings: TimelineLLMSettings = {
   enabled: false,
-  memorySynthesisEnabled: false,
+  rollupSynthesisEnabled: false,
   protocol: "responses",
   model: "gpt-5.6-luna",
   endpoint: "https://api.openai.com/v1/responses",
@@ -121,14 +121,11 @@ export class HistorySettingsStore {
       | (Partial<TimelineLLMSettings> & { schemaVersion?: unknown })
       | undefined;
     if (!stored) return { ...defaultLLMSettings };
-    const protocol =
-      stored.schemaVersion === undefined || stored.schemaVersion === 1
-        ? "responses"
-        : stored.protocol;
     if (
+      stored.schemaVersion !== 3 ||
       typeof stored.enabled !== "boolean" ||
-      typeof stored.memorySynthesisEnabled !== "boolean" ||
-      !isModelProtocol(protocol) ||
+      typeof stored.rollupSynthesisEnabled !== "boolean" ||
+      !isModelProtocol(stored.protocol) ||
       typeof stored.model !== "string" ||
       typeof stored.endpoint !== "string"
     ) {
@@ -136,24 +133,19 @@ export class HistorySettingsStore {
     }
     const settings: TimelineLLMSettings = {
       enabled: stored.enabled,
-      memorySynthesisEnabled: stored.memorySynthesisEnabled,
-      protocol,
+      rollupSynthesisEnabled: stored.rollupSynthesisEnabled,
+      protocol: stored.protocol,
       model: stored.model,
       endpoint: stored.endpoint,
     };
     if (!validateModelConfiguration(settings)) throw new Error("Invalid model settings");
-    if (stored.schemaVersion === undefined || stored.schemaVersion === 1) {
-      await this.saveLLMSettings(settings);
-    } else if (stored.schemaVersion !== 2) {
-      throw new Error("Unsupported model settings schema");
-    }
     return settings;
   }
 
   async saveLLMSettings(settings: TimelineLLMSettings): Promise<void> {
     await atomicWriteOwnedFile(
       this.llmPath,
-      `${JSON.stringify({ schemaVersion: 2, ...settings }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 3, ...settings }, null, 2)}\n`,
     );
   }
 

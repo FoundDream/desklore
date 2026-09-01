@@ -111,9 +111,9 @@ export function registerHistoryIPC({ core, getTrustedWindow }: HistoryIPCServerO
     assertRenderer(event);
     return applicationIconDataURL(validatedApplicationIconPath(value));
   });
-  ipcMain.handle("history:search-memory", (event, value: unknown) => {
+  ipcMain.handle("history:search", (event, value: unknown) => {
     assertRenderer(event);
-    return core.searchMemory(historyQuery(value));
+    return core.searchHistory(historyQuery(value));
   });
   ipcMain.handle("history:start-collector", async (event) => {
     assertRenderer(event);
@@ -164,10 +164,10 @@ export function registerHistoryIPC({ core, getTrustedWindow }: HistoryIPCServerO
     if (typeof enabled !== "boolean") throw new Error("Invalid model summary setting");
     return core.setLLMEnabled(enabled);
   });
-  ipcMain.handle("history:set-memory-synthesis-enabled", async (event, enabled: unknown) => {
+  ipcMain.handle("history:set-rollup-synthesis-enabled", async (event, enabled: unknown) => {
     assertRenderer(event);
-    if (typeof enabled !== "boolean") throw new Error("Invalid memory synthesis setting");
-    return core.setMemorySynthesisEnabled(enabled);
+    if (typeof enabled !== "boolean") throw new Error("Invalid timeline rollup setting");
+    return core.setRollupSynthesisEnabled(enabled);
   });
   ipcMain.handle("history:configure-visual", async (event, input: VisualConfigurationInput) => {
     assertRenderer(event);

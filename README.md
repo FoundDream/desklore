@@ -11,7 +11,7 @@
 </p>
 <p align="center"><sub>Real DeskLore interface with a fully synthetic activity history.</sub></p>
 
-DeskLore turns ordinary Mac activity into a searchable timeline and layered personal memory. It
+DeskLore turns ordinary Mac activity into a searchable, multi-resolution timeline. It
 uses macOS Accessibility semantics instead of continuously recording the screen. An optional
 visual fallback exists for gaps in Accessibility evidence, but it is disabled by default.
 
@@ -20,17 +20,18 @@ visual fallback exists for gaps in Accessibility evidence, but it is disabled by
 
 ## Why DeskLore
 
-- **History is the product.** The core output is a readable timeline and local memory, not a raw
+- **History is the product.** The core output is a readable timeline at ten-minute, six-hour, and
+  daily resolutions, not a raw
   recording archive or a general agent platform.
 - **Semantic capture first.** App, window, interaction, URL, and Accessibility context are
   normalized into evidence-aware events.
-- **Local-first storage.** Raw events, Markdown timelines, memory rollups, settings, and encrypted
+- **Local-first storage.** Raw events, Markdown timelines, timeline rollups, settings, and encrypted
   API credentials stay on your Mac unless you explicitly enable a model-backed feature.
 - **Explicit recording consent.** The native collector does not start before the first-run consent
   screen is accepted.
 - **Bilingual interface.** English is the default; Simplified Chinese can be selected during
   onboarding or later in Settings.
-- **Inspectable artifacts.** Timeline and memory outputs are Markdown files with source IDs and
+- **Inspectable artifacts.** Timeline details and rollups are Markdown files with source IDs and
   deterministic fallbacks.
 
 ## Privacy defaults
@@ -39,17 +40,17 @@ After explicit consent, DeskLore observes ordinary applications and URLs by defa
 DeskLore itself, sensitive macOS system surfaces, private-browsing windows, and password-like
 fields. Recording can be paused at any time.
 
-| Capability          | Default          | Network                              | Retention                                      |
-| ------------------- | ---------------- | ------------------------------------ | ---------------------------------------------- |
-| Semantic events     | On after consent | None                                 | Raw segments: 48 hours                         |
-| Timeline and memory | On               | None with deterministic summaries    | Until deleted                                  |
-| Visual fallback     | Off              | None for capture; optional model use | Text evidence: 24 hours; pixels are not stored |
-| Model summaries     | Off              | User-configured HTTPS endpoint       | Generated Markdown stays local                 |
-| Telemetry           | Not included     | None                                 | N/A                                            |
+| Capability           | Default          | Network                              | Retention                                      |
+| -------------------- | ---------------- | ------------------------------------ | ---------------------------------------------- |
+| Semantic events      | On after consent | None                                 | Raw segments: 48 hours                         |
+| Timeline and rollups | On               | None with deterministic summaries    | Until deleted                                  |
+| Visual fallback      | Off              | None for capture; optional model use | Text evidence: 24 hours; pixels are not stored |
+| Model summaries      | Off              | User-configured HTTPS endpoint       | Generated Markdown stays local                 |
+| Telemetry            | Not included     | None                                 | N/A                                            |
 
 Deleting a timeline item also deletes its source segment and related visual evidence; affected
-memory rollups are regenerated without it. **Clear all history** removes raw events, timelines,
-memory, and visual evidence, then leaves recording paused. See [PRIVACY.md](PRIVACY.md) for the
+timeline rollups are regenerated without it. **Clear all history** removes raw events, timelines,
+rollups, and visual evidence, then leaves recording paused. See [PRIVACY.md](PRIVACY.md) for the
 complete boundary.
 
 ## Requirements
@@ -90,7 +91,7 @@ React renderer
   -> narrow preload API and validated IPC
   -> Electron main process
      -> ServerCore utility process
-        -> policy, coalescing, storage, timeline, memory, optional model calls
+        -> policy, coalescing, storage, timeline, rollups, optional model calls
         -> NDJSON over stdio
            -> DeskLore Collector (Swift)
               -> Accessibility, AXObserver, NSWorkspace, global interaction events
@@ -110,13 +111,13 @@ Local data lives at:
 ~/Library/Application Support/DeskLore/history/
   segments/       # 10-minute raw JSONL buckets, retained for 48 hours
   timeline/       # derived Markdown timeline cards
-  memory/6h/      # six-hour Markdown rollups
-  memory/day/     # daily Markdown rollups
+  rollups/6h/     # six-hour Markdown rollups
+  rollups/day/    # daily Markdown rollups
   state/          # consent, language, policy, visual, and model settings
 ```
 
 Files are created with owner-only permissions where supported. DeskLore does not add application-
-level encryption to timeline or memory files; use macOS FileVault if disk-at-rest protection is
+level encryption to timeline or rollup files; use macOS FileVault if disk-at-rest protection is
 required.
 
 DeskLore's public release line uses a new, versioned local schema. It does not import data or
@@ -124,7 +125,7 @@ unversioned settings created by pre-release Computer History builds.
 
 ## Optional model features
 
-DeskLore works without an API key. Deterministic rules create timeline and memory artifacts
+DeskLore works without an API key. Deterministic rules create timeline details and rollups
 offline. If you enable model summaries, DeskLore sends filtered evidence to the HTTPS endpoint you
 configure. API keys are encrypted with Electron `safeStorage` and are not exposed to the renderer.
 Model settings support both OpenAI Responses and Chat Completions wire protocols, including

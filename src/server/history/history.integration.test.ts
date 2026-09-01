@@ -221,7 +221,7 @@ describe("TypeScript history core", () => {
       {
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "chat_completions",
           model: "test-model",
           endpoint: "https://gateway.example.com/openai/v1/chat/completions",
@@ -255,7 +255,7 @@ describe("TypeScript history core", () => {
       {
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",
@@ -297,7 +297,7 @@ describe("TypeScript history core", () => {
       {
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",
@@ -359,7 +359,7 @@ describe("TypeScript history core", () => {
       {
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",
@@ -958,7 +958,7 @@ describe("TypeScript history core", () => {
     let apiKeyConfigured = false;
     const settings = {
       enabled: true,
-      memorySynthesisEnabled: false,
+      rollupSynthesisEnabled: false,
       protocol: "responses" as const,
       model: "gpt-5.6-luna",
       endpoint: "https://api.openai.com/v1/responses",
@@ -1035,7 +1035,7 @@ describe("TypeScript history core", () => {
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
         enabled: true,
-        memorySynthesisEnabled: false,
+        rollupSynthesisEnabled: false,
         protocol: "responses",
         model: "test-model",
         endpoint: "https://api.openai.com/v1/responses",
@@ -1116,7 +1116,7 @@ describe("TypeScript history core", () => {
       async () => ({
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",
@@ -1164,7 +1164,7 @@ describe("TypeScript history core", () => {
       async () => ({
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",
@@ -1226,7 +1226,7 @@ describe("TypeScript history core", () => {
       async () => ({
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",
@@ -1296,7 +1296,7 @@ describe("TypeScript history core", () => {
       async () => ({
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model,
           endpoint: "https://api.openai.com/v1/responses",
@@ -1351,7 +1351,7 @@ describe("TypeScript history core", () => {
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
         enabled: true,
-        memorySynthesisEnabled: false,
+        rollupSynthesisEnabled: false,
         protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
@@ -1423,7 +1423,7 @@ describe("TypeScript history core", () => {
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
         enabled: true,
-        memorySynthesisEnabled: false,
+        rollupSynthesisEnabled: false,
         protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
@@ -1475,7 +1475,7 @@ describe("TypeScript history core", () => {
     const repository = new TimelineRepository(layout, store, async () => ({
       settings: {
         enabled: true,
-        memorySynthesisEnabled: false,
+        rollupSynthesisEnabled: false,
         protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
@@ -1533,7 +1533,7 @@ describe("TypeScript history core", () => {
       {
         settings: {
           enabled: true,
-          memorySynthesisEnabled: false,
+          rollupSynthesisEnabled: false,
           protocol: "responses",
           model: "test-model",
           endpoint: "https://api.openai.com/v1/responses",

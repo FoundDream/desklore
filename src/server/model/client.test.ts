@@ -31,7 +31,7 @@ function runtime(protocol: ModelRuntime["settings"]["protocol"]): ModelRuntime {
   return {
     settings: {
       enabled: true,
-      memorySynthesisEnabled: true,
+      rollupSynthesisEnabled: true,
       protocol,
       model: "test-model",
       endpoint:

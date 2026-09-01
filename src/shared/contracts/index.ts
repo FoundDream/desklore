@@ -44,9 +44,10 @@ export interface TimelineDocument {
   generatorFailureReason?: string;
 }
 
-export interface MemoryRollup {
+export interface TimelineRollup {
   id: string;
   kind: "6h" | "day";
+  status: "provisional" | "final";
   startedAt: string;
   endedAt: string;
   title: string;
@@ -97,7 +98,7 @@ export interface CaptureHealth {
 
 export interface LLMSettings {
   enabled: boolean;
-  memorySynthesisEnabled: boolean;
+  rollupSynthesisEnabled: boolean;
   protocol: ModelProtocol;
   model: string;
   endpoint: string;
@@ -157,7 +158,7 @@ export interface HistorySnapshot {
   activeDomain?: string;
   activeDomainAllowed?: boolean;
   documents: TimelineDocument[];
-  memories: MemoryRollup[];
+  rollups: TimelineRollup[];
   usage: ApplicationUsageSummary;
   health: CaptureHealth;
   llm: LLMSettings;
@@ -169,7 +170,7 @@ export interface HistoryRecovery {
   id: string;
   deletedAt: string;
   documentCount: number;
-  memoryCount: number;
+  rollupCount: number;
 }
 
 export interface DesktopSnapshot {
@@ -208,7 +209,7 @@ export interface DeskLoreAPI {
   updateObservationPolicy(input: ObservationPolicy): Promise<DesktopSnapshot>;
   configureLLM(input: LLMConfigurationInput): Promise<DesktopSnapshot>;
   setLLMEnabled(enabled: boolean): Promise<DesktopSnapshot>;
-  setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot>;
+  setRollupSynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot>;
   configureVisual(input: VisualConfigurationInput): Promise<DesktopSnapshot>;
   requestScreenCapturePermission(): Promise<DesktopSnapshot>;
   removeLLMAPIKey(): Promise<DesktopSnapshot>;
@@ -218,6 +219,6 @@ export interface DeskLoreAPI {
   restoreHistory(id: string): Promise<DesktopSnapshot>;
   revealStorage(): Promise<DesktopSnapshot>;
   getApplicationIcon(iconPath: string): Promise<string | undefined>;
-  searchMemory(query: string): Promise<HistorySearchResponse>;
+  searchHistory(query: string): Promise<HistorySearchResponse>;
   onSnapshot(listener: (snapshot: DesktopSnapshot) => void): () => void;
 }

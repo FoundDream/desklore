@@ -116,8 +116,8 @@ export class ServerCoreProcessClient extends EventEmitter {
     return this.request("setLLMEnabled", enabled);
   }
 
-  setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot> {
-    return this.request("setMemorySynthesisEnabled", enabled);
+  setRollupSynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot> {
+    return this.request("setRollupSynthesisEnabled", enabled);
   }
 
   configureVisual(input: VisualConfigurationInput): Promise<DesktopSnapshot> {
@@ -157,8 +157,8 @@ export class ServerCoreProcessClient extends EventEmitter {
     return this.current();
   }
 
-  searchMemory(query: string): Promise<HistorySearchResponse> {
-    return this.request("searchMemory", query);
+  searchHistory(query: string): Promise<HistorySearchResponse> {
+    return this.request("searchHistory", query);
   }
 
   async shutdown(): Promise<void> {

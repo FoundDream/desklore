@@ -595,22 +595,22 @@ export function SettingsView({
                   </label>
                 </SettingRow>
                 <SettingRow
-                  title={t("settings.memorySynthesis")}
-                  description={t("settings.memorySynthesisDetail")}
+                  title={t("settings.rollupSynthesis")}
+                  description={t("settings.rollupSynthesisDetail")}
                 >
                   <label className="switch">
                     <input
                       type="checkbox"
-                      aria-label={t("settings.memorySynthesis")}
-                      checked={history?.llm.memorySynthesisEnabled ?? false}
+                      aria-label={t("settings.rollupSynthesis")}
+                      checked={history?.llm.rollupSynthesisEnabled ?? false}
                       disabled={
                         busy ||
                         !history ||
-                        (!history.llm.apiKeyConfigured && !history.llm.memorySynthesisEnabled)
+                        (!history.llm.apiKeyConfigured && !history.llm.rollupSynthesisEnabled)
                       }
                       onChange={(event) =>
                         void run(() =>
-                          window.desklore.setMemorySynthesisEnabled(event.target.checked),
+                          window.desklore.setRollupSynthesisEnabled(event.target.checked),
                         )
                       }
                     />
@@ -1057,7 +1057,7 @@ export function SettingsView({
                   title={t("settings.archiveContents")}
                   description={t("settings.historyCounts", {
                     documents: history?.documents.length ?? 0,
-                    memories: history?.memories.length ?? 0,
+                    rollups: history?.rollups.length ?? 0,
                   })}
                 >
                   <StatusPill tone="success">{t("settings.localOnly")}</StatusPill>
@@ -1072,7 +1072,7 @@ export function SettingsView({
                       {t("settings.recoveryDetail", {
                         date: recoveryDate,
                         documents: recovery.documentCount,
-                        memories: recovery.memoryCount,
+                        rollups: recovery.rollupCount,
                       })}
                     </span>
                     <small>{t("settings.recoveryRetention")}</small>
@@ -1149,7 +1149,7 @@ export function SettingsView({
           title={t("settings.clearDialogTitle")}
           detail={`${t("settings.clearDialogDetail")} ${t("settings.clearDialogCounts", {
             documents: history?.documents.length ?? 0,
-            memories: history?.memories.length ?? 0,
+            rollups: history?.rollups.length ?? 0,
           })}`}
           secondaryDetail={t("settings.clearDialogPause")}
           confirmLabel={t("settings.clearDialogConfirm")}

@@ -12,7 +12,7 @@ import type {
   DesktopSnapshot,
   HistoryRecovery,
   LLMConfigurationInput,
-  MemoryRollup,
+  TimelineRollup,
   ObservationPolicy,
   TimelineApplication,
   TimelineDocument,
@@ -54,11 +54,11 @@ import {
   type LLMRuntime,
   type LLMUnavailable,
 } from "../history/timeline/repository.js";
-import { MemoryRepository } from "../history/memory/repository.js";
+import { TimelineRollupRepository } from "../history/rollup/repository.js";
 import { UsageTracker } from "../history/usage/tracker.js";
 import type {
   HistorySearchResponse,
-  MemoryRollupRecord,
+  TimelineRollupRecord,
   HistoryEvent,
   TimelineDocumentRecord,
   TimelineLLMSettings,
@@ -89,7 +89,7 @@ export class ServerCore extends EventEmitter {
   private readonly segments;
   private readonly settingsStore;
   private readonly timeline;
-  private readonly memory;
+  private readonly rollup;
   private readonly usage;
   private readonly collector: CollectorPort;
   private readonly credentials: CredentialStore;
@@ -105,7 +105,7 @@ export class ServerCore extends EventEmitter {
   private locale: AppLocale = "en";
   private recordingConsentGranted = false;
   private documents: TimelineDocumentRecord[] = [];
-  private memories: MemoryRollupRecord[] = [];
+  private rollups: TimelineRollupRecord[] = [];
   private historyRecovery?: HistoryRecovery;
   private lastError?: string;
   private initialized = false;
@@ -144,10 +144,10 @@ export class ServerCore extends EventEmitter {
       () => this.locale,
       dependencies.timelineAgentSessions,
     );
-    this.memory = new MemoryRepository(
+    this.rollup = new TimelineRollupRepository(
       this.layout,
       async () => {
-        if (!this.llmSettings.memorySynthesisEnabled) return undefined;
+        if (!this.llmSettings.rollupSynthesisEnabled) return undefined;
         const runtime = await this.llmRuntime();
         return runtime && !("failureReason" in runtime) ? runtime : undefined;
       },
@@ -206,7 +206,7 @@ export class ServerCore extends EventEmitter {
             ? allowsDomain(this.policy, native.snapshot.activeDomain)
             : undefined,
           documents: this.documents.map((document) => this.publicDocument(document)),
-          memories: this.memories.map((record) => this.publicMemory(record)),
+          rollups: this.rollups.map((record) => this.publicRollup(record)),
           usage: this.publicUsageSummary(this.usage.summary()),
           health: { ...native.snapshot.health, ...this.semanticHealth },
           llm: { ...this.llmSettings, apiKeyConfigured: this.apiKeyConfigured },
@@ -440,8 +440,8 @@ export class ServerCore extends EventEmitter {
     return this.current();
   }
 
-  async setMemorySynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot> {
-    const next = { ...this.llmSettings, memorySynthesisEnabled: enabled };
+  async setRollupSynthesisEnabled(enabled: boolean): Promise<DesktopSnapshot> {
+    const next = { ...this.llmSettings, rollupSynthesisEnabled: enabled };
     await this.settingsStore.saveLLMSettings(next);
     this.llmSettings = next;
     this.lastError = undefined;
@@ -522,14 +522,14 @@ export class ServerCore extends EventEmitter {
     await this.timelineWork;
     this.historyRecovery = await clearHistoryData(this.layout, {
       documentCount: this.documents.length,
-      memoryCount: this.memories.length,
+      rollupCount: this.rollups.length,
     });
     await this.usage.reload();
     this.segments.reset();
     this.coalescer.reset();
     this.burstCoalescer.reset();
     this.documents = [];
-    this.memories = [];
+    this.rollups = [];
     this.applicationIconPaths.clear();
     this.visual.clearCache();
     this.currentCaptureSegmentID = undefined;
@@ -595,8 +595,8 @@ export class ServerCore extends EventEmitter {
     return this.layout.timeline;
   }
 
-  searchMemory(query: string): HistorySearchResponse {
-    return this.memory.search(query, this.documents, this.memories);
+  searchHistory(query: string): HistorySearchResponse {
+    return this.rollup.search(query, this.documents, this.rollups);
   }
 
   private async initialize(): Promise<void> {
@@ -621,7 +621,7 @@ export class ServerCore extends EventEmitter {
     await this.usage.initialize();
     this.historyRecovery = await latestHistoryArchive(this.layout);
     this.documents = await this.timeline.loadDocuments();
-    this.memories = await this.memory.refresh(this.documents);
+    this.rollups = await this.rollup.refresh(this.documents);
     this.initialized = true;
   }
 
@@ -706,7 +706,7 @@ export class ServerCore extends EventEmitter {
 
   private async refreshDocuments(): Promise<void> {
     this.documents = await this.timeline.loadDocuments();
-    this.memories = await this.memory.refresh(this.documents);
+    this.rollups = await this.rollup.refresh(this.documents);
     const bundleIdentifiers = [
       ...new Set(
         [
@@ -758,10 +758,11 @@ export class ServerCore extends EventEmitter {
     };
   }
 
-  private publicMemory(record: MemoryRollupRecord): MemoryRollup {
+  private publicRollup(record: TimelineRollupRecord): TimelineRollup {
     return {
       id: record.id,
       kind: record.kind,
+      status: record.status,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
       title: record.title,

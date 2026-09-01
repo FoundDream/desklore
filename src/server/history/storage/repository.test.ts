@@ -98,13 +98,13 @@ describe("history storage deletion and retention", () => {
     await writeFile(path.join(layout.timeline, "timeline-agent-runs.jsonl"), "diagnostic\n", {
       mode: 0o600,
     });
-    await writeFile(path.join(layout.memoryDay, "example.md"), "memory", { mode: 0o600 });
+    await writeFile(path.join(layout.rollupDay, "example.md"), "rollup", { mode: 0o600 });
     await writeFile(path.join(layout.usage, "2026-08-24.json"), "usage\n", { mode: 0o600 });
     await writeFile(path.join(layout.state, "recording-consent.json"), "{}", { mode: 0o600 });
 
     const archive = await clearHistoryData(
       layout,
-      { documentCount: 1, memoryCount: 1 },
+      { documentCount: 1, rollupCount: 1 },
       new Date("2026-08-24T08:09:10.123Z"),
     );
     store.reset();
@@ -113,7 +113,7 @@ describe("history storage deletion and retention", () => {
       id: "2026-08-24T08-09-10-123Z",
       deletedAt: "2026-08-24T08:09:10.123Z",
       documentCount: 1,
-      memoryCount: 1,
+      rollupCount: 1,
     });
     await expect(latestHistoryArchive(layout)).resolves.toEqual(archive);
     await expect(stat(path.join(layout.state, "recording-consent.json"))).resolves.toBeDefined();
@@ -123,7 +123,7 @@ describe("history storage deletion and retention", () => {
     await expect(
       stat(path.join(layout.timeline, "timeline-agent-runs.jsonl")),
     ).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(path.join(layout.memoryDay, "example.md"))).rejects.toMatchObject({
+    await expect(stat(path.join(layout.rollupDay, "example.md"))).rejects.toMatchObject({
       code: "ENOENT",
     });
     await expect(stat(path.join(layout.usage, "2026-08-24.json"))).rejects.toMatchObject({
@@ -138,6 +138,9 @@ describe("history storage deletion and retention", () => {
     await expect(
       stat(path.join(layout.trash, archive.id, "usage", "2026-08-24.json")),
     ).resolves.toBeDefined();
+    await expect(
+      stat(path.join(layout.trash, archive.id, "rollups", "day", "example.md")),
+    ).resolves.toBeDefined();
 
     await expect(restoreHistoryData(layout, archive.id)).resolves.toEqual(archive);
     await expect(readFile(path.join(layout.timeline, "example.md"), "utf8")).resolves.toBe(
@@ -146,8 +149,8 @@ describe("history storage deletion and retention", () => {
     await expect(
       readFile(path.join(layout.timeline, "timeline-agent-runs.jsonl"), "utf8"),
     ).resolves.toBe("diagnostic\n");
-    await expect(readFile(path.join(layout.memoryDay, "example.md"), "utf8")).resolves.toBe(
-      "memory",
+    await expect(readFile(path.join(layout.rollupDay, "example.md"), "utf8")).resolves.toBe(
+      "rollup",
     );
     await expect(readFile(path.join(layout.usage, "2026-08-24.json"), "utf8")).resolves.toBe(
       "usage\n",

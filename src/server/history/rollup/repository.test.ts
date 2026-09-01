@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRepository } from "./repository.js";
+import { TimelineRollupRepository } from "./repository.js";
 import {
   ensureStorage,
   hardenStoragePermissions,
@@ -26,28 +26,29 @@ function document(overrides: Partial<TimelineDocumentRecord> = {}): TimelineDocu
     sourceSegmentID: "2026-08-20T06-10-00Z",
     startedAt: "2026-08-20T06:10:00.000Z",
     endedAt: "2026-08-20T06:20:00.000Z",
-    title: "实现 DeskLore 的分层记忆",
-    description: "完成了六小时和每日记忆聚合，并保留来源时间线引用。",
+    title: "实现 DeskLore 的分层时间线",
+    description: "完成了六小时和每日聚合，并保留来源时间线引用。",
     continuationHint: "补充真实数据评测",
-    claims: [{ text: "分层记忆已可检索。", evidenceEventIDs: ["event-1"] }],
+    claims: [{ text: "分层时间线已可检索。", evidenceEventIDs: ["event-1"] }],
     applications: [{ bundleIdentifier: "com.openai.codex", name: "Codex" }],
     evidenceEventIDs: ["event-1"],
     generator: { type: "llm", version: 2, model: "gpt-5.6-luna" },
     createdAt: "2026-08-20T06:20:01.000Z",
-    body: "## Recording summary\n\n完成分层记忆。",
+    body: "## Recording summary\n\n完成分层时间线。",
     ...overrides,
   };
 }
 
-describe("History memory", () => {
+describe("Timeline rollups", () => {
   it("materializes reloadable six-hour and daily rollups with source lineage", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-memory-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-rollup-"));
     temporaryDirectories.push(root);
-    const repository = new MemoryRepository(makeStorageLayout(root));
+    const repository = new TimelineRollupRepository(makeStorageLayout(root));
 
     const records = await repository.refresh([document()]);
 
     expect(records.map((record) => record.kind).sort()).toEqual(["6h", "day"]);
+    expect(records.every((record) => record.status === "final")).toBe(true);
     expect(records.every((record) => record.sourceDocumentIDs.includes("document-1"))).toBe(true);
     await expect(repository.load()).resolves.toHaveLength(2);
 
@@ -55,10 +56,10 @@ describe("History memory", () => {
     await expect(repository.load()).resolves.toEqual([]);
   });
 
-  it("waits for a six-hour boundary before materializing memory", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-memory-"));
+  it("materializes provisional rollups before their time boundary and finalizes them at it", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-rollup-"));
     temporaryDirectories.push(root);
-    const repository = new MemoryRepository(makeStorageLayout(root));
+    const repository = new TimelineRollupRepository(makeStorageLayout(root));
     const source = document({
       startedAt: new Date(2026, 7, 20, 6, 10).toISOString(),
       endedAt: new Date(2026, 7, 20, 6, 20).toISOString(),
@@ -69,24 +70,30 @@ describe("History memory", () => {
       new Date(2026, 7, 20, 11, 59, 59, 999),
     );
 
-    expect(beforeBoundary).toEqual([]);
-    expect(repository.search("分层记忆", [source], beforeBoundary).matches).toMatchObject([
-      { kind: "10min" },
+    expect(
+      beforeBoundary
+        .map((record) => [record.kind, record.status])
+        .sort(([lhs], [rhs]) => lhs.localeCompare(rhs)),
+    ).toEqual([
+      ["6h", "provisional"],
+      ["day", "provisional"],
     ]);
 
     const atBoundary = await repository.refresh([source], new Date(2026, 7, 20, 12));
 
     expect(atBoundary.map((record) => record.kind).sort()).toEqual(["6h", "day"]);
+    expect(atBoundary.find((record) => record.kind === "6h")?.status).toBe("final");
+    expect(atBoundary.find((record) => record.kind === "day")?.status).toBe("provisional");
   });
 
   it("retrieves across 10-minute and rollup layers with local evidence references", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-memory-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-rollup-"));
     temporaryDirectories.push(root);
-    const repository = new MemoryRepository(makeStorageLayout(root));
+    const repository = new TimelineRollupRepository(makeStorageLayout(root));
     const documents = [document()];
-    const memories = await repository.refresh(documents);
+    const rollups = await repository.refresh(documents);
 
-    const result = repository.search("分层记忆 可检索", documents, memories);
+    const result = repository.search("分层时间线 可检索", documents, rollups);
 
     expect(result.matches.some((match) => match.kind === "10min")).toBe(true);
     expect(result.matches.some((match) => match.kind === "6h")).toBe(true);
@@ -94,7 +101,7 @@ describe("History memory", () => {
   });
 
   it("uses model-backed synthesis once per source digest and keeps deterministic citations", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-memory-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-rollup-"));
     temporaryDirectories.push(root);
     const fetch = vi.fn().mockImplementation(
       async () =>
@@ -107,8 +114,8 @@ describe("History memory", () => {
                   {
                     type: "output_text",
                     text: JSON.stringify({
-                      title: "DeskLore 分层记忆实现",
-                      description: "实现并验证了本地分层记忆。",
+                      title: "DeskLore 分层时间线实现",
+                      description: "实现并验证了本地分层时间线。",
                       narrative: "工作从十分钟摘要扩展到六小时和每日归纳，并保留确定性的来源引用。",
                       continuation_hint: "补充真实数据评测",
                       important_context: ["来源 ID 由本地代码生成"],
@@ -122,10 +129,10 @@ describe("History memory", () => {
         ),
     );
     vi.stubGlobal("fetch", fetch);
-    const repository = new MemoryRepository(makeStorageLayout(root), async () => ({
+    const repository = new TimelineRollupRepository(makeStorageLayout(root), async () => ({
       settings: {
         enabled: true,
-        memorySynthesisEnabled: true,
+        rollupSynthesisEnabled: true,
         protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
@@ -149,7 +156,7 @@ describe("History memory", () => {
   });
 
   it("hardens existing storage files and directories without following symlinks", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "computer-history-permissions-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-permissions-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     await ensureStorage(layout);

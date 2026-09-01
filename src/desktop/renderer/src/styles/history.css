@@ -1,4 +1,37 @@
-.memory-search {
+.timeline-resolution {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  margin: 0 16px 12px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #f5f5f6;
+}
+
+.timeline-resolution button {
+  min-height: 29px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.timeline-resolution button:hover {
+  color: var(--foreground);
+}
+
+.timeline-resolution button.active {
+  color: var(--foreground);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 7%);
+}
+
+.history-search {
   display: grid;
   grid-template-columns: minmax(180px, 0.42fr) minmax(300px, 1fr);
   gap: 18px 24px;
@@ -10,20 +43,20 @@
   background: var(--surface);
 }
 
-.memory-search h2 {
+.history-search h2 {
   margin: 0;
   font-size: 15px;
   font-weight: 640;
 }
 
-.memory-search form {
+.history-search form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
 }
 
-.memory-search input {
+.history-search input {
   min-width: 0;
   height: 36px;
   padding: 0 11px;
@@ -34,7 +67,7 @@
   font-size: 12px;
 }
 
-.memory-search button {
+.history-search button {
   min-height: 32px;
   padding: 0 11px;
   border: 1px solid var(--border);
@@ -45,16 +78,16 @@
   cursor: pointer;
 }
 
-.memory-search button:hover {
+.history-search button:hover {
   background: var(--accent);
 }
 
-.memory-search button:disabled {
+.history-search button:disabled {
   color: var(--muted-soft);
   cursor: progress;
 }
 
-.memory-answer {
+.history-answer {
   display: grid;
   grid-column: 1 / -1;
   gap: 10px;
@@ -62,7 +95,7 @@
   border-top: 1px solid var(--border);
 }
 
-.memory-answer p {
+.history-answer p {
   margin: 0;
   color: #3f3f46;
   font-size: 12px;
@@ -70,13 +103,14 @@
   white-space: pre-line;
 }
 
-.memory-answer > div {
+.history-answer > div {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.memory-answer span {
+.history-answer button {
+  min-height: 26px;
   padding: 4px 7px;
   border-radius: 5px;
   color: var(--muted);
@@ -84,24 +118,24 @@
   font-size: 10px;
 }
 
-.memory-archive {
+.rollup-archive {
   width: 100%;
   padding: 0 16px 20px;
 }
 
-.memory-day {
+.rollup-day {
   display: grid;
   gap: 18px;
 }
 
-.daily-memory {
+.daily-rollup {
   padding: 21px 22px 18px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
 }
 
-.daily-memory h2 {
+.daily-rollup h2 {
   margin: 0;
   font-size: 17px;
   font-weight: 650;
@@ -109,12 +143,39 @@
   letter-spacing: -0.015em;
 }
 
-.daily-memory > p {
+.daily-rollup > p {
   max-width: 760px;
   margin: 9px 0 0;
   color: #52525b;
   font-size: 12px;
   line-height: 1.65;
+}
+
+.rollup-heading,
+.rollup-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rollup-title-row {
+  justify-content: flex-start;
+}
+
+.rollup-status {
+  flex: none;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.rollup-status.provisional {
+  color: #8a5a0a;
+  background: #fff7d6;
 }
 
 .continuation-hints {
@@ -140,7 +201,7 @@
   line-height: 1.55;
 }
 
-.memory-source {
+.rollup-source {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -150,19 +211,19 @@
   border-top: 1px solid var(--border);
 }
 
-.memory-source-meta {
+.rollup-source-meta {
   display: flex;
   flex: none;
   align-items: center;
   gap: 6px;
 }
 
-.memory-source-meta span {
+.rollup-source-meta span {
   color: var(--muted-soft);
   font-size: 10px;
 }
 
-.memory-source button {
+.rollup-source button {
   flex: none;
   min-height: 28px;
   padding: 0 8px;
@@ -174,51 +235,51 @@
   cursor: pointer;
 }
 
-.memory-source button:hover {
+.rollup-source button:hover {
   color: var(--foreground);
   background: var(--accent);
 }
 
-.memory-periods {
+.rollup-periods {
   display: grid;
   gap: 12px;
 }
 
-.memory-periods > header {
+.rollup-periods > header {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
 }
 
-.memory-periods > header h2 {
+.rollup-periods > header h2 {
   margin: 0;
   font-size: 16px;
   font-weight: 630;
 }
 
-.memory-periods > header > span {
+.rollup-periods > header > span {
   color: var(--muted);
   font-size: 10px;
 }
 
-.memory-periods > div {
+.rollup-periods > div {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
 }
 
-.memory-period {
+.rollup-period {
   overflow: hidden;
   background: var(--surface);
 }
 
-.memory-period + .memory-period {
+.rollup-period + .rollup-period {
   border-top: 1px solid var(--border-soft);
 }
 
-.memory-period summary {
+.rollup-period summary {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr) 36px;
   align-items: start;
@@ -229,34 +290,34 @@
   list-style: none;
 }
 
-.memory-period summary::-webkit-details-marker {
+.rollup-period summary::-webkit-details-marker {
   display: none;
 }
 
-.memory-period summary:hover {
+.rollup-period summary:hover {
   background: #f9f9fa;
 }
 
-.memory-period summary:focus-visible {
+.rollup-period summary:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
 
-.memory-period summary time {
+.rollup-period summary time {
   padding-top: 2px;
   color: var(--muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.memory-period summary h3 {
+.rollup-period summary h3 {
   margin: 0;
   font-size: 13px;
   font-weight: 630;
   line-height: 1.4;
 }
 
-.memory-period summary p {
+.rollup-period summary p {
   display: -webkit-box;
   overflow: hidden;
   margin: 5px 0 0;
@@ -267,23 +328,23 @@
   -webkit-line-clamp: 2;
 }
 
-.memory-period summary > span {
+.rollup-period summary > span {
   justify-self: end;
   padding-top: 2px;
   color: var(--muted-soft);
   font-size: 10px;
 }
 
-.memory-period[open] summary {
+.rollup-period[open] summary {
   border-bottom: 1px solid var(--border);
 }
 
-.memory-period-details {
+.rollup-period-details {
   padding: 16px 18px 16px 110px;
   background: #fafafa;
 }
 
-.memory-period-details .memory-source {
+.rollup-period-details .rollup-source {
   margin-top: 16px;
 }
 

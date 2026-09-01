@@ -61,7 +61,7 @@ describe("History settings", () => {
     service.terminate();
   });
 
-  it("cascades timeline deletion to its source segment before refreshing memory", async () => {
+  it("cascades timeline deletion to its source segment before refreshing rollups", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-delete-"));
     temporaryDirectories.push(root);
     const collector = Object.assign(new EventEmitter(), {
@@ -316,7 +316,7 @@ describe("History settings", () => {
     );
   });
 
-  it("migrates the known unversioned LLM settings shape", async () => {
+  it("rejects legacy LLM settings that have not been explicitly migrated", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-legacy-llm-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
@@ -324,66 +324,22 @@ describe("History settings", () => {
     await writeFile(
       path.join(layout.state, "llm-settings.json"),
       JSON.stringify({
+        schemaVersion: 2,
         enabled: false,
         memorySynthesisEnabled: true,
+        protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",
       }),
     );
 
     const settingsStore = new HistorySettingsStore(layout);
-    await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
-      enabled: false,
-      memorySynthesisEnabled: true,
-      protocol: "responses",
-      model: "gpt-5.6-luna",
-      endpoint: "https://api.openai.com/v1/responses",
-    });
-    await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
-      enabled: false,
-      memorySynthesisEnabled: true,
-      protocol: "responses",
-      model: "gpt-5.6-luna",
-      endpoint: "https://api.openai.com/v1/responses",
-    });
-    expect(
-      JSON.parse(await readFile(path.join(layout.state, "llm-settings.json"), "utf8")),
-    ).toMatchObject({
-      schemaVersion: 2,
-      protocol: "responses",
-    });
-  });
-
-  it("migrates v1 LLM settings to the Responses protocol", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-v1-llm-settings-"));
-    temporaryDirectories.push(root);
-    const layout = makeStorageLayout(root);
-    await ensureStorage(layout);
-    await writeFile(
-      path.join(layout.state, "llm-settings.json"),
-      JSON.stringify({
-        schemaVersion: 1,
-        enabled: true,
-        memorySynthesisEnabled: false,
-        model: "legacy-model",
-        endpoint: "https://example.com/v1/responses",
-      }),
+    await expect(settingsStore.loadLLMSettings()).rejects.toThrow(
+      "Unsupported model settings schema",
     );
-
-    const settingsStore = new HistorySettingsStore(layout);
-    await expect(settingsStore.loadLLMSettings()).resolves.toMatchObject({
-      protocol: "responses",
-      model: "legacy-model",
-    });
-    expect(
-      JSON.parse(await readFile(path.join(layout.state, "llm-settings.json"), "utf8")),
-    ).toMatchObject({
-      schemaVersion: 2,
-      protocol: "responses",
-    });
   });
 
-  it("persists the long-term-memory synthesis toggle independently", async () => {
+  it("persists the timeline-rollup synthesis toggle independently", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "desklore-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
@@ -391,7 +347,7 @@ describe("History settings", () => {
     const settingsStore = new HistorySettingsStore(layout);
     await settingsStore.saveLLMSettings({
       enabled: true,
-      memorySynthesisEnabled: false,
+      rollupSynthesisEnabled: false,
       protocol: "responses",
       model: "custom-model",
       endpoint: "https://example.com/v1/responses",
@@ -404,10 +360,10 @@ describe("History settings", () => {
     const service = createTestServerCore(collector, root);
     await (service as unknown as { initialize(): Promise<void> }).initialize();
 
-    await service.setMemorySynthesisEnabled(true);
+    await service.setRollupSynthesisEnabled(true);
 
     const reloaded = await settingsStore.loadLLMSettings();
-    expect(reloaded.memorySynthesisEnabled).toBe(true);
+    expect(reloaded.rollupSynthesisEnabled).toBe(true);
     expect(reloaded.enabled).toBe(true);
     expect(reloaded.model).toBe("custom-model");
     expect(reloaded.endpoint).toBe("https://example.com/v1/responses");
@@ -421,7 +377,7 @@ describe("History settings", () => {
     const settingsStore = new HistorySettingsStore(layout);
     await settingsStore.saveLLMSettings({
       enabled: false,
-      memorySynthesisEnabled: true,
+      rollupSynthesisEnabled: true,
       protocol: "chat_completions",
       model: "custom-model",
       endpoint: "https://example.com/v1/chat/completions",
@@ -438,7 +394,7 @@ describe("History settings", () => {
 
     const reloaded = await settingsStore.loadLLMSettings();
     expect(reloaded.enabled).toBe(true);
-    expect(reloaded.memorySynthesisEnabled).toBe(true);
+    expect(reloaded.rollupSynthesisEnabled).toBe(true);
     expect(reloaded.protocol).toBe("chat_completions");
     expect(reloaded.model).toBe("custom-model");
     expect(reloaded.endpoint).toBe("https://example.com/v1/chat/completions");
@@ -452,7 +408,7 @@ describe("History settings", () => {
     const settingsStore = new HistorySettingsStore(layout);
     await settingsStore.saveLLMSettings({
       enabled: true,
-      memorySynthesisEnabled: false,
+      rollupSynthesisEnabled: false,
       protocol: "responses",
       model: "original-model",
       endpoint: "https://example.com/v1/responses",
@@ -474,7 +430,7 @@ describe("History settings", () => {
 
     await expect(settingsStore.loadLLMSettings()).resolves.toEqual({
       enabled: true,
-      memorySynthesisEnabled: false,
+      rollupSynthesisEnabled: false,
       protocol: "chat_completions",
       model: "replacement-model",
       endpoint: "https://example.com/v1/chat/completions",

@@ -6,7 +6,6 @@ export type IconName =
   | "chevron-right"
   | "folder"
   | "usage"
-  | "memory"
   | "settings"
   | "timeline";
 
@@ -18,12 +17,6 @@ const geometry: Record<IconName, ReactNode> = {
       <circle cx="3" cy="3.5" r="0.75" fill="currentColor" stroke="none" />
       <circle cx="3" cy="8" r="0.75" fill="currentColor" stroke="none" />
       <circle cx="3" cy="12.5" r="0.75" fill="currentColor" stroke="none" />
-    </>
-  ),
-  memory: (
-    <>
-      <path d="M2.5 3.25h3.25A2.25 2.25 0 0 1 8 5.5v7.25a2.25 2.25 0 0 0-2.25-1.5H2.5z" />
-      <path d="M13.5 3.25h-3.25A2.25 2.25 0 0 0 8 5.5v7.25a2.25 2.25 0 0 1 2.25-1.5h3.25z" />
     </>
   ),
   usage: (

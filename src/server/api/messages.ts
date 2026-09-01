@@ -15,7 +15,7 @@ export type ServerCoreMethod =
   | "setLocale"
   | "configureLLM"
   | "setLLMEnabled"
-  | "setMemorySynthesisEnabled"
+  | "setRollupSynthesisEnabled"
   | "configureVisual"
   | "requestScreenCapturePermission"
   | "removeLLMAPIKey"
@@ -24,7 +24,7 @@ export type ServerCoreMethod =
   | "clearHistory"
   | "restoreHistory"
   | "storagePath"
-  | "searchMemory";
+  | "searchHistory";
 
 export interface ServerCoreInitializeMessage {
   type: "initialize";

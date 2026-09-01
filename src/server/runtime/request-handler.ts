@@ -38,8 +38,8 @@ export async function dispatchServerCoreRequest(
       return core.configureLLM(first as LLMConfigurationInput);
     case "setLLMEnabled":
       return core.setLLMEnabled(first as boolean);
-    case "setMemorySynthesisEnabled":
-      return core.setMemorySynthesisEnabled(first as boolean);
+    case "setRollupSynthesisEnabled":
+      return core.setRollupSynthesisEnabled(first as boolean);
     case "configureVisual":
       return core.configureVisual(first as VisualConfigurationInput);
     case "requestScreenCapturePermission":
@@ -56,7 +56,7 @@ export async function dispatchServerCoreRequest(
       return core.restoreHistory(first as string);
     case "storagePath":
       return core.storagePath();
-    case "searchMemory":
-      return core.searchMemory(first as string);
+    case "searchHistory":
+      return core.searchHistory(first as string);
   }
 }

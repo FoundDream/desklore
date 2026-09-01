@@ -28,8 +28,8 @@ const api: DeskLoreAPI = {
   configureLLM: (input: LLMConfigurationInput) =>
     ipcRenderer.invoke("history:configure-llm", input),
   setLLMEnabled: (enabled: boolean) => ipcRenderer.invoke("history:set-llm-enabled", enabled),
-  setMemorySynthesisEnabled: (enabled: boolean) =>
-    ipcRenderer.invoke("history:set-memory-synthesis-enabled", enabled),
+  setRollupSynthesisEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("history:set-rollup-synthesis-enabled", enabled),
   configureVisual: (input: VisualConfigurationInput) =>
     ipcRenderer.invoke("history:configure-visual", input),
   requestScreenCapturePermission: () => invoke("history:request-screen-capture-permission"),
@@ -41,7 +41,7 @@ const api: DeskLoreAPI = {
   revealStorage: () => invoke("history:reveal-storage"),
   getApplicationIcon: (iconPath: string) =>
     ipcRenderer.invoke("history:get-application-icon", iconPath),
-  searchMemory: (query: string) => ipcRenderer.invoke("history:search-memory", query),
+  searchHistory: (query: string) => ipcRenderer.invoke("history:search", query),
   onSnapshot: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: DesktopSnapshot): void => {
       listener(snapshot);

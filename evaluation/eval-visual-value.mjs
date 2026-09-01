@@ -406,7 +406,7 @@ async function generateSummary(runtime, model, events) {
       apiKey: runtime.apiKey,
       settings: {
         enabled: true,
-        memorySynthesisEnabled: false,
+        rollupSynthesisEnabled: false,
         protocol: "responses",
         model,
         endpoint: runtime.endpoint,

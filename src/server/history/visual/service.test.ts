@@ -27,7 +27,7 @@ function response(value: Record<string, unknown>): Response {
 const runtime = {
   settings: {
     enabled: false,
-    memorySynthesisEnabled: false,
+    rollupSynthesisEnabled: false,
     protocol: "responses" as const,
     model: "gpt-5.6-luna",
     endpoint: "https://api.openai.com/v1/responses",

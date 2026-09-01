@@ -101,15 +101,15 @@
     grid-template-columns: 1fr;
   }
 
-  .memory-search {
+  .history-search {
     grid-template-columns: 1fr;
   }
 
-  .memory-answer {
+  .history-answer {
     grid-column: 1;
   }
 
-  .memory-period-details {
+  .rollup-period-details {
     padding-left: 18px;
   }
 }

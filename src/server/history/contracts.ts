@@ -180,12 +180,13 @@ export interface TimelineClaim {
   evidenceEventIDs: string[];
 }
 
-export type MemoryBucketKind = "6h" | "day";
+export type TimelineRollupKind = "6h" | "day";
 
-export interface MemoryRollupRecord {
-  schemaVersion: 2;
+export interface TimelineRollupRecord {
+  schemaVersion: 1;
   id: string;
-  kind: MemoryBucketKind;
+  kind: TimelineRollupKind;
+  status: "provisional" | "final";
   startedAt: string;
   endedAt: string;
   title: string;
@@ -216,7 +217,7 @@ export type {
 
 export interface TimelineLLMSettings {
   enabled: boolean;
-  memorySynthesisEnabled: boolean;
+  rollupSynthesisEnabled: boolean;
   protocol: ModelProtocol;
   model: string;
   endpoint: string;
