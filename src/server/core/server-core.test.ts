@@ -44,7 +44,7 @@ class FakeCollector extends EventEmitter implements CollectorPort {
   }
 }
 
-class MemoryCredentialStore implements CredentialStore {
+class EphemeralCredentialStore implements CredentialStore {
   value?: string;
   readonly save = vi.fn(async (value: string) => {
     this.value = value;
@@ -83,7 +83,7 @@ describe("ServerCore", () => {
     const collector = new FakeCollector();
     const core = new ServerCore(
       { storageRoot },
-      { collector, credentials: new MemoryCredentialStore() },
+      { collector, credentials: new EphemeralCredentialStore() },
     );
 
     await expect(core.prepare()).resolves.toMatchObject({
@@ -98,7 +98,7 @@ describe("ServerCore", () => {
     const storageRoot = await mkdtemp(path.join(os.tmpdir(), "desklore-server-core-"));
     temporaryDirectories.push(storageRoot);
     const collector = new FakeCollector();
-    const credentials = new MemoryCredentialStore();
+    const credentials = new EphemeralCredentialStore();
     const core = new ServerCore({ storageRoot }, { collector, credentials });
 
     await expect(core.start()).resolves.toMatchObject({ recordingConsentGranted: false });

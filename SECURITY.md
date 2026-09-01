@@ -25,7 +25,7 @@ Reports are especially valuable when they involve:
 
 - capture occurring before explicit consent or while paused;
 - password, private-browsing, or sensitive-system content escaping native redaction;
-- deletion failing to remove source segments or derived memory;
+- deletion failing to remove source segments or derived rollups;
 - raw JSONL or API keys reaching the renderer;
 - unrequested network traffic or persisted screenshot pixels;
 - path traversal, unsafe symlink handling, or permissive data-file modes;

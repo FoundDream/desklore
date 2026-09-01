@@ -29,7 +29,6 @@
     "test:evaluation": "node --test evaluation/*.test.mjs",
     "test": "pnpm test:app && pnpm test:evaluation && pnpm native:test",
     "smoke:server-core": "electron scripts/server-core-process-smoke.mjs",
-    "migrate:timeline-rollups": "node scripts/migrate-timeline-rollups.mjs",
     "eval:history": "node evaluation/eval-history-data.mjs",
     "eval:timeline": "node evaluation/eval-timeline.mjs",
     "eval:visual": "node evaluation/eval-visual-policy.mjs",

@@ -31,7 +31,7 @@ data, evaluation output, or credentials.
 - Use a focused Conventional Commit-style title such as `fix(history): cascade timeline deletion`.
 - Explain the user-visible effect, the trust boundary touched, and the validation performed.
 - Add regression tests for policy, deletion, retention, protocol, and schema changes.
-- Use synthetic fixtures. Never copy real timeline, memory, AX, OCR, or screenshot content into the
+- Use synthetic fixtures. Never copy real timeline, rollup, AX, OCR, or screenshot content into the
   repository.
 - Preserve the Swift Collector boundary for Accessibility, native redaction, and capture health.
 - Keep renderer APIs narrow. Raw events and API keys must not enter the renderer.

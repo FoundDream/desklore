@@ -19,7 +19,7 @@ directory structure; the detailed design is in `docs/ARCHITECTURE.md`.
 - Renderer code uses `window.desklore` and shared DTOs; never import Node, Electron, or server code.
 - Preload exposes the smallest typed API. Electron main may depend on `server/api`, not ServerCore
   internals.
-- ServerCore owns policy, persistence, timeline, memory, usage, and optional model/visual work.
+- ServerCore owns policy, persistence, timeline details and rollups, usage, and optional model/visual work.
 - The Swift collector owns Accessibility and ScreenCaptureKit access. It emits sanitized NDJSON;
   it does not write history or call models.
 - Raw events and API keys never enter the renderer. Screenshots remain transient and are not stored.

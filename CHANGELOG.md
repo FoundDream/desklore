@@ -38,7 +38,7 @@ DeskLore's first public source release.
 ### Included
 
 - Native macOS semantic activity collection through Accessibility APIs.
-- A local timeline, six-hour memory rollups, daily memory, and search.
+- A local timeline with ten-minute, six-hour, and daily resolutions, plus search.
 - Explicit first-run recording consent with independently authorized Collector access.
 - Local JSONL and Markdown artifacts with deletion and retention controls.
 - Sensitive-surface, private-browsing, and password-field filtering.

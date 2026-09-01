@@ -45,11 +45,12 @@ Data is stored under:
 ```
 
 DeskLore creates owner-only directories and files where supported. Raw event segments are retained
-for 48 hours. Persisted visual text evidence is removed after 24 hours. Timeline and memory
-Markdown remain until the user deletes them.
+for 48 hours. Persisted visual text evidence is removed after 24 hours. Timeline documents and
+rollup Markdown remain until the user deletes them.
 
-Raw screenshot pixels are processed in memory and are not written to the event store. Timeline and
-memory Markdown are not encrypted by DeskLore. API keys are encrypted with Electron `safeStorage`.
+Raw screenshot pixels are processed transiently and are not written to the event store. Timeline
+and rollup Markdown are not encrypted by DeskLore. API keys are encrypted with Electron
+`safeStorage`.
 Use FileVault and an appropriate macOS account password when disk-at-rest protection is required.
 
 ## Deletion
@@ -59,17 +60,17 @@ Deleting one timeline item removes:
 - the timeline Markdown file;
 - its source raw segment;
 - visual evidence inside that segment;
-- memory rollups derived from the deleted source, which are regenerated from remaining documents.
+- timeline rollups derived from the deleted source, which are regenerated from remaining documents.
 
-**Clear all history** pauses recording and removes all raw segments, timeline documents, memory
+**Clear all history** pauses recording and removes all raw segments, timeline documents, timeline
 rollups, and visual evidence. It intentionally keeps application settings, recording consent, and
 an encrypted API key so deletion does not silently change unrelated preferences. Users can remove
 the API key separately in Settings.
 
 ## Network access
 
-DeskLore contains no telemetry or automatic crash upload. Its deterministic timeline and memory
-paths require no network access.
+DeskLore contains no telemetry or automatic crash upload. Its deterministic timeline details and
+rollups require no network access.
 
 Network requests occur only when the user enables a model-backed feature and supplies a compatible
 HTTPS endpoint and API key. Depending on enabled options, filtered semantic evidence, generated

@@ -137,7 +137,7 @@ Visual fallback has three independently configured parts:
 2. Window capture (`off` by default).
 3. Understanding (`off`, local OCR, or an explicitly configured model).
 
-Raw screenshots stay in memory and are not written to event files. See
+Raw screenshots are processed transiently and are not written to event files. See
 [docs/EVALUATION.md](docs/EVALUATION.md) before making quality claims from the included benchmarks.
 
 ## Contributing

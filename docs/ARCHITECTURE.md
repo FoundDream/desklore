@@ -29,7 +29,7 @@ React renderer (sandboxed)
 Electron main is a host, not the application domain. Long-running capture, persistence, model, and
 history work runs in ServerCore so a failure does not take down the renderer or the main event loop.
 The utility process is a crash boundary, not an operating-system sandbox: it receives the history
-root and the API key in memory because it owns persistence and optional model work.
+root and the API key in process state because it owns persistence and optional model work.
 
 ## Source layout
 
@@ -61,12 +61,12 @@ and daily timeline rollups, plus usage summaries, are derived from these local r
 
 Visual fallback is disabled by default. Its coordinator separately owns AX sufficiency decisions,
 capture settling/coalescing, provider backoff, transient image understanding, and health metrics.
-Pixels are processed in memory and discarded; persisted visual evidence contains sanitized text or
+Pixels are processed transiently and discarded; persisted visual evidence contains sanitized text or
 metadata only.
 
 The Electron main process is the only layer that uses `safeStorage`. It loads the credential before
 starting ServerCore and passes it through the process initialization message. ServerCore keeps it in
-memory and never includes it in snapshots. Renderer snapshots contain sanitized DTOs only.
+private process state and never includes it in snapshots. Renderer snapshots contain sanitized DTOs only.
 
 ## Dependency rules
 

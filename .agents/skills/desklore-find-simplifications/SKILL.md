@@ -48,7 +48,7 @@ Useful survey domains include:
 
 - Electron main/preload/renderer API and state duplication.
 - Collector command handling, capture lifecycle, and TypeScript/Swift wire representations.
-- History service lifecycle, coalescing, policy, storage, timeline, memory, visual scheduling, and error paths.
+- History service lifecycle, coalescing, policy, storage, timeline, rollups, visual scheduling, and error paths.
 - Persisted schemas, settings compatibility, retention, deletion, recovery, and derived-artifact invalidation.
 - Evaluator helpers, synthetic fixtures, website assets, localization, build scripts, packaging, and dependencies.
 
@@ -104,7 +104,7 @@ When the user explicitly requests implementation:
 - Make the smallest coherent change that removes the confirmed surface completely. Do not leave orphaned IPC handlers, preload methods, DTOs, Swift commands, settings, translations, tests, docs, package entries, or dependencies.
 - Preserve unrelated modifications and stage exact paths only if the user asks for a commit. Do not push, create a PR, close issues, or delete external artifacts unless explicitly requested.
 - Add or update regression tests for changed policy, deletion, retention, protocol, schema, consent, or privacy behavior.
-- Use synthetic fixtures; never introduce real activity, AX, OCR, screenshot, timeline, or memory data into the repository.
+- Use synthetic fixtures; never introduce real activity, AX, OCR, screenshot, timeline, or rollup data into the repository.
 
 Choose validation according to the outgoing change:
 

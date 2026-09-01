@@ -71,7 +71,7 @@ inflate provider retry counters.
 
 ## Submission and evidence contract
 
-The model can inspect only the in-memory, sanitized segment DTO and the explicit read-only Timeline
+The model can inspect only the transient, sanitized segment DTO and the explicit read-only Timeline
 tools. `submit_timeline` is the only accepted output path and must be the sole tool call in its turn.
 The submitted document-level evidence list is derived from claim citations rather than trusted as
 an independent field.
@@ -90,7 +90,7 @@ Only then may the baseline be upgraded.
 
 Production history and model work runs inside the ServerCore Electron utility process. Electron
 main starts it through a small request/response protocol and forwards snapshots to the renderer.
-ServerCore owns the history storage root, persistent jobs, and the API key in memory; its in-process
+ServerCore owns the history storage root, persistent jobs, and the API key in private process state; its in-process
 Timeline Agent receives sanitized events, bounded prior summaries, locale, and the selected model
 runtime. The model-facing tool set remains read-only except for the structured `submit_timeline`
 result handled and validated by ServerCore.

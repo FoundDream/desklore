@@ -316,17 +316,17 @@ describe("History settings", () => {
     );
   });
 
-  it("rejects legacy LLM settings that have not been explicitly migrated", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-legacy-llm-settings-"));
+  it("rejects unsupported LLM settings schemas", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-unsupported-llm-settings-"));
     temporaryDirectories.push(root);
     const layout = makeStorageLayout(root);
     await ensureStorage(layout);
     await writeFile(
       path.join(layout.state, "llm-settings.json"),
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 99,
         enabled: false,
-        memorySynthesisEnabled: true,
+        rollupSynthesisEnabled: true,
         protocol: "responses",
         model: "gpt-5.6-luna",
         endpoint: "https://api.openai.com/v1/responses",

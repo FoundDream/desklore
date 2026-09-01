@@ -1,7 +1,7 @@
 import { CollectorClient } from "../adapters/collector/client.js";
 import { InProcessTimelineAgentSessionFactory } from "../history/timeline/agent/runtime.js";
 import { CollectorVisualCaptureProvider } from "../adapters/collector/visual-provider.js";
-import { MemoryCredentialStore } from "../adapters/credentials/memory-store.js";
+import { EphemeralCredentialStore } from "../adapters/credentials/ephemeral-store.js";
 import type {
   ServerCoreInboundMessage,
   ServerCoreInitializeMessage,
@@ -36,7 +36,7 @@ async function initialize(message: ServerCoreInitializeMessage): Promise<void> {
     { storageRoot: message.storageRoot },
     {
       collector,
-      credentials: new MemoryCredentialStore(message.apiKey),
+      credentials: new EphemeralCredentialStore(message.apiKey),
       timelineAgentSessions: new InProcessTimelineAgentSessionFactory(),
       visualCapture: new CollectorVisualCaptureProvider(collector),
     },

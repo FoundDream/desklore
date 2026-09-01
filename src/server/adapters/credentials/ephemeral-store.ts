@@ -1,7 +1,7 @@
 import type { AppLocale } from "../../../shared/i18n/index.js";
 import type { CredentialStore } from "../../core/ports.js";
 
-export class MemoryCredentialStore implements CredentialStore {
+export class EphemeralCredentialStore implements CredentialStore {
   constructor(private apiKey?: string) {}
 
   async has(): Promise<boolean> {
