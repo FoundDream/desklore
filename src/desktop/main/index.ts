@@ -11,6 +11,7 @@ import { ServerCoreProcessClient } from "./server/server-core-client.js";
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
+let desktopReady = false;
 
 app.setName("DeskLore");
 app.setPath("userData", path.join(app.getPath("appData"), "DeskLore"));
@@ -30,6 +31,7 @@ const history = new ServerCoreProcessClient({
 });
 
 function showWindow(): void {
+  if (!desktopReady) return;
   if (!mainWindow || mainWindow.isDestroyed()) {
     void createWindow();
     return;
@@ -127,6 +129,7 @@ if (!hasSingleInstanceLock) {
       await history.connect();
       registerHistoryIPC({ core: history, getTrustedWindow: () => mainWindow });
       await createWindow();
+      desktopReady = true;
       tray = new Tray(trayIcon());
       tray.on("click", showWindow);
       rebuildTray(history.current());
