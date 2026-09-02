@@ -1,8 +1,7 @@
 # Evaluation
 
-DeskLore includes local evaluators for capture coverage, semantic fidelity, visual-policy behavior,
-and conditional summary value. Evaluation inputs can contain private activity data and remain
-ignored under `.eval-data/`.
+DeskLore includes local evaluators for capture coverage, semantic fidelity, and conditional summary
+value. Evaluation inputs can contain private activity data and remain ignored under `.eval-data/`.
 
 ## Evaluation contract
 
@@ -143,16 +142,6 @@ support, focus, unsupported claims, and incidental details. Citation membership 
 deterministically first. Skysight summaries may be retained as a same-window observational
 reference, but they are not a controlled arm because its generator cannot consume DeskLore's exact
 same-evidence contract.
-
-## Visual policy replay
-
-```bash
-pnpm eval:visual -- \
-  --input "$HOME/Library/Application Support/DeskLore/history"
-```
-
-This replays persisted event evidence through policy diagnostics. It does not prove that screenshots
-improve summaries.
 
 ## Paired visual-value benchmark
 

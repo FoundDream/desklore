@@ -1,3 +1,6 @@
+// Chosen by replaying recorded capture traces: the settle delay collapses a window's burst into one
+// candidate, and the per-window cooldown bounds repeats without a global capture quota. Both trade
+// screenshot volume against how quickly a changed window is observed again.
 export const visualCaptureLimits = {
   settleMilliseconds: 500,
   windowCooldownMilliseconds: 12_000,

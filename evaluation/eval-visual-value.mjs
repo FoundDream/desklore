@@ -633,7 +633,7 @@ function markdown(report) {
   const heading = `# DeskLore visual value benchmark\n\n`;
   const common =
     `Generated at ${report.generatedAt}. Input: ${report.input.root}.\n\n` +
-    `This benchmark keeps the existing visual-policy replay separate. It compares paired summaries over the same complete set of sanitized event IDs: AX-only removes visual evidence, while AX + Visual retains persisted OCR and visual understanding. Raw pixels are never read.\n\n` +
+    `This benchmark compares paired summaries over the same complete set of sanitized event IDs: AX-only removes visual evidence, while AX + Visual retains persisted OCR and visual understanding. Raw pixels are never read.\n\n` +
     `Selected ${selected} completed ten-minute segments: ${JSON.stringify(report.selection.cohorts)}. ` +
     `The manifest contains IDs and counts only, not OCR, AX, summary, or understanding text.\n\n`;
   if (report.mode === "manifest_only") {

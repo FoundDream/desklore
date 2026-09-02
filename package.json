@@ -31,7 +31,6 @@
     "smoke:server-core": "electron scripts/server-core-process-smoke.mjs",
     "eval:history": "node evaluation/eval-history-data.mjs",
     "eval:timeline": "node evaluation/eval-timeline.mjs",
-    "eval:visual": "node evaluation/eval-visual-policy.mjs",
     "eval:visual-value": "node evaluation/eval-visual-value.mjs",
     "doctor": "electron-vite-plus doctor",
     "preview": "electron-vite-plus preview",
