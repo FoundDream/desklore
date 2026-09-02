@@ -1,8 +1,8 @@
 <div align="center">
   <img src="resources/branding/icon.png" width="128" alt="DeskLore app icon">
   <h1>DeskLore</h1>
-  <p><strong>Open-source Computer History for macOS.</strong></p>
-  <p>Semantic activity events first. No continuous screen recording. Local by default.</p>
+  <p><strong>Your computer's memory. Owned by you, usable by the agents you trust.</strong></p>
+  <p>Open-source personal context infrastructure for macOS. Local. Cited. Deletable. Yours.</p>
   <p><a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
@@ -11,24 +11,33 @@
 </p>
 <p align="center"><sub>Real DeskLore interface with a fully synthetic activity history.</sub></p>
 
-DeskLore turns ordinary Mac activity into a searchable, multi-resolution timeline. It
-uses macOS Accessibility semantics instead of continuously recording the screen. An optional
-visual fallback exists for gaps in Accessibility evidence, but it is disabled by default.
+DeskLore is open-source infrastructure for personal context. It observes what you do on your Mac
+through macOS Accessibility semantics instead of screen recording, and turns that activity into a
+memory stored on your machine as plain files. Every statement in that memory can be traced to the
+evidence behind it and deleted together with it. DeskLore uses this memory itself first; agents you
+trust can use it within the scope you grant.
+
+Today DeskLore ships the evidence layer: a searchable, multi-resolution timeline with
+citation-validated summaries. The memory layer and its outputs, including proactive assistance and
+agent access, are the direction described in [docs/DIRECTION.md](docs/DIRECTION.md).
 
 > **Status:** [`0.2.0`](https://github.com/FoundDream/desklore/releases/tag/v0.2.0) is an early
 > source release for macOS 14+ on Apple Silicon. There is no official signed binary yet.
 
 ## Why DeskLore
 
-- **History is the product.** The core output is a readable timeline at ten-minute, six-hour, and
-  daily resolutions, not a raw
-  recording archive or a general agent platform.
+- **Memory is the product; history is its evidence.** Timeline documents at ten-minute, six-hour,
+  and daily resolutions are the retained evidence that every later claim must cite.
 - **Semantic capture first.** App, window, interaction, URL, and Accessibility context are
-  normalized into evidence-aware events.
+  normalized into evidence-aware events. Screen capture is a fallback and stays off by default.
 - **Local-first storage.** Raw events, Markdown timelines, timeline rollups, settings, and encrypted
   API credentials stay on your Mac unless you explicitly enable a model-backed feature.
-- **Explicit recording consent.** The native collector does not start before the first-run consent
-  screen is accepted.
+- **Explicit consent per boundary.** The native collector does not start before the first-run
+  consent screen is accepted, and each capability that sends data off the machine is a separate
+  decision.
+- **Built as infrastructure.** Evidence producers, the memory layer, and consumers are separate
+  layers with stable, versioned formats, so new collectors and agents can be added without
+  rewriting the core.
 - **Bilingual interface.** English is the default; Simplified Chinese can be selected during
   onboarding or later in Settings.
 - **Inspectable artifacts.** Timeline details and rollups are Markdown files with source IDs and
@@ -103,7 +112,8 @@ Collector and UI have separate bundle identifiers so macOS can sign and authoriz
 capture boundary independently.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the source layout, dependency rules, process
-boundary, and data ownership model.
+boundary, and data ownership model, and [docs/DIRECTION.md](docs/DIRECTION.md) for the layer model
+and the current phase.
 
 Local data lives at:
 

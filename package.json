@@ -2,7 +2,7 @@
   "name": "desklore",
   "version": "0.2.0",
   "private": true,
-  "description": "Open-source computer history for macOS, built local-first",
+  "description": "Open-source personal context infrastructure for macOS: a local, cited, deletable memory of your work",
   "homepage": "https://github.com/FoundDream/desklore#readme",
   "bugs": {
     "url": "https://github.com/FoundDream/desklore/issues"

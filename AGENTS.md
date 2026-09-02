@@ -1,7 +1,9 @@
 # DeskLore repository guide
 
 DeskLore is a local-first macOS desktop app. Keep privacy and process boundaries visible in the
-directory structure; the detailed design is in `docs/ARCHITECTURE.md`.
+directory structure; the detailed design is in `docs/ARCHITECTURE.md`. The product definition,
+load-bearing commitments, and layer model are in `docs/DIRECTION.md`; place new code in the layer
+it belongs to.
 
 ## Repository map
 

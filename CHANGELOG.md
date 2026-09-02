@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Direction
+
+- Redefined DeskLore as open-source personal context infrastructure: a local, cited, deletable
+  memory of your work, used first by DeskLore and then by agents you trust. See
+  `docs/DIRECTION.md` for the layer model and the current phase, which is collecting
+  comprehensive context. README, website copy, and package metadata follow the new definition.
+
 ## 0.2.0 — 2026-08-26
 
 DeskLore's second early source release makes Timeline Agent work durable, adds user-controlled
