@@ -4,13 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  classifyRecorderAvailability,
   classifySegment,
   diagnosticSummary,
   discoverLocalCodexHistoryRoot,
   evaluateEvents,
   normalizedEvent,
   normalizedMetadata,
+  normalizedRecorderAvailabilityRun,
   readDataset,
+  readRecorderAvailability,
   run as runHistoryEvaluation,
   tolerantMatchCount,
   tolerantMatchPairs,
@@ -208,9 +211,11 @@ void test("full paired run records provenance and scores only complete shared bu
   const segmentID = "2026-08-20T12-00-00Z";
   const candidateDirectory = path.join(candidate, "segments", segmentID);
   const referenceDirectory = path.join(reference, "segments", segmentID);
+  const availabilityDirectory = path.join(candidate, "usage", "recorder-availability");
   await Promise.all([
     mkdir(candidateDirectory, { recursive: true }),
     mkdir(referenceDirectory, { recursive: true }),
+    mkdir(availabilityDirectory, { recursive: true }),
   ]);
   const candidateEvent = {
     id: "11111111-1111-4111-8111-111111111111",
@@ -251,6 +256,28 @@ void test("full paired run records provenance and scores only complete shared bu
       }),
     ),
     writeFile(path.join(referenceDirectory, "events.jsonl"), `${JSON.stringify(referenceEvent)}\n`),
+    writeFile(
+      path.join(availabilityDirectory, "fixture-run.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        runID: "fixture-run",
+        startedAt: "2026-08-20T12:00:00.000Z",
+        lastHeartbeatAt: "2026-08-20T12:10:00.000Z",
+        endedAt: "2026-08-20T12:10:00.000Z",
+        transitions: [
+          {
+            timestamp: "2026-08-20T12:00:00.000Z",
+            state: "available",
+            reason: "recorder_running",
+            trigger: "server_start",
+            connectionState: "connected",
+            recorderState: "running",
+            accessibilityGranted: true,
+            interactionMonitorActive: true,
+          },
+        ],
+      }),
+    ),
     writeFile(segmentSelection, JSON.stringify({ overall: { segmentIDs: [segmentID] } })),
   ]);
 
@@ -267,8 +294,8 @@ void test("full paired run records provenance and scores only complete shared bu
     "fixture",
   ]);
 
-  assert.equal(report.schemaVersion, 2);
-  assert.equal(report.evaluatorVersion, "history-paired-v3");
+  assert.equal(report.schemaVersion, 3);
+  assert.equal(report.evaluatorVersion, "history-paired-v4");
   assert.equal(report.overall.commonCompletedSegments, 1);
   assert.equal(report.overall.matches.tolerant.matches, 1);
   assert.equal(report.provenance.candidate.recorderSettings, "fixture");
@@ -276,7 +303,77 @@ void test("full paired run records provenance and scores only complete shared bu
   assert.equal(report.provenance.reference.origin, "configured-path");
   assert.equal(report.segmentSelection.mode, "explicit_file");
   assert.equal(report.segmentSelection.requestedCount, 1);
+  assert.equal(report.recorderAvailability.candidate.telemetry, "recorded");
+  assert.deepEqual(report.recorderAvailability.referenceCompleteSegments.statusCounts, {
+    available: 1,
+    unavailable: 0,
+    unknown: 0,
+  });
   assert.equal((await stat(path.join(output, "report.json"))).mode & 0o777, 0o600);
+});
+
+void test("recorder availability distinguishes healthy, interrupted, and legacy segments", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "desklore-eval-availability-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, "usage", "recorder-availability");
+  await mkdir(directory, { recursive: true });
+  const run = {
+    schemaVersion: 1,
+    runID: "run-a",
+    startedAt: "2026-08-20T12:00:00.000Z",
+    lastHeartbeatAt: "2026-08-20T12:14:00.000Z",
+    transitions: [
+      {
+        timestamp: "2026-08-20T12:00:00.000Z",
+        state: "available",
+        reason: "recorder_running",
+        trigger: "server_start",
+        connectionState: "connected",
+        recorderState: "running",
+        accessibilityGranted: true,
+        interactionMonitorActive: true,
+      },
+    ],
+  };
+  const restartedRun = {
+    ...run,
+    runID: "run-b",
+    startedAt: "2026-08-20T12:20:00.000Z",
+    lastHeartbeatAt: "2026-08-20T12:30:00.000Z",
+    endedAt: "2026-08-20T12:30:00.000Z",
+    transitions: [
+      {
+        ...run.transitions[0],
+        timestamp: "2026-08-20T12:20:00.000Z",
+      },
+    ],
+  };
+  await Promise.all([
+    writeFile(path.join(directory, "run-a.json"), JSON.stringify(run)),
+    writeFile(path.join(directory, "run-b.json"), JSON.stringify(restartedRun)),
+    writeFile(path.join(directory, "invalid.json"), "{}"),
+  ]);
+
+  assert.equal(normalizedRecorderAvailabilityRun(run, "run-a").runID, "run-a");
+  const availability = await readRecorderAvailability(root);
+  assert.equal(availability.telemetry, "recorded");
+  assert.equal(availability.invalidRunCount, 1);
+  assert.deepEqual(
+    classifyRecorderAvailability(availability.runs, "2026-08-20T11-50-00Z", 90_000),
+    { status: "unknown", reason: "before_first_recorded_run" },
+  );
+  assert.deepEqual(
+    classifyRecorderAvailability(availability.runs, "2026-08-20T12-00-00Z", 90_000),
+    { status: "available", reason: "continuous_healthy_run" },
+  );
+  assert.deepEqual(
+    classifyRecorderAvailability(availability.runs, "2026-08-20T12-10-00Z", 90_000),
+    { status: "unavailable", reason: "heartbeat_gap_or_run_ended" },
+  );
+  assert.deepEqual(
+    classifyRecorderAvailability(availability.runs, "2026-08-20T12-20-00Z", 90_000),
+    { status: "available", reason: "continuous_healthy_run" },
+  );
 });
 
 void test("diagnostics preserve headline scoring while exposing segment and stream gaps", () => {

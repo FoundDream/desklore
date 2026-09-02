@@ -1,11 +1,12 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultObservationPolicy } from "../../shared/defaults.js";
 import { HistorySettingsStore } from "../history/settings/store.js";
 import { ensureStorage, makeStorageLayout } from "../history/storage/repository.js";
+import type { CaptureHealth } from "../../shared/contracts/index.js";
 import type {
   CollectorCommand,
   CollectorConnection,
@@ -14,15 +15,43 @@ import type {
 } from "./ports.js";
 import { ServerCore } from "./server-core.js";
 
+function captureHealth(): CaptureHealth {
+  return {
+    accessibilityGranted: true,
+    interactionMonitorActive: true,
+    axObserverActive: true,
+    axValueNotificationTargets: 1,
+    axSelectionNotificationTargets: 1,
+    returnKeyEventCount: 0,
+    keyboardSubmitCount: 0,
+    keyboardShortcutCount: 0,
+    textInputEventCount: 0,
+    selectionEventCount: 0,
+    capturedEventCount: 0,
+    persistedEventCount: 0,
+    policyBlockedEventCount: 0,
+    deduplicatedEventCount: 0,
+    burstCoalescedEventCount: 0,
+    lastAXCaptureDurationMilliseconds: 0,
+    axCaptureBacklog: 0,
+    screenCaptureGranted: false,
+  };
+}
+
 class FakeCollector extends EventEmitter implements CollectorPort {
   connection: CollectorConnection = { connectionState: "stopped" };
   readonly commands: Array<{ command: CollectorCommand; payload?: Record<string, unknown> }> = [];
   readonly start = vi.fn(async () => {
-    this.connection = { connectionState: "connected" };
+    this.connection = {
+      connectionState: "connected",
+      snapshot: { recorderState: "stopped", health: captureHealth() },
+    };
+    this.emit("snapshot", this.current());
     return this.current();
   });
   readonly stop = vi.fn(async () => {
     this.connection = { connectionState: "stopped" };
+    this.emit("snapshot", this.current());
     return this.current();
   });
   readonly terminate = vi.fn();
@@ -36,6 +65,17 @@ class FakeCollector extends EventEmitter implements CollectorPort {
     payload?: Record<string, unknown>,
   ): Promise<CollectorConnection> {
     this.commands.push({ command, payload });
+    const snapshot = this.connection.snapshot;
+    if (snapshot && ["start", "pause", "resume"].includes(command)) {
+      this.connection = {
+        ...this.connection,
+        snapshot: {
+          ...snapshot,
+          recorderState: command === "pause" ? "paused" : "running",
+        },
+      };
+      this.emit("snapshot", this.current());
+    }
     return this.current();
   }
 
@@ -113,6 +153,19 @@ describe("ServerCore", () => {
       },
       { command: "start", payload: undefined },
     ]);
+    const availabilityDirectory = path.join(storageRoot, "usage", "recorder-availability");
+    const runFiles = await readdir(availabilityDirectory);
+    expect(runFiles).toHaveLength(1);
+    const runningAvailability = JSON.parse(
+      await readFile(path.join(availabilityDirectory, runFiles[0]), "utf8"),
+    ) as { transitions: Array<{ state: string }> };
+    expect(runningAvailability.transitions.at(-1)?.state).toBe("available");
+    await (
+      core as unknown as {
+        maintenance(): Promise<void>;
+      }
+    ).maintenance();
+    expect(collector.commands.at(-1)).toEqual({ command: "heartbeat", payload: undefined });
 
     await core.configureLLM({
       protocol: "responses",
@@ -126,6 +179,11 @@ describe("ServerCore", () => {
 
     await Promise.all([core.shutdown(), core.shutdown()]);
     expect(collector.stop).toHaveBeenCalledOnce();
+    const stoppedAvailability = JSON.parse(
+      await readFile(path.join(availabilityDirectory, runFiles[0]), "utf8"),
+    ) as { endedAt?: string; transitions: Array<{ state: string }> };
+    expect(stoppedAvailability.endedAt).toBeDefined();
+    expect(stoppedAvailability.transitions.at(-1)?.state).toBe("unavailable");
     core.terminate();
   });
 });

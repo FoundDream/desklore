@@ -26,6 +26,8 @@ import {
   EventBurstCoalescer,
   EventCoalescer,
 } from "../history/events/coalescer.js";
+import { RecorderAvailabilityTracker } from "../history/availability/tracker.js";
+import { recorderAvailabilityHeartbeatMilliseconds } from "../history/availability/contracts.js";
 import {
   allowsApplication,
   allowsDomain,
@@ -91,6 +93,7 @@ export class ServerCore extends EventEmitter {
   private readonly timeline;
   private readonly rollup;
   private readonly usage;
+  private readonly recorderAvailability;
   private readonly collector: CollectorPort;
   private readonly credentials: CredentialStore;
   private readonly visual;
@@ -154,6 +157,7 @@ export class ServerCore extends EventEmitter {
       () => this.locale,
     );
     this.usage = new UsageTracker(this.layout);
+    this.recorderAvailability = new RecorderAvailabilityTracker(this.layout);
     this.visual = new VisualEnrichmentCoordinator({
       provider: dependencies.visualCapture,
       appendEvidence: (enrichment) => this.segments.appendEvidence(enrichment),
@@ -163,9 +167,13 @@ export class ServerCore extends EventEmitter {
       onError: (error) => this.captureError(error),
     });
     this.collector.on("snapshot", () => {
-      if (this.initialized && this.collector.current().connectionState !== "connected") {
+      if (this.initialized) {
         void this.enqueueCapture(async () => {
-          await this.usage.end(new Date(), "collector_disconnected");
+          const connection = this.collector.current();
+          await this.recorderAvailability.record(connection, "collector_snapshot");
+          if (connection.connectionState !== "connected") {
+            await this.usage.end(new Date(), "collector_disconnected");
+          }
           this.emitSnapshot();
         }).catch((error) => this.captureError(error));
       }
@@ -182,6 +190,7 @@ export class ServerCore extends EventEmitter {
     });
     this.collector.on("usage-state", (event: UsageStateEvent) => {
       void this.enqueueCapture(async () => {
+        await this.recorderAvailability.recordUsageState(this.collector.current(), event);
         await this.usage.transition(event);
         if (event.application) {
           await this.resolveApplicationIcons([event.application.bundleIdentifier]);
@@ -244,6 +253,7 @@ export class ServerCore extends EventEmitter {
     await this.syncObservationPolicyToCollector();
     await this.collector.request("start");
     await this.captureWork;
+    await this.recorderAvailability.record(this.collector.current(), "recorder_started");
     this.timelineAgentEnabled = true;
     this.startTimers();
     await this.refreshDocuments();
@@ -291,6 +301,7 @@ export class ServerCore extends EventEmitter {
     await this.visual.drain();
     await this.collector.stop();
     await this.maintenance();
+    await this.recorderAvailability.stop(this.collector.current());
     await this.timelineAgentWork;
     await this.timelineWork;
     await this.timeline.pauseAgentJobs();
@@ -525,6 +536,7 @@ export class ServerCore extends EventEmitter {
       rollupCount: this.rollups.length,
     });
     await this.usage.reload();
+    await this.recorderAvailability.reset(this.collector.current(), "history_cleared");
     this.segments.reset();
     this.coalescer.reset();
     this.burstCoalescer.reset();
@@ -564,6 +576,7 @@ export class ServerCore extends EventEmitter {
       await this.timelineWork;
       await restoreHistoryData(this.layout, id);
       await this.usage.reload();
+      await this.recorderAvailability.reset(this.collector.current(), "history_restored");
       this.segments.reset();
       this.coalescer.reset();
       this.burstCoalescer.reset();
@@ -619,6 +632,7 @@ export class ServerCore extends EventEmitter {
     this.visual.configure(this.visualSettings);
     this.apiKeyConfigured = await this.credentials.has();
     await this.usage.initialize();
+    await this.recorderAvailability.start(this.collector.current());
     this.historyRecovery = await latestHistoryArchive(this.layout);
     this.documents = await this.timeline.loadDocuments();
     this.rollups = await this.rollup.refresh(this.documents);
@@ -685,6 +699,20 @@ export class ServerCore extends EventEmitter {
   }
 
   private async maintenance(): Promise<void> {
+    if (this.collector.current().connectionState === "connected") {
+      try {
+        await this.collector.request("heartbeat");
+        await this.recorderAvailability.record(this.collector.current(), "heartbeat", new Date());
+      } catch {
+        await this.recorderAvailability.recordUnavailable(
+          "collector_heartbeat_failed",
+          this.collector.current(),
+          new Date(),
+        );
+      }
+    } else {
+      await this.recorderAvailability.record(this.collector.current(), "heartbeat", new Date());
+    }
     for (const event of this.burstCoalescer.flushExpired()) await this.persist(event);
     await this.usage.checkpoint();
     const closed = await this.segments.closeExpired();
@@ -875,7 +903,7 @@ export class ServerCore extends EventEmitter {
         void this.enqueueCapture(async () => this.maintenance()).catch((error) =>
           this.captureError(error),
         );
-      }, 30_000);
+      }, recorderAvailabilityHeartbeatMilliseconds);
     }
   }
 

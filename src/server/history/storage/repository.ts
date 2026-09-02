@@ -35,6 +35,7 @@ export interface StorageLayout {
   rollupSixHour: string;
   rollupDay: string;
   usage: string;
+  recorderAvailability: string;
   state: string;
   trash: string;
 }
@@ -51,6 +52,7 @@ const historyArchiveMetadataFile = "archive.json";
 
 export function makeStorageLayout(root: string): StorageLayout {
   const rollups = path.join(root, "rollups");
+  const usage = path.join(root, "usage");
   return {
     root,
     segments: path.join(root, "segments"),
@@ -58,7 +60,8 @@ export function makeStorageLayout(root: string): StorageLayout {
     rollups,
     rollupSixHour: path.join(rollups, "6h"),
     rollupDay: path.join(rollups, "day"),
-    usage: path.join(root, "usage"),
+    usage,
+    recorderAvailability: path.join(usage, "recorder-availability"),
     state: path.join(root, "state"),
     trash: path.join(root, ".trash"),
   };
@@ -74,6 +77,7 @@ export async function ensureStorage(layout: StorageLayout): Promise<void> {
       layout.rollupSixHour,
       layout.rollupDay,
       layout.usage,
+      layout.recorderAvailability,
       layout.state,
       layout.trash,
     ].map(async (directory) => {
@@ -246,7 +250,17 @@ async function historyDirectoriesAreEmpty(layout: StorageLayout): Promise<boolea
     if (!entry.isDirectory() || !["6h", "day"].includes(entry.name)) return false;
     if ((await readdir(path.join(layout.rollups, entry.name))).length) return false;
   }
-  if ((await readdir(layout.usage)).length) return false;
+  const usageEntries = await readdir(layout.usage, { withFileTypes: true });
+  if (
+    usageEntries.some(
+      (entry) =>
+        entry.name !== path.basename(layout.recorderAvailability) ||
+        !entry.isDirectory() ||
+        entry.isSymbolicLink(),
+    )
+  ) {
+    return false;
+  }
   return true;
 }
 

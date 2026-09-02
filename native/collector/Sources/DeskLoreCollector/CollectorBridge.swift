@@ -191,6 +191,8 @@ final class CollectorBridge {
         }
 
         switch command.command {
+        case "heartbeat":
+            break
         case "configureObservationPolicy":
             guard let policy = command.observationPolicy else {
                 sendError("Invalid observation policy", requestID: command.id)

@@ -100,6 +100,9 @@ describe("history storage deletion and retention", () => {
     });
     await writeFile(path.join(layout.rollupDay, "example.md"), "rollup", { mode: 0o600 });
     await writeFile(path.join(layout.usage, "2026-08-24.json"), "usage\n", { mode: 0o600 });
+    await writeFile(path.join(layout.recorderAvailability, "archived-run.json"), "availability\n", {
+      mode: 0o600,
+    });
     await writeFile(path.join(layout.state, "recording-consent.json"), "{}", { mode: 0o600 });
 
     const archive = await clearHistoryData(
@@ -139,9 +142,17 @@ describe("history storage deletion and retention", () => {
       stat(path.join(layout.trash, archive.id, "usage", "2026-08-24.json")),
     ).resolves.toBeDefined();
     await expect(
+      stat(
+        path.join(layout.trash, archive.id, "usage", "recorder-availability", "archived-run.json"),
+      ),
+    ).resolves.toBeDefined();
+    await expect(
       stat(path.join(layout.trash, archive.id, "rollups", "day", "example.md")),
     ).resolves.toBeDefined();
 
+    await writeFile(path.join(layout.recorderAvailability, "current-run.json"), "current\n", {
+      mode: 0o600,
+    });
     await expect(restoreHistoryData(layout, archive.id)).resolves.toEqual(archive);
     await expect(readFile(path.join(layout.timeline, "example.md"), "utf8")).resolves.toBe(
       "timeline",
@@ -155,6 +166,12 @@ describe("history storage deletion and retention", () => {
     await expect(readFile(path.join(layout.usage, "2026-08-24.json"), "utf8")).resolves.toBe(
       "usage\n",
     );
+    await expect(
+      readFile(path.join(layout.recorderAvailability, "archived-run.json"), "utf8"),
+    ).resolves.toBe("availability\n");
+    await expect(
+      stat(path.join(layout.recorderAvailability, "current-run.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(latestHistoryArchive(layout)).resolves.toBeUndefined();
   });
 

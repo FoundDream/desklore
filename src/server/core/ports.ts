@@ -26,6 +26,7 @@ export interface CollectorConnection {
 export type CollectorCommand =
   | "captureVisualEvidence"
   | "configureObservationPolicy"
+  | "heartbeat"
   | "pause"
   | "quit"
   | "refreshPermissions"

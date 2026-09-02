@@ -2,6 +2,10 @@ import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  recorderAvailabilitySchemaVersion,
+  recorderAvailabilityStaleMilliseconds,
+} from "../src/server/history/availability/contracts.ts";
 import { normalizeHistoryEvent, normalizeMetadata } from "../src/server/history/contracts.ts";
 
 const secretPattern =
@@ -12,8 +16,8 @@ const sensitiveSystemBundles = new Set([
   "com.apple.ScreenSaver.Engine",
 ]);
 const defaultExcludedBundles = new Set(["com.github.Electron", "com.desklore.desktop"]);
-const reportSchemaVersion = 2;
-const evaluatorVersion = "history-paired-v3";
+const reportSchemaVersion = 3;
+const evaluatorVersion = "history-paired-v4";
 const segmentDurationMilliseconds = 10 * 60 * 1_000;
 const segmentBoundaryToleranceMilliseconds = 2_000;
 const segmentStatuses = [
@@ -410,6 +414,194 @@ export async function readDataset(root, source) {
         })),
     },
   };
+}
+
+function normalizedAvailabilityTransition(value) {
+  const transition = record(value);
+  const timestamp = string(transition?.timestamp);
+  const state = string(transition?.state);
+  const reason = string(transition?.reason);
+  const trigger = string(transition?.trigger);
+  const connectionState = string(transition?.connectionState);
+  const recorderState = string(transition?.recorderState);
+  if (
+    !timestamp ||
+    !Number.isFinite(Date.parse(timestamp)) ||
+    !["available", "unavailable"].includes(state) ||
+    !reason ||
+    !trigger ||
+    !["starting", "connected", "stopped", "missing", "failed"].includes(connectionState) ||
+    (recorderState !== undefined && !["stopped", "running", "paused"].includes(recorderState)) ||
+    (transition.accessibilityGranted !== undefined &&
+      typeof transition.accessibilityGranted !== "boolean") ||
+    (transition.interactionMonitorActive !== undefined &&
+      typeof transition.interactionMonitorActive !== "boolean")
+  ) {
+    throw new Error("Invalid recorder availability transition");
+  }
+  return {
+    timestamp,
+    state,
+    reason,
+    trigger,
+    connectionState,
+    recorderState,
+    accessibilityGranted: transition.accessibilityGranted,
+    interactionMonitorActive: transition.interactionMonitorActive,
+  };
+}
+
+export function normalizedRecorderAvailabilityRun(value, expectedRunID) {
+  const source = record(value);
+  const runID = string(source?.runID);
+  const startedAt = string(source?.startedAt);
+  const lastHeartbeatAt = string(source?.lastHeartbeatAt);
+  const endedAt = string(source?.endedAt);
+  if (
+    source?.schemaVersion !== recorderAvailabilitySchemaVersion ||
+    !runID ||
+    runID !== expectedRunID ||
+    !startedAt ||
+    !lastHeartbeatAt ||
+    !Number.isFinite(Date.parse(startedAt)) ||
+    !Number.isFinite(Date.parse(lastHeartbeatAt)) ||
+    Date.parse(lastHeartbeatAt) < Date.parse(startedAt) ||
+    (endedAt !== undefined &&
+      (!Number.isFinite(Date.parse(endedAt)) ||
+        Date.parse(endedAt) < Date.parse(startedAt) ||
+        Date.parse(endedAt) < Date.parse(lastHeartbeatAt))) ||
+    !Array.isArray(source.transitions) ||
+    !source.transitions.length
+  ) {
+    throw new Error("Invalid recorder availability run");
+  }
+  const transitions = source.transitions.map(normalizedAvailabilityTransition);
+  let previous = Date.parse(startedAt);
+  for (const transition of transitions) {
+    const timestamp = Date.parse(transition.timestamp);
+    if (
+      timestamp < Date.parse(startedAt) ||
+      timestamp < previous ||
+      timestamp > Date.parse(lastHeartbeatAt)
+    ) {
+      throw new Error("Invalid recorder availability transition order");
+    }
+    previous = timestamp;
+  }
+  return {
+    schemaVersion: recorderAvailabilitySchemaVersion,
+    runID,
+    startedAt,
+    lastHeartbeatAt,
+    endedAt,
+    transitions,
+  };
+}
+
+export async function readRecorderAvailability(root) {
+  const directory = path.join(root, "usage", "recorder-availability");
+  let entries;
+  try {
+    const stats = await lstat(directory);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      return { telemetry: "invalid", runs: [], invalidRunCount: 1 };
+    }
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { telemetry: "not_supplied", runs: [], invalidRunCount: 0 };
+    }
+    return { telemetry: "invalid", runs: [], invalidRunCount: 1 };
+  }
+  const runs = [];
+  let invalidRunCount = 0;
+  for (const entry of entries.sort((lhs, rhs) => lhs.name.localeCompare(rhs.name))) {
+    if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".json")) {
+      invalidRunCount += 1;
+      continue;
+    }
+    try {
+      const file = path.join(directory, entry.name);
+      const stats = await lstat(file);
+      if (stats.isSymbolicLink() || !stats.isFile()) throw new Error("Invalid run file");
+      runs.push(
+        normalizedRecorderAvailabilityRun(
+          JSON.parse(await readFile(file, "utf8")),
+          entry.name.slice(0, -5),
+        ),
+      );
+    } catch {
+      invalidRunCount += 1;
+    }
+  }
+  return {
+    telemetry: runs.length ? "recorded" : invalidRunCount ? "invalid" : "not_supplied",
+    runs: runs.sort((lhs, rhs) => lhs.startedAt.localeCompare(rhs.startedAt)),
+    invalidRunCount,
+  };
+}
+
+function runEffectiveEnd(run, staleMilliseconds) {
+  return run.endedAt
+    ? Date.parse(run.endedAt)
+    : Date.parse(run.lastHeartbeatAt) + staleMilliseconds;
+}
+
+export function classifyRecorderAvailability(runs, segmentID, staleMilliseconds) {
+  const startedAt = expectedSegmentStart(segmentID);
+  if (!Number.isFinite(startedAt)) {
+    return { status: "unknown", reason: "invalid_segment_id" };
+  }
+  if (!runs.length) return { status: "unknown", reason: "no_recorder_telemetry" };
+  const endedAt = startedAt + segmentDurationMilliseconds;
+  const firstRunStartedAt = Math.min(...runs.map((run) => Date.parse(run.startedAt)));
+  if (startedAt < firstRunStartedAt) {
+    return { status: "unknown", reason: "before_first_recorded_run" };
+  }
+  for (const run of runs) {
+    if (
+      Date.parse(run.startedAt) > startedAt ||
+      runEffectiveEnd(run, staleMilliseconds) < endedAt
+    ) {
+      continue;
+    }
+    const atStart = run.transitions
+      .filter((transition) => Date.parse(transition.timestamp) <= startedAt)
+      .at(-1);
+    if (!atStart || atStart.state !== "available") continue;
+    const unavailableInside = run.transitions.some((transition) => {
+      const timestamp = Date.parse(transition.timestamp);
+      return timestamp > startedAt && timestamp < endedAt && transition.state === "unavailable";
+    });
+    if (!unavailableInside) {
+      return { status: "available", reason: "continuous_healthy_run" };
+    }
+  }
+  const coveringStart = runs
+    .filter((run) => Date.parse(run.startedAt) <= startedAt)
+    .sort((lhs, rhs) => rhs.startedAt.localeCompare(lhs.startedAt))[0];
+  if (coveringStart && runEffectiveEnd(coveringStart, staleMilliseconds) < endedAt) {
+    return { status: "unavailable", reason: "heartbeat_gap_or_run_ended" };
+  }
+  return { status: "unavailable", reason: "recorded_unavailable" };
+}
+
+function availabilitySummary(availability, segmentIDs, candidateDataset, staleMilliseconds) {
+  const segments = [...segmentIDs]
+    .sort((lhs, rhs) => lhs.localeCompare(rhs))
+    .map((segmentID) => {
+      const result = classifyRecorderAvailability(availability.runs, segmentID, staleMilliseconds);
+      return {
+        segmentID,
+        ...result,
+        candidateSegmentStatus:
+          candidateDataset.segments.find((segment) => segment.id === segmentID)?.status ??
+          "missing",
+      };
+    });
+  const statusCounts = { available: 0, unavailable: 0, unknown: 0 };
+  for (const segment of segments) statusCounts[segment.status] += 1;
+  return { segmentCount: segments.length, statusCounts, segments };
 }
 
 function multisetIntersection(lhs, rhs, key) {
@@ -1026,6 +1218,30 @@ function dataQualityMarkdown(report) {
   );
 }
 
+function recorderAvailabilityMarkdown(report) {
+  const availability = report.recorderAvailability;
+  const summary = availability.referenceCompleteSegments;
+  const rows = summary.segments
+    .filter(
+      (segment) => segment.status !== "available" || segment.candidateSegmentStatus !== "complete",
+    )
+    .slice(0, 100)
+    .map(
+      (segment) =>
+        `| ${markdownCell(segment.segmentID)} | ${segment.status} | ${markdownCell(segment.reason)} | ${segment.candidateSegmentStatus} |`,
+    )
+    .join("\n");
+  return (
+    `## Candidate recorder availability\n\n` +
+    `Telemetry: ${availability.candidate.telemetry}. Runs: ${availability.candidate.runCount}; invalid run files: ${availability.candidate.invalidRunCount}. ` +
+    `A heartbeat is stale after ${availability.staleAfterMilliseconds} ms.\n\n` +
+    `Reference-complete segments: ${summary.segmentCount}; available ${summary.statusCounts.available}; unavailable ${summary.statusCounts.unavailable}; unknown ${summary.statusCounts.unknown}. ` +
+    `Availability is diagnostic and does not redefine headline event matching.\n\n` +
+    `| Segment | Candidate availability | Reason | Candidate segment status |\n` +
+    `| --- | --- | --- | --- |\n${rows}\n`
+  );
+}
+
 function privacyMarkdown(candidate, reference) {
   return (
     `## Privacy signals (overall)\n\n` +
@@ -1047,6 +1263,8 @@ function markdown(report) {
     `Candidate adapter/settings: ${report.provenance.candidate.adapter} / ${report.provenance.candidate.recorderSettings}. ` +
     `Reference adapter/settings/origin: ${report.provenance.reference.adapter} / ${report.provenance.reference.recorderSettings} / ${report.provenance.reference.origin}.\n\n` +
     dataQualityMarkdown(report) +
+    `\n` +
+    recorderAvailabilityMarkdown(report) +
     `\n` +
     sliceMarkdown(
       `Recent ${report.recent.commonCompletedSegments} completed segments`,
@@ -1090,6 +1308,7 @@ export async function run(argv = process.argv.slice(2)) {
     1,
     Number.parseInt(args.get("recent-segments") ?? "12", 10) || 12,
   );
+  const availabilityStaleMilliseconds = recorderAvailabilityStaleMilliseconds;
   const excludedBundles = new Set(defaultExcludedBundles);
   for (const bundle of (args.get("exclude-bundles") ?? "").split(",")) {
     if (bundle.trim()) excludedBundles.add(bundle.trim());
@@ -1106,9 +1325,10 @@ export async function run(argv = process.argv.slice(2)) {
     throw new Error("Use either --segment-ids-file or --since, not both");
   }
 
-  const [candidateDataset, referenceDataset] = await Promise.all([
+  const [candidateDataset, referenceDataset, candidateAvailability] = await Promise.all([
     readDataset(candidateRoot, "candidate"),
     readDataset(referenceRoot, "reference"),
+    readRecorderAvailability(candidateRoot),
   ]);
   const candidateCompleted = completedSegmentIDs(candidateDataset);
   const referenceCompleted = completedSegmentIDs(referenceDataset);
@@ -1131,6 +1351,11 @@ export async function run(argv = process.argv.slice(2)) {
     .sort((lhs, rhs) => lhs.localeCompare(rhs));
   const overallIDs = new Set(commonIDs);
   const recentIDs = new Set(commonIDs.slice(-recentSegmentCount));
+  const availabilityScopeIDs = new Set(
+    (segmentSelection?.ids ?? [...referenceCompleted]).filter(
+      (id) => !Number.isFinite(since) || segmentStartedAt(referenceDataset, id) >= since,
+    ),
+  );
   const overall = evaluateSlice(
     candidateDataset,
     referenceDataset,
@@ -1169,6 +1394,26 @@ export async function run(argv = process.argv.slice(2)) {
     dataQuality: {
       candidate: candidateDataset.dataQuality,
       reference: referenceDataset.dataQuality,
+    },
+    recorderAvailability: {
+      schemaVersion: recorderAvailabilitySchemaVersion,
+      staleAfterMilliseconds: availabilityStaleMilliseconds,
+      candidate: {
+        telemetry: candidateAvailability.telemetry,
+        runCount: candidateAvailability.runs.length,
+        invalidRunCount: candidateAvailability.invalidRunCount,
+        firstStartedAt: candidateAvailability.runs.at(0)?.startedAt,
+        lastHeartbeatAt: candidateAvailability.runs
+          .map((run) => run.lastHeartbeatAt)
+          .sort((lhs, rhs) => lhs.localeCompare(rhs))
+          .at(-1),
+      },
+      referenceCompleteSegments: availabilitySummary(
+        candidateAvailability,
+        availabilityScopeIDs,
+        candidateDataset,
+        availabilityStaleMilliseconds,
+      ),
     },
     provenance: {
       candidate: datasetProvenance(

@@ -48,6 +48,49 @@ sensitivity, and privacy-safe Return-key context diagnostics. Headline precision
 their original kind/application/time definition; diagnostics are a separate layer and do not
 redefine those scores.
 
+### Interpreting shared segments
+
+Headline reference-similarity scores are conditional on both recorders producing the same complete
+ten-minute segment. DeskLore creates segment storage when the server receives an event or a
+suppression metric; it does not write empty heartbeat segments merely because the application is
+running. If the DeskLore process is killed during a segment, that segment can remain `open`, while
+later intervals produce no candidate segment at all. A reference-only complete segment can
+therefore indicate candidate downtime, a disconnected collector, disabled capture, or a permission
+failure rather than an event-level algorithm miss.
+
+Do not divide shared complete segments by reference complete segments and describe the result as
+algorithm recall unless candidate runtime availability is independently known. Keep these concerns
+separate:
+
+1. **Paired reference similarity** uses only mutually complete segments and measures event matching
+   while both datasets are available.
+2. **Recorder availability** requires process, collector, permission, and pause-state telemetry. In
+   reports without that telemetry, label reference-only intervals `candidate_availability_unknown`.
+3. **End-to-end capture reliability** combines availability with event quality and needs a deliberate
+   continuously running collection session.
+
+Recorder availability telemetry is stored separately from history events under
+`usage/recorder-availability/`. Each ServerCore process run owns one atomically updated file with a
+start time, last heartbeat, optional clean end time, and privacy-safe state transitions. ServerCore
+requests a native collector heartbeat every 30 seconds; the evaluator treats a run without a fresh
+heartbeat for 90 seconds as unavailable. The telemetry contains no application identity, window
+title, URL, typed text, or captured content. It moves with history during clear and restore.
+
+`history-paired-v4` reports availability for every complete reference segment as `available`,
+`unavailable`, or `unknown`. Older segments recorded before this telemetry existed remain `unknown`.
+Availability is a diagnostic in v4 and does not silently change the headline cohort or its matching
+definition.
+
+For example, the retained local report generated on 2026-09-01 contains 51 complete candidate
+segments, 88 complete reference segments, and 49 mutually complete segments. The other 39 complete
+reference segments do not enter F1. The report did not record recorder settings or runtime
+heartbeats, so development-time process termination is a plausible explanation but cannot be proven
+for every missing segment. Its 57.8% headline F1 must be read as a conditional score over the 49
+shared segments, not as an end-to-end coverage claim. On the 35 shared segments where both sides
+recorded at least 20 events, precision was 58.2%, recall was 76.2%, and F1 was 66.0%; this active
+subset is more useful for diagnosing event algorithms, while still treating the reference as an
+observational comparator rather than ground truth.
+
 To rerun an exact frozen cohort, pass a previous evaluator report, a JSON object with
 `segmentIDs`, or a JSON array of segment IDs. The evaluator fails if any selected segment is missing
 or incomplete instead of silently shrinking the cohort:
