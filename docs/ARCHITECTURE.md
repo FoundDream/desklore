@@ -62,7 +62,8 @@ and daily timeline rollups, plus usage summaries, are derived from these local r
 Visual fallback is disabled by default. Its coordinator separately owns AX sufficiency decisions,
 capture settling/coalescing, provider backoff, transient image understanding, and health metrics.
 Pixels are processed transiently and discarded; persisted visual evidence contains sanitized text or
-metadata only.
+metadata only. Its capture limits trade screenshot volume against how quickly a changed window is
+observed again, so changing them needs a replay over recorded captures, not a unit test alone.
 
 The Electron main process is the only layer that uses `safeStorage`. It loads the credential before
 starting ServerCore and passes it through the process initialization message. ServerCore keeps it in
