@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultObservationPolicy } from "../../shared/defaults.js";
+import { normalizeHistoryEvent } from "../history/contracts.js";
 import { HistorySettingsStore } from "../history/settings/store.js";
 import { ensureStorage, makeStorageLayout } from "../history/storage/repository.js";
 import type { CaptureHealth } from "../../shared/contracts/index.js";
@@ -184,6 +185,66 @@ describe("ServerCore", () => {
     ) as { endedAt?: string; transitions: Array<{ state: string }> };
     expect(stoppedAvailability.endedAt).toBeDefined();
     expect(stoppedAvailability.transitions.at(-1)?.state).toBe("unavailable");
+    core.terminate();
+  });
+
+  it("persists structured Accessibility nodes, redacted, without rendered text", async () => {
+    const storageRoot = await mkdtemp(path.join(os.tmpdir(), "desklore-server-core-ax-"));
+    temporaryDirectories.push(storageRoot);
+    const collector = new FakeCollector();
+    const core = new ServerCore(
+      { storageRoot },
+      { collector, credentials: new EphemeralCredentialStore() },
+    );
+    await core.start();
+    await core.grantRecordingConsent();
+
+    const tree = {
+      nodes: [
+        { id: "w", role: "AXWindow", depth: 0, siblingIndex: 0, childCount: 1 },
+        {
+          id: "t",
+          parentID: "w",
+          role: "AXStaticText",
+          depth: 1,
+          siblingIndex: 0,
+          childCount: 0,
+          value: "api_key=sk-abcdefghijklmnopqrstuvwxyz",
+        },
+      ],
+      visitedNodeCount: 2,
+      wasTruncated: false,
+    };
+    collector.emit(
+      "event",
+      normalizeHistoryEvent({
+        id: "00000000-0000-4000-8000-0000000000aa",
+        timestamp: new Date().toISOString(),
+        kind: "window.changed",
+        captureReason: "window_focus",
+        application: { bundleIdentifier: "com.example.app", name: "Example" },
+        window: { title: "Example", isPrivateBrowsing: false, runtimeIdentifier: 7 },
+        accessibility: { mode: "fullTree", tree },
+      }),
+    );
+    await core.shutdown();
+
+    const segmentsDirectory = path.join(storageRoot, "segments");
+    const [segmentID] = await readdir(segmentsDirectory);
+    const lines = (await readFile(path.join(segmentsDirectory, segmentID!, "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain("abcdefghijklmnopqrstuvwxyz");
+    const stored = JSON.parse(lines[0]!) as {
+      accessibility: { mode: string; text?: string; tree?: typeof tree };
+    };
+    expect(stored.accessibility.mode).toBe("fullTree");
+    expect(stored.accessibility.text).toBeUndefined();
+    expect(stored.accessibility.tree?.nodes[1]?.value).toBe("[REDACTED]");
+
+    const reloaded = normalizeHistoryEvent(stored);
+    expect(reloaded.accessibility?.text).toContain('t AXStaticText value="[REDACTED]" parent=w');
     core.terminate();
   });
 });

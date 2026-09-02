@@ -53,8 +53,12 @@ entrypoints. Branding inputs are isolated under `resources`.
 
 ## Data ownership and flow
 
-The collector emits sanitized semantic events and usage-state transitions. ServerCore applies the
-persisted observation policy again, coalesces events, and writes owner-only segment data. Closed
+The collector emits sanitized semantic events and usage-state transitions. Accessibility context
+travels as bounded, structured node lists (a full window snapshot or a delta against the previous
+snapshot in the same window stream); ServerCore renders the textual form, retains the nodes in
+segment files, and hands model- and renderer-facing consumers rendered text only. ServerCore
+applies the persisted observation policy again, coalesces events, and writes owner-only segment
+data. Closed
 segments receive an immediate deterministic timeline baseline. Optional Timeline Agent work can
 upgrade that same document after validating every claim citation against retained evidence. Six-hour
 and daily timeline rollups, plus usage summaries, are derived from these local records.

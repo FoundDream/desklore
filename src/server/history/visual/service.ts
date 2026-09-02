@@ -4,6 +4,7 @@ import {
   type ModelRuntime,
 } from "../../model/client.js";
 import type { AXSufficiencyEvidence, HistoryEvent, VisualEvidence } from "../contracts.js";
+import { accessibilityTextOnly } from "../semantic/ax-tree.js";
 
 const visualTriggerKinds = new Set<HistoryEvent["kind"]>([
   "window.changed",
@@ -212,7 +213,7 @@ export async function judgeAXWithLuna(
             target: event.target,
             interaction: event.interaction,
             accessibility: event.accessibility
-              ? { ...event.accessibility, text: event.accessibility.text.slice(0, 32_000) }
+              ? accessibilityTextOnly(event.accessibility, 32_000)
               : undefined,
           }),
         },

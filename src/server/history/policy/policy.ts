@@ -205,6 +205,12 @@ export function sanitizeURL(value: string | undefined, limit = 2_048): string | 
   }
 }
 
+/**
+ * Produces the presentation-safe form of an event: cleaned text, and rendered
+ * Accessibility text only. Structured Accessibility nodes are re-attached solely on the
+ * persistence path by `withSanitizedAccessibilityTree` in the semantic module. This module
+ * stays free of runtime imports because the offline evaluators load it directly.
+ */
 export function sanitizeEvent(
   event: HistoryEvent,
   textLimit = 4_096,
@@ -248,7 +254,7 @@ export function sanitizeEvent(
       : undefined,
     accessibility: event.accessibility
       ? {
-          ...event.accessibility,
+          mode: event.accessibility.mode,
           text: cleanText(event.accessibility.text, accessibilityTextLimit) ?? "",
         }
       : undefined,

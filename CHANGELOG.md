@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Evidence
+
+- The collector now sends Accessibility context as structured node snapshots and deltas instead
+  of pre-rendered text. ServerCore renders the text, keeps the nodes in segment files, and gives
+  model-facing consumers text only. Text-only segments written by earlier builds still load.
+
 ### Direction
 
 - Redefined DeskLore as open-source personal context infrastructure: a local, cited, deletable

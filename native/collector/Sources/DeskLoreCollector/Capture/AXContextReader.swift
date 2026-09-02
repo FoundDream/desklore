@@ -317,10 +317,7 @@ final class AXContextReader {
         guard let previous = previousAXSnapshotByStream[streamKey],
               previous.segmentID == segmentID else {
             return AccessibilityCapture(
-                context: .init(
-                    mode: .fullTree,
-                    text: AXTreeRenderer.fullText(snapshot)
-                ),
+                context: .init(mode: .fullTree, tree: snapshot),
                 snapshot: snapshot
             )
         }
@@ -331,24 +328,12 @@ final class AXContextReader {
         let baselineNodeCount = max(previous.snapshot.nodes.count, snapshot.nodes.count, 1)
         if Double(delta.changeCount) / Double(baselineNodeCount) >= 0.65 {
             return AccessibilityCapture(
-                context: .init(
-                    mode: .fullTree,
-                    text: AXTreeRenderer.fullText(snapshot)
-                ),
+                context: .init(mode: .fullTree, tree: snapshot),
                 snapshot: snapshot
             )
         }
-        guard let diff = AXTreeRenderer.diffText(
-            previous: previous.snapshot,
-            current: snapshot
-        ) else {
-            return AccessibilityCapture(context: nil, snapshot: snapshot)
-        }
         return AccessibilityCapture(
-            context: .init(
-                mode: .diffFromPrevious,
-                text: diff
-            ),
+            context: .init(mode: .diffFromPrevious, delta: delta),
             snapshot: snapshot
         )
     }

@@ -133,11 +133,13 @@ public struct HistoryEvent: Codable, Equatable, Identifiable, Sendable {
         }
 
         public let mode: Mode
-        public let text: String
+        public let tree: AXTreeSnapshot?
+        public let delta: AXTreeDelta?
 
-        public init(mode: Mode, text: String) {
+        public init(mode: Mode, tree: AXTreeSnapshot? = nil, delta: AXTreeDelta? = nil) {
             self.mode = mode
-            self.text = text
+            self.tree = tree
+            self.delta = delta
         }
     }
 

@@ -35,6 +35,7 @@ import {
   normalizeObservationPolicy,
   observationDecision,
 } from "../history/policy/policy.js";
+import { withSanitizedAccessibilityTree } from "../history/semantic/ax-tree.js";
 import {
   defaultLLMSettings,
   defaultVisualSettings,
@@ -655,7 +656,9 @@ export class ServerCore extends EventEmitter {
       if (closed) this.scheduleTimeline(closed);
       return;
     }
-    const normalized = this.coalescer.process(classifyKeyboardEvent(sanitized));
+    const normalized = this.coalescer.process(
+      classifyKeyboardEvent(withSanitizedAccessibilityTree(sanitized, event)),
+    );
     if (!normalized) {
       this.semanticHealth.deduplicatedEventCount += 1;
       const closed = await this.segments.recordMetric(event.timestamp, "deduplicated");

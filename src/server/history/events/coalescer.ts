@@ -1,4 +1,9 @@
 import type { HistoryEvent } from "../contracts.js";
+import {
+  hasAccessibilityStructure,
+  mergeAXTreeDeltas,
+  renderedAccessibilityContext,
+} from "../semantic/ax-tree.js";
 
 const knownNonEditableTextRoles = new Set([
   "AXButton",
@@ -320,13 +325,21 @@ export class EventBurstCoalescer {
     const latestAX = latest.accessibility;
     let accessibility = latestAX ?? previousAX;
     if (previousAX && latestAX && JSON.stringify(previousAX) !== JSON.stringify(latestAX)) {
-      accessibility = {
-        mode:
-          previousAX.mode === "fullTree" || latestAX.mode === "fullTree"
-            ? "fullTree"
-            : "diffFromPrevious",
-        text: `${previousAX.text}\n${latestAX.text}`.slice(0, 48_000),
-      };
+      const mode =
+        previousAX.mode === "fullTree" || latestAX.mode === "fullTree"
+          ? "fullTree"
+          : "diffFromPrevious";
+      if (hasAccessibilityStructure(previousAX) || hasAccessibilityStructure(latestAX)) {
+        // A newer full snapshot supersedes everything before it; otherwise the newer
+        // delta is applied on top of the retained full snapshot or earlier deltas.
+        const tree = latestAX.tree ?? previousAX.tree;
+        const delta = latestAX.tree
+          ? undefined
+          : mergeAXTreeDeltas(previousAX.tree ? undefined : previousAX.delta, latestAX.delta);
+        accessibility = renderedAccessibilityContext({ mode, tree, delta });
+      } else {
+        accessibility = { mode, text: `${previousAX.text}\n${latestAX.text}`.slice(0, 48_000) };
+      }
     }
     const captureReasons = [
       ...(previous.coalescedCaptureReasons ?? [previous.captureReason]),
