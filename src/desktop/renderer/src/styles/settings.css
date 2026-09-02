@@ -519,8 +519,7 @@
 .settings-form-grid input:focus-visible,
 .settings-form-grid select:focus-visible,
 .settings-advanced input:focus-visible,
-.settings-advanced summary:focus-visible,
-.settings-disclosure summary:focus-visible {
+.settings-advanced summary:focus-visible {
   border-color: #a1a1aa;
   box-shadow: 0 0 0 3px var(--ring);
 }
@@ -553,25 +552,14 @@
 }
 
 .setting-row + .settings-form-block,
-.settings-inline-warning + .setting-row,
-.setting-group-intro + .setting-row {
+.settings-inline-warning + .setting-row {
   border-top: 1px solid var(--border-soft);
 }
 
-.settings-form-block > header {
+.settings-form-status {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
+  justify-content: flex-end;
   margin-bottom: 18px;
-}
-
-.settings-form-block > header p {
-  max-width: 520px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
 }
 
 .settings-form-grid {
@@ -657,8 +645,7 @@
   border-top: 1px solid var(--border);
 }
 
-.settings-advanced summary,
-.settings-disclosure summary {
+.settings-advanced summary {
   display: flex;
   align-items: center;
   min-height: 40px;
@@ -670,13 +657,11 @@
   list-style: none;
 }
 
-.settings-advanced summary::-webkit-details-marker,
-.settings-disclosure summary::-webkit-details-marker {
+.settings-advanced summary::-webkit-details-marker {
   display: none;
 }
 
-.settings-advanced summary::after,
-.settings-disclosure summary::after {
+.settings-advanced summary::after {
   content: "+";
   margin-left: auto;
   color: var(--muted);
@@ -684,16 +669,8 @@
   font-weight: 400;
 }
 
-.settings-advanced[open] summary::after,
-.settings-disclosure[open] summary::after {
+.settings-advanced[open] summary::after {
   content: "−";
-}
-
-.settings-advanced > p {
-  margin: -2px 0 12px;
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.55;
 }
 
 .settings-advanced label {
@@ -727,33 +704,6 @@
 .settings-inline-warning strong {
   font-size: 10px;
   font-weight: 620;
-}
-
-.settings-inline-warning span {
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.setting-group-intro {
-  padding: 16px 18px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
-.settings-disclosure {
-  margin-top: 20px;
-  padding: 0 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-
-.settings-disclosure p {
-  margin: -1px 0 0;
-  padding: 0 0 15px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.65;
 }
 
 .settings-recovery {

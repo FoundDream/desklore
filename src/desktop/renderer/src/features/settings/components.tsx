@@ -72,15 +72,6 @@ export function applicationIsExcluded(
   );
 }
 
-export function SettingsDisclosure({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <details className="settings-disclosure">
-      <summary>{title}</summary>
-      <p>{children}</p>
-    </details>
-  );
-}
-
 export function SettingsDialog({
   title,
   detail,

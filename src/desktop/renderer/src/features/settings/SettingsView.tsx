@@ -12,7 +12,6 @@ import {
   InstalledApplicationIcon,
   SettingRow,
   SettingsDialog,
-  SettingsDisclosure,
   SettingsSection,
   StatusPill,
 } from "./components.js";
@@ -106,13 +105,13 @@ export function SettingsView({
     }
   }, [installedApplications, installedApplicationsLoading, loadInstalledApplications, tab]);
 
-  const pageCopy = {
-    general: [t("settings.tabGeneral"), t("settings.generalDescription")],
-    ai: [t("settings.tabAI"), t("settings.aiDescription")],
-    visual: [t("settings.tabVisual"), t("settings.visualDescription")],
-    privacy: [t("settings.tabPrivacy"), t("settings.privacyDescription")],
-    data: [t("settings.tabData"), t("settings.dataDescription")],
-  } satisfies Record<SettingsTab, [string, string]>;
+  const pageTitles = {
+    general: t("settings.tabGeneral"),
+    ai: t("settings.tabAI"),
+    visual: t("settings.tabVisual"),
+    privacy: t("settings.tabPrivacy"),
+    data: t("settings.tabData"),
+  } satisfies Record<SettingsTab, string>;
   const tabs: Array<{
     id: SettingsTab;
     label: string;
@@ -131,7 +130,7 @@ export function SettingsView({
     .toLocaleLowerCase(locale);
   const filteredTabs = tabs.filter((item) => {
     if (!normalizedSettingsSearch) return true;
-    return `${item.label} ${pageCopy[item.id][1]}`
+    return item.label
       .normalize("NFKC")
       .toLocaleLowerCase(locale)
       .includes(normalizedSettingsSearch);
@@ -402,7 +401,7 @@ export function SettingsView({
       <main className="settings-content">
         <div className="settings-content-inner">
           <header className="settings-page-header">
-            <h1>{pageCopy[tab][0]}</h1>
+            <h1>{pageTitles[tab]}</h1>
           </header>
 
           {error && (
@@ -418,7 +417,7 @@ export function SettingsView({
           {tab === "general" && (
             <>
               <SettingsSection title={t("settings.interface")}>
-                <SettingRow title={t("settings.language")} description={t("settings.languageHint")}>
+                <SettingRow title={t("settings.language")}>
                   <select
                     className="setting-select"
                     aria-label={t("settings.language")}
@@ -437,12 +436,7 @@ export function SettingsView({
               </SettingsSection>
 
               <SettingsSection title={t("settings.capture")}>
-                <SettingRow
-                  title={t("settings.recording")}
-                  description={
-                    recording ? t("settings.recordingRunning") : t("settings.recordingPaused")
-                  }
-                >
+                <SettingRow title={t("settings.recording")}>
                   <StatusPill tone={recording ? "success" : "neutral"}>
                     {recording ? t("sidebar.recording") : t("sidebar.paused")}
                   </StatusPill>
@@ -457,22 +451,7 @@ export function SettingsView({
                     {recording ? t("settings.pauseRecording") : t("settings.resumeRecording")}
                   </button>
                 </SettingRow>
-                <SettingRow
-                  title={t("settings.captureStatus")}
-                  description={
-                    captureStatus === "unavailable"
-                      ? desktop.connectionState === "starting"
-                        ? t("connection.starting")
-                        : t("settings.collectorUnavailable")
-                      : captureStatus === "permission"
-                        ? t("settings.capturePermissionRequired")
-                        : captureStatus === "attention"
-                          ? t("settings.captureNeedsAttentionDetail")
-                          : captureStatus === "ready"
-                            ? t("settings.captureReadyDetail")
-                            : t("settings.recordingPaused")
-                  }
-                >
+                <SettingRow title={t("settings.captureStatus")}>
                   <StatusPill
                     tone={
                       captureStatus === "ready"
@@ -518,14 +497,13 @@ export function SettingsView({
             <>
               <SettingsSection title={t("settings.modelConnection")}>
                 <div className="settings-form-block">
-                  <header>
-                    <p>{t("settings.modelConnectionDetail")}</p>
+                  <div className="settings-form-status">
                     <StatusPill tone={history?.llm.apiKeyConfigured ? "success" : "neutral"}>
                       {history?.llm.apiKeyConfigured
                         ? t("settings.configured")
                         : t("settings.notConfigured")}
                     </StatusPill>
-                  </header>
+                  </div>
                   <div className="settings-form-grid">
                     <label className="wide">
                       <span>
@@ -578,7 +556,6 @@ export function SettingsView({
                     onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
                   >
                     <summary>{t("settings.advanced")}</summary>
-                    <p>{t("settings.advancedDetail")}</p>
                     <label>
                       <span>{t("settings.endpoint")}</span>
                       <input
@@ -616,13 +593,9 @@ export function SettingsView({
                 {!history?.llm.apiKeyConfigured && (
                   <div className="settings-inline-warning" role="status">
                     <strong>{t("settings.keyRequired")}</strong>
-                    <span>{t("settings.keyRequiredDetail")}</span>
                   </div>
                 )}
-                <SettingRow
-                  title={t("settings.semanticSummaries")}
-                  description={t("settings.semanticSummariesDetail")}
-                >
+                <SettingRow title={t("settings.semanticSummaries")}>
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -638,10 +611,7 @@ export function SettingsView({
                     <span />
                   </label>
                 </SettingRow>
-                <SettingRow
-                  title={t("settings.rollupSynthesis")}
-                  description={t("settings.rollupSynthesisDetail")}
-                >
+                <SettingRow title={t("settings.rollupSynthesis")}>
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -662,19 +632,13 @@ export function SettingsView({
                   </label>
                 </SettingRow>
               </SettingsSection>
-              <SettingsDisclosure title={t("settings.dataBoundary")}>
-                {t("settings.dataBoundaryDetail")}
-              </SettingsDisclosure>
             </>
           )}
 
           {tab === "visual" && (
             <>
               <SettingsSection title={t("settings.visualFallback")}>
-                <SettingRow
-                  title={t("settings.visualFallback")}
-                  description={t("settings.visualFallbackDetail")}
-                >
+                <SettingRow title={t("settings.visualFallback")}>
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -726,16 +690,7 @@ export function SettingsView({
               </SettingsSection>
 
               <SettingsSection title={t("settings.screenRecording")}>
-                <SettingRow
-                  title={t("settings.screenRecording")}
-                  description={
-                    providerStatus === "ready"
-                      ? t("settings.screenRecordingReadyDetail")
-                      : visualEnabled
-                        ? t("settings.screenRecordingRequiredDetail")
-                        : t("settings.screenRecordingInactiveDetail")
-                  }
-                >
+                <SettingRow title={t("settings.screenRecording")}>
                   <StatusPill
                     tone={
                       providerStatus === "ready" ? "success" : visualEnabled ? "warning" : "neutral"
@@ -755,16 +710,12 @@ export function SettingsView({
                   )}
                 </SettingRow>
               </SettingsSection>
-              <SettingsDisclosure title={t("settings.visualFlow")}>
-                {t("settings.visualBoundaryDetail")}
-              </SettingsDisclosure>
             </>
           )}
 
           {tab === "privacy" && (
             <>
               <SettingsSection title={t("settings.currentScope")}>
-                <div className="setting-group-intro">{t("settings.currentScopeDetail")}</div>
                 <SettingRow
                   title={t("settings.currentApplication")}
                   description={
@@ -825,9 +776,6 @@ export function SettingsView({
                 </SettingRow>
               </SettingsSection>
               <SettingsSection title={t("settings.excludedApplications")}>
-                <div className="setting-group-intro">
-                  {t("settings.excludedApplicationsDetail")}
-                </div>
                 <div className="settings-application-picker">
                   <div className="settings-application-toolbar">
                     <span>
@@ -920,7 +868,6 @@ export function SettingsView({
                 </div>
                 <details className="settings-advanced settings-manual-application">
                   <summary>{t("settings.manualApplicationRule")}</summary>
-                  <p>{t("settings.manualApplicationRuleDetail")}</p>
                   <form className="settings-rule-form" onSubmit={addApplicationExclusion}>
                     <label>
                       <span>{t("settings.bundleIdentifier")}</span>
@@ -944,7 +891,6 @@ export function SettingsView({
                 </details>
               </SettingsSection>
               <SettingsSection title={t("settings.excludedDomains")}>
-                <div className="setting-group-intro">{t("settings.excludedDomainsDetail")}</div>
                 {desktop.observationPolicy.blockedDomains.length === 0 ? (
                   <div className="settings-empty-state">{t("settings.noDomainExclusions")}</div>
                 ) : (
@@ -988,9 +934,6 @@ export function SettingsView({
                 </form>
               </SettingsSection>
               <SettingsSection title={t("settings.excludedWindowTitles")}>
-                <div className="setting-group-intro">
-                  {t("settings.excludedWindowTitlesDetail")}
-                </div>
                 {desktop.observationPolicy.blockedWindowTitles.length === 0 ? (
                   <div className="settings-empty-state">
                     {t("settings.noWindowTitleExclusions")}
@@ -1077,9 +1020,6 @@ export function SettingsView({
                   </div>
                 </form>
               </SettingsSection>
-              <SettingsDisclosure title={t("settings.exclusionPriority")}>
-                {t("settings.exclusionPriorityDetail")}
-              </SettingsDisclosure>
             </>
           )}
 
@@ -1119,7 +1059,6 @@ export function SettingsView({
                         rollups: recovery.rollupCount,
                       })}
                     </span>
-                    <small>{t("settings.recoveryRetention")}</small>
                   </div>
                   <button
                     disabled={busy}
@@ -1140,10 +1079,7 @@ export function SettingsView({
               {feedback && <div className="settings-inline-feedback">{feedback}</div>}
 
               <SettingsSection title={t("settings.dangerZone")} tone="danger">
-                <SettingRow
-                  title={t("settings.deleteHistory")}
-                  description={t("settings.deleteHistoryDetail")}
-                >
+                <SettingRow title={t("settings.deleteHistory")}>
                   <button
                     className="text-danger"
                     disabled={busy || !history}
