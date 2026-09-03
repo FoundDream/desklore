@@ -76,6 +76,13 @@ tools. `submit_timeline` is the only accepted output path and must be the sole t
 The submitted document-level evidence list is derived from claim citations rather than trusted as
 an independent field.
 
+Inspection results are semantic-first. Every event carries a bounded frame summary (surface,
+identity, heading outline, focused element, recent lines) when the persistence path produced one.
+`include_accessibility` adds the frame's full content-region body; for events without a frame it
+falls back to the rendered Accessibility text. The optional `include_raw_accessibility` flag is the
+only way to receive the rendered tree when a frame exists. Event search matches semantic content
+rather than window chrome.
+
 Duplicate citations are normalized. Empty claims and citations that were not inspected return
 structured repair information to the model, allowing a later turn to correct the submission. On a
 successful model response, ServerCore independently checks that every document and claim

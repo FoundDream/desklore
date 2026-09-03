@@ -224,3 +224,66 @@ function boundedBody(
 function clip(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 1))}…`;
 }
+
+export interface FrameSummaryLimits {
+  outlineEntries: number;
+  outlineCharacters: number;
+  focusCharacters: number;
+  recentEntries: number;
+  recentCharacters: number;
+}
+
+export const defaultFrameSummaryLimits: FrameSummaryLimits = {
+  outlineEntries: 6,
+  outlineCharacters: 80,
+  focusCharacters: 160,
+  recentEntries: 3,
+  recentCharacters: 120,
+};
+
+/**
+ * The list-view form of a frame: everything except the body, trimmed. `bodyTruncated`
+ * is true whenever a body existed so consumers know a drill-down would add material.
+ */
+export function summarizeSemanticFrame(
+  frame: SemanticFrame,
+  limits: FrameSummaryLimits = defaultFrameSummaryLimits,
+): SemanticFrame {
+  const summary: SemanticFrame = {
+    version: frame.version,
+    surface: frame.surface,
+    identity: frame.identity,
+    outline: frame.outline
+      .slice(0, limits.outlineEntries)
+      .map((entry) => ({ level: entry.level, text: clip(entry.text, limits.outlineCharacters) })),
+    body: "",
+    bodyTruncated: frame.body.length > 0 || frame.bodyTruncated,
+    recent: frame.recent
+      .slice(-limits.recentEntries)
+      .map((line) => clip(line, limits.recentCharacters)),
+    regions: frame.regions,
+  };
+  if (frame.focus) {
+    summary.focus = { role: frame.focus.role, path: frame.focus.path };
+    if (frame.focus.text !== undefined) {
+      summary.focus.text = clip(frame.focus.text, limits.focusCharacters);
+    }
+  }
+  return summary;
+}
+
+/** Everything in a frame worth matching a search query against. */
+export function semanticSearchText(frame: SemanticFrame): string {
+  return [
+    frame.identity.title,
+    frame.identity.url,
+    frame.identity.domain,
+    frame.identity.path,
+    ...frame.outline.map((entry) => entry.text),
+    frame.body,
+    frame.focus?.text,
+    ...frame.recent,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+}

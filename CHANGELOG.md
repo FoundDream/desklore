@@ -10,8 +10,12 @@
 - Persisted events carry a `semantic` frame derived from the sanitized tree: surface kind,
   identity, heading outline, a bounded content-region body, the focused element with its
   path, recent lines, and per-region text volume. Delta-only events are framed by replaying
-  the delta on the window's last full snapshot. Consumers still read rendered text; the
-  frame is stored for the next step and for offline replay.
+  the delta on the window's last full snapshot.
+- Timeline Agent evidence tools are semantic-first: every event returns a frame summary,
+  `include_accessibility` adds the full content-region body instead of the rendered tree, and
+  the new optional `include_raw_accessibility` exposes the rendered tree on demand. Event search
+  matches semantic content rather than window chrome. Events without a frame keep the previous
+  text behaviour.
 
 ### Direction
 
