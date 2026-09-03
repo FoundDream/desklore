@@ -56,7 +56,11 @@ entrypoints. Branding inputs are isolated under `resources`.
 The collector emits sanitized semantic events and usage-state transitions. Accessibility context
 travels as bounded, structured node lists (a full window snapshot or a delta against the previous
 snapshot in the same window stream); ServerCore renders the textual form, retains the nodes in
-segment files, and hands model- and renderer-facing consumers rendered text only. ServerCore
+segment files, and hands model- and renderer-facing consumers rendered text only. On the
+persistence path the `semantic` layer partitions each tree into content, navigation, and chrome,
+classifies the surface, and stores a bounded semantic frame on the event; delta-only events are
+framed against the window's last full snapshot. Frame extraction is a pure function over
+recorded snapshots so it can be replayed offline when the rules change. ServerCore
 applies the persisted observation policy again, coalesces events, and writes owner-only segment
 data. Closed
 segments receive an immediate deterministic timeline baseline. Optional Timeline Agent work can

@@ -213,6 +213,7 @@ function compactEvent(event: HistoryEvent, includeAccessibility: boolean): Histo
   return {
     ...sanitized,
     accessibility: undefined,
+    semantic: undefined,
     evidence: sanitized.evidence?.axSufficiency
       ? { axSufficiency: sanitized.evidence.axSufficiency }
       : undefined,

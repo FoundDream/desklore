@@ -238,10 +238,13 @@ describe("ServerCore", () => {
     expect(lines[0]).not.toContain("abcdefghijklmnopqrstuvwxyz");
     const stored = JSON.parse(lines[0]!) as {
       accessibility: { mode: string; text?: string; tree?: typeof tree };
+      semantic?: { version: number; surface: string; body: string };
     };
     expect(stored.accessibility.mode).toBe("fullTree");
     expect(stored.accessibility.text).toBeUndefined();
     expect(stored.accessibility.tree?.nodes[1]?.value).toBe("[REDACTED]");
+    expect(stored.semantic).toMatchObject({ version: 1, surface: "unknown" });
+    expect(stored.semantic?.body).toContain("[REDACTED]");
 
     const reloaded = normalizeHistoryEvent(stored);
     expect(reloaded.accessibility?.text).toContain('t AXStaticText value="[REDACTED]" parent=w');

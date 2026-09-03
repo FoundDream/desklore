@@ -36,6 +36,7 @@ import {
   observationDecision,
 } from "../history/policy/policy.js";
 import { withSanitizedAccessibilityTree } from "../history/semantic/ax-tree.js";
+import { SemanticFrameTracker } from "../history/semantic/tracker.js";
 import {
   defaultLLMSettings,
   defaultVisualSettings,
@@ -101,6 +102,7 @@ export class ServerCore extends EventEmitter {
   private shutdownWork?: Promise<void>;
   private readonly coalescer = new EventCoalescer();
   private readonly burstCoalescer = new EventBurstCoalescer();
+  private readonly semanticFrames = new SemanticFrameTracker();
   private readonly applicationIconPaths = new Map<string, string>();
   private policy: ObservationPolicy = structuredClone(defaultObservationPolicy);
   private llmSettings: TimelineLLMSettings = { ...defaultLLMSettings };
@@ -541,6 +543,7 @@ export class ServerCore extends EventEmitter {
     this.segments.reset();
     this.coalescer.reset();
     this.burstCoalescer.reset();
+    this.semanticFrames.reset();
     this.documents = [];
     this.rollups = [];
     this.applicationIconPaths.clear();
@@ -581,6 +584,7 @@ export class ServerCore extends EventEmitter {
       this.segments.reset();
       this.coalescer.reset();
       this.burstCoalescer.reset();
+      this.semanticFrames.reset();
       this.applicationIconPaths.clear();
       this.visual.clearCache();
       this.currentCaptureSegmentID = undefined;
@@ -683,9 +687,10 @@ export class ServerCore extends EventEmitter {
   }
 
   private async persist(event: HistoryEvent): Promise<void> {
-    const closed = await this.segments.append(event);
+    const framed = this.semanticFrames.process(event);
+    const closed = await this.segments.append(framed);
     this.semanticHealth.persistedEventCount += 1;
-    this.visual.schedule(event);
+    this.visual.schedule(framed);
     if (closed) this.scheduleTimeline(closed);
   }
 

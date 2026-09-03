@@ -84,7 +84,67 @@ export interface HistoryEvent {
     mouseDestination?: { x: number; y: number };
   };
   accessibility?: AccessibilityContext;
+  /** Derived at persistence time from the sanitized Accessibility tree; see `SemanticFrame`. */
+  semantic?: SemanticFrame;
   evidence?: EventEvidence;
+}
+
+export type SemanticSurfaceKind =
+  | "web_article"
+  | "web_app"
+  | "editor"
+  | "terminal"
+  | "chat"
+  | "mail"
+  | "document"
+  | "table"
+  | "unknown";
+
+export const semanticSurfaceKinds: readonly SemanticSurfaceKind[] = [
+  "web_article",
+  "web_app",
+  "editor",
+  "terminal",
+  "chat",
+  "mail",
+  "document",
+  "table",
+  "unknown",
+];
+
+export interface SemanticOutlineEntry {
+  level: number;
+  text: string;
+}
+
+export interface SemanticFocus {
+  role: string;
+  text?: string;
+  /** Titles of the focused element's ancestors, outermost first. */
+  path: string[];
+}
+
+/**
+ * The structured answer to "what is this window, what is on it, and what is the user
+ * touching", extracted once from the content region of a full Accessibility snapshot so
+ * consumers do not re-parse rendered trees. Bounded by construction.
+ */
+export interface SemanticFrame {
+  version: 1;
+  surface: SemanticSurfaceKind;
+  identity: {
+    title?: string;
+    url?: string;
+    domain?: string;
+    path?: string;
+  };
+  outline: SemanticOutlineEntry[];
+  body: string;
+  bodyTruncated: boolean;
+  focus?: SemanticFocus;
+  recent: string[];
+  /** Text characters per region, a cheap signal-to-noise figure for evaluators. */
+  regions: { content: number; navigation: number; chrome: number };
 }
 
 export interface AXTreeNode {
@@ -511,6 +571,66 @@ function boundedLines(lines: string[], characterLimit: number): string {
   return result;
 }
 
+function stringList(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").slice(0, limit)
+    : [];
+}
+
+/** Lenient: a frame that fails validation is dropped, never rejects the event. */
+export function normalizeSemanticFrame(value: unknown): SemanticFrame | undefined {
+  const source = Array.isArray(value) ? undefined : record(value);
+  const surface = source?.surface;
+  if (
+    !source ||
+    source.version !== 1 ||
+    typeof surface !== "string" ||
+    !semanticSurfaceKinds.includes(surface as SemanticSurfaceKind)
+  ) {
+    return undefined;
+  }
+  const identity = record(source.identity) ?? {};
+  const focus = record(source.focus);
+  const regions = record(source.regions) ?? {};
+  const outline = Array.isArray(source.outline)
+    ? source.outline
+        .map((entry) => {
+          const item = record(entry);
+          const text = string(item?.text);
+          return text === undefined ? undefined : { level: number(item?.level) ?? 1, text };
+        })
+        .filter((entry): entry is SemanticOutlineEntry => entry !== undefined)
+        .slice(0, 64)
+    : [];
+  const focusRole = string(focus?.role);
+  let focusFrame: SemanticFocus | undefined;
+  if (focus && focusRole) {
+    focusFrame = { role: focusRole, path: stringList(focus.path, 16) };
+    const focusText = string(focus.text);
+    if (focusText !== undefined) focusFrame.text = focusText;
+  }
+  return {
+    version: 1,
+    surface: surface as SemanticSurfaceKind,
+    identity: compact({
+      title: string(identity.title),
+      url: string(identity.url),
+      domain: string(identity.domain),
+      path: string(identity.path),
+    }) as SemanticFrame["identity"],
+    outline,
+    body: string(source.body) ?? "",
+    bodyTruncated: source.bodyTruncated === true,
+    focus: focusFrame,
+    recent: stringList(source.recent, 32),
+    regions: {
+      content: number(regions.content) ?? 0,
+      navigation: number(regions.navigation) ?? 0,
+      chrome: number(regions.chrome) ?? 0,
+    },
+  };
+}
+
 export function normalizeHistoryEvent(value: unknown): HistoryEvent {
   const source = record(value);
   const application = record(source?.application);
@@ -611,6 +731,7 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
         }
       : undefined,
     accessibility: accessibility ? normalizeAccessibilityContext(accessibility) : undefined,
+    semantic: normalizeSemanticFrame(source?.semantic),
     evidence: normalizeEventEvidence(evidence),
   };
 }
@@ -814,6 +935,7 @@ export function eventForDisk(event: HistoryEvent): UnknownRecord {
     accessibility: event.accessibility
       ? accessibilityContextForDisk(event.accessibility)
       : undefined,
+    semantic: event.semantic,
     evidence: event.evidence,
   });
 }

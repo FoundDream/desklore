@@ -7,6 +7,11 @@
 - The collector now sends Accessibility context as structured node snapshots and deltas instead
   of pre-rendered text. ServerCore renders the text, keeps the nodes in segment files, and gives
   model-facing consumers text only. Text-only segments written by earlier builds still load.
+- Persisted events carry a `semantic` frame derived from the sanitized tree: surface kind,
+  identity, heading outline, a bounded content-region body, the focused element with its
+  path, recent lines, and per-region text volume. Delta-only events are framed by replaying
+  the delta on the window's last full snapshot. Consumers still read rendered text; the
+  frame is stored for the next step and for offline replay.
 
 ### Direction
 
