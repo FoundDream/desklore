@@ -439,16 +439,13 @@
 }
 
 .app-token {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 24px;
-  padding: 2px 7px 2px 3px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: #52525b;
-  background: #fafafa;
-  font-size: 10px;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+}
+
+.app-token .app-token-icon {
+  background: transparent;
 }
 
 .app-token-icon {
@@ -471,11 +468,6 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-}
-
-.app-overflow {
-  color: var(--muted-soft);
-  font-size: 10px;
 }
 
 .duration {

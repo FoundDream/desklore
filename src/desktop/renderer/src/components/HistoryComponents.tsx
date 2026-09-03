@@ -69,27 +69,23 @@ export function ApplicationIcon({ application }: { application: TimelineApplicat
 export function ApplicationList({
   applications,
   trailing,
-  limit = 6,
 }: {
   applications: TimelineApplication[];
   trailing?: ReactNode;
-  limit?: number;
 }) {
-  const visible = applications.slice(0, limit);
-  const remaining = applications.length - visible.length;
   return (
     <div className="app-list">
-      {visible.map((application) => (
+      {applications.map((application) => (
         <span
           className="app-token"
-          title={application.bundleIdentifier}
+          role="img"
+          aria-label={application.name}
+          title={application.name}
           key={application.bundleIdentifier}
         >
           <ApplicationIcon application={application} />
-          {application.name}
         </span>
       ))}
-      {remaining > 0 && <span className="app-overflow">+{remaining}</span>}
       {trailing}
     </div>
   );
