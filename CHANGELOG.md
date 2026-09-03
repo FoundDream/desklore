@@ -16,6 +16,10 @@
   the new optional `include_raw_accessibility` exposes the rendered tree on demand. Event search
   matches semantic content rather than window chrome. Events without a frame keep the previous
   text behaviour.
+- `pnpm eval:semantic` replays retained segments through the frame extractor and reports, without
+  source text, structured-node and frame coverage, frame-to-text volume, identity, content, focus,
+  and content-share rates per application, plus stored-frame agreement. `--baseline` compares with
+  an earlier report and flags per-application regressions.
 
 ### Direction
 
