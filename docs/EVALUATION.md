@@ -106,6 +106,30 @@ A passing code test or an old retained bucket is not evidence of current live ca
 Collector changes require a fresh baseline of at least 30 complete paired ten-minute buckets before
 making a release comparison.
 
+## Semantic frame replay
+
+Replay retained segments through the current frame extractor:
+
+```bash
+pnpm eval:semantic -- --root "$HOME/Library/Application Support/DeskLore/history"
+```
+
+The report stays free of source text. It counts, overall and per application, how many events
+carried structured Accessibility nodes, how many produced a frame (deltas without a base cannot),
+how the frame and its list-view summary compare in bytes with the rendered tree text, and how often
+a frame carries identity, content, and a focused element. `meanContentShare` is the share of text
+characters that fell in the content region rather than navigation or chrome. Stored frames are
+compared with the fresh replay so a rule change that would alter persisted frames is visible before
+it ships.
+
+Frame extraction is a pure function over recorded snapshots, so this evaluator is the replay
+discipline for the semantic layer: run it before changing region rules, surface tables, or frame
+limits, keep the `report.json`, then run it again with `--baseline <report.json>`. Any
+per-application drop in identity, content, focus, or content share beyond
+`--regression-threshold` (default `0.01`) is listed as a regression, and `--fail-on-regression`
+turns that into a non-zero exit code for automation. Coverage here measures the extractor, not
+timeline quality; the paired timeline benchmark below remains the place for summary claims.
+
 ## Paired timeline benchmark
 
 Start by freezing the exact complete segments used by every arm. A comma-separated

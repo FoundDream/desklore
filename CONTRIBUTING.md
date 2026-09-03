@@ -1,6 +1,6 @@
 # Contributing to DeskLore
 
-Thank you for helping build an inspectable, local-first computer history for macOS.
+Thank you for helping build open-source personal context infrastructure: a local, cited, deletable memory of your work on macOS. Read [docs/DIRECTION.md](docs/DIRECTION.md) for the definition and layer model.
 
 ## Before you start
 

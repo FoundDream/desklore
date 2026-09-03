@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AXTreeNode: Equatable, Identifiable, Sendable {
+public struct AXTreeNode: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let parentID: String?
     public let depth: Int
@@ -97,10 +97,29 @@ public struct AXTreeNode: Equatable, Identifiable, Sendable {
     }
 }
 
-public struct AXTreeSnapshot: Equatable, Sendable {
+public struct AXTreeSnapshot: Codable, Equatable, Sendable {
     public let nodes: [AXTreeNode]
     public let visitedNodeCount: Int
     public let wasTruncated: Bool
+
+    /// Chromium and Electron applications expose a handful of empty groups until an
+    /// assistive client asks for the full tree. A tiny tree with at most one text-bearing
+    /// node outside the window is the signal that such a request is worth making.
+    /// Chromium browsers expose their native toolbar and tab strip immediately but only build
+    /// the web content tree (`AXWebArea`) once an assistive client asks for it.
+    public var containsWebArea: Bool {
+        nodes.contains { $0.role == "AXWebArea" }
+    }
+
+    public var isDegenerate: Bool {
+        guard nodes.count <= 16 else { return false }
+        let textBearing = nodes.filter { node in
+            node.role != "AXWindow"
+                && [node.value, node.title, node.description]
+                    .contains { !($0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
+        }
+        return textBearing.count <= 1
+    }
 
     public init(
         nodes: [AXTreeNode],
@@ -113,7 +132,7 @@ public struct AXTreeSnapshot: Equatable, Sendable {
     }
 }
 
-public struct AXTreeDelta: Equatable, Sendable {
+public struct AXTreeDelta: Codable, Equatable, Sendable {
     public let added: [AXTreeNode]
     public let removed: [AXTreeNode]
     public let updated: [AXTreeNode]
@@ -168,99 +187,5 @@ public enum AXTreeDiffer {
             updated: updated,
             moved: moved
         )
-    }
-}
-
-public enum AXTreeRenderer {
-    public static func fullText(
-        _ snapshot: AXTreeSnapshot,
-        characterLimit: Int = 48_000
-    ) -> String {
-        let header = "AXTree v2 nodes=\(snapshot.nodes.count) "
-            + "visited=\(snapshot.visitedNodeCount) "
-            + "truncated=\(snapshot.wasTruncated)"
-        let lines = [header] + snapshot.nodes.map { render($0) }
-        return bounded(lines: lines, characterLimit: characterLimit)
-    }
-
-    public static func diffText(
-        previous: AXTreeSnapshot,
-        current: AXTreeSnapshot,
-        characterLimit: Int = 48_000
-    ) -> String? {
-        let delta = AXTreeDiffer.diff(previous: previous, current: current)
-        guard !delta.isEmpty else { return nil }
-        var lines = [
-            "AXTreeDiff v2 added=\(delta.added.count) "
-                + "removed=\(delta.removed.count) "
-                + "updated=\(delta.updated.count) "
-                + "moved=\(delta.moved.count)",
-        ]
-        lines.append(contentsOf: delta.removed.map {
-            "- \($0.id) \($0.role) parent=\($0.parentID ?? "root")"
-        })
-        lines.append(contentsOf: delta.added.map { "+ " + render($0) })
-        lines.append(contentsOf: delta.updated.map { "~ " + render($0) })
-        lines.append(contentsOf: delta.moved.map { "> " + render($0) })
-        return bounded(lines: lines, characterLimit: characterLimit)
-    }
-
-    private static func render(_ node: AXTreeNode) -> String {
-        let indentation = String(repeating: "  ", count: min(node.depth, 24))
-        var components = ["\(node.id) \(node.role)"]
-        if let subrole = node.subrole { components.append("subrole=\(quoted(subrole))") }
-        if let identifier = node.identifier {
-            components.append("identifier=\(quoted(identifier))")
-        }
-        if node.childCount > 0 { components.append("children=\(node.childCount)") }
-        if node.enabled == false { components.append("disabled") }
-        if node.focused == true { components.append("focused") }
-        if node.selected == true { components.append("selected") }
-        if let expanded = node.expanded {
-            components.append(expanded ? "expanded" : "collapsed")
-        }
-        if let disclosureLevel = node.disclosureLevel {
-            components.append("level=\(disclosureLevel)")
-        }
-        if let title = node.title { components.append("title=\(quoted(title))") }
-        if let description = node.description {
-            components.append("description=\(quoted(description))")
-        }
-        if let placeholder = node.placeholder {
-            components.append("placeholder=\(quoted(placeholder))")
-        }
-        if let help = node.help { components.append("help=\(quoted(help))") }
-        if let value = node.value { components.append("value=\(quoted(value))") }
-        if let parentID = node.parentID { components.append("parent=\(parentID)") }
-        return indentation + components.joined(separator: " ")
-    }
-
-    private static func quoted(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-        return "\"\(escaped)\""
-    }
-
-    private static func bounded(lines: [String], characterLimit: Int) -> String {
-        guard characterLimit > 0 else { return "" }
-        var result = ""
-        var omitted = 0
-        for (index, line) in lines.enumerated() {
-            let candidate = result.isEmpty ? line : "\n" + line
-            guard result.count + candidate.count <= characterLimit else {
-                omitted = lines.count - index
-                break
-            }
-            result += candidate
-        }
-        guard omitted > 0 else { return result }
-        let marker = "\n… truncated \(omitted) AX tree lines"
-        if result.count + marker.count <= characterLimit {
-            result += marker
-        }
-        return result
     }
 }

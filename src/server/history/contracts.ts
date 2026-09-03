@@ -83,11 +83,114 @@ export interface HistoryEvent {
     mouseOrigin?: { x: number; y: number };
     mouseDestination?: { x: number; y: number };
   };
-  accessibility?: {
-    mode: "fullTree" | "diffFromPrevious";
-    text: string;
-  };
+  accessibility?: AccessibilityContext;
+  /** Derived at persistence time from the sanitized Accessibility tree; see `SemanticFrame`. */
+  semantic?: SemanticFrame;
   evidence?: EventEvidence;
+}
+
+export type SemanticSurfaceKind =
+  | "web_article"
+  | "web_app"
+  | "editor"
+  | "terminal"
+  | "chat"
+  | "mail"
+  | "document"
+  | "table"
+  | "unknown";
+
+export const semanticSurfaceKinds: readonly SemanticSurfaceKind[] = [
+  "web_article",
+  "web_app",
+  "editor",
+  "terminal",
+  "chat",
+  "mail",
+  "document",
+  "table",
+  "unknown",
+];
+
+export interface SemanticOutlineEntry {
+  level: number;
+  text: string;
+}
+
+export interface SemanticFocus {
+  role: string;
+  text?: string;
+  /** Titles of the focused element's ancestors, outermost first. */
+  path: string[];
+}
+
+/**
+ * The structured answer to "what is this window, what is on it, and what is the user
+ * touching", extracted once from the content region of a full Accessibility snapshot so
+ * consumers do not re-parse rendered trees. Bounded by construction.
+ */
+export interface SemanticFrame {
+  version: 1;
+  surface: SemanticSurfaceKind;
+  identity: {
+    title?: string;
+    url?: string;
+    domain?: string;
+    path?: string;
+  };
+  outline: SemanticOutlineEntry[];
+  body: string;
+  bodyTruncated: boolean;
+  focus?: SemanticFocus;
+  recent: string[];
+  /** Text characters per region, a cheap signal-to-noise figure for evaluators. */
+  regions: { content: number; navigation: number; chrome: number };
+}
+
+export interface AXTreeNode {
+  id: string;
+  parentID?: string;
+  depth: number;
+  siblingIndex: number;
+  role: string;
+  subrole?: string;
+  identifier?: string;
+  title?: string;
+  description?: string;
+  help?: string;
+  placeholder?: string;
+  value?: string;
+  enabled?: boolean;
+  focused?: boolean;
+  selected?: boolean;
+  expanded?: boolean;
+  disclosureLevel?: number;
+  childCount: number;
+}
+
+export interface AXTreeSnapshot {
+  nodes: AXTreeNode[];
+  visitedNodeCount: number;
+  wasTruncated: boolean;
+}
+
+export interface AXTreeDelta {
+  added: AXTreeNode[];
+  removed: AXTreeNode[];
+  updated: AXTreeNode[];
+  moved: AXTreeNode[];
+}
+
+/**
+ * `text` is the rendered form every current consumer reads. When the collector supplied
+ * structured nodes, `tree` (full snapshot) and/or `delta` (changes since the previous
+ * snapshot in the same window stream) are retained and `text` is derived from them.
+ */
+export interface AccessibilityContext {
+  mode: "fullTree" | "diffFromPrevious";
+  text: string;
+  tree?: AXTreeSnapshot;
+  delta?: AXTreeDelta;
 }
 
 export type AXSufficiencyDecision = "enough" | "needs_visual" | "uncertain";
@@ -250,6 +353,284 @@ function point(value: unknown): { x: number; y: number } | undefined {
   return x === undefined || y === undefined ? undefined : { x, y };
 }
 
+function boolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+/**
+ * Structured Accessibility payloads arrive from the collector as bounded node lists.
+ * ServerCore owns the textual rendering so later semantic extraction can work on the same
+ * nodes instead of re-parsing rendered text. These helpers stay free of runtime imports so
+ * the offline evaluators can load this module directly.
+ */
+
+export const defaultAccessibilityTextLimit = 48_000;
+export const maximumAccessibilityNodes = 2_000;
+
+function compactNode(node: AXTreeNode): AXTreeNode {
+  return Object.fromEntries(
+    Object.entries(node).filter(([, value]) => value !== undefined),
+  ) as unknown as AXTreeNode;
+}
+
+export function normalizeAXTreeNode(value: unknown): AXTreeNode | undefined {
+  const source = Array.isArray(value) ? undefined : record(value);
+  const id = string(source?.id);
+  const role = string(source?.role);
+  if (!id || !role) return undefined;
+  return compactNode({
+    id,
+    parentID: string(source?.parentID),
+    depth: number(source?.depth) ?? 0,
+    siblingIndex: number(source?.siblingIndex) ?? 0,
+    role,
+    subrole: string(source?.subrole),
+    identifier: string(source?.identifier),
+    title: string(source?.title),
+    description: string(source?.description),
+    help: string(source?.help),
+    placeholder: string(source?.placeholder),
+    value: string(source?.value),
+    enabled: boolean(source?.enabled),
+    focused: boolean(source?.focused),
+    selected: boolean(source?.selected),
+    expanded: boolean(source?.expanded),
+    disclosureLevel: number(source?.disclosureLevel),
+    childCount: number(source?.childCount) ?? 0,
+  });
+}
+
+function normalizeNodeList(value: unknown): AXTreeNode[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .slice(0, maximumAccessibilityNodes)
+    .map(normalizeAXTreeNode)
+    .filter((node): node is AXTreeNode => node !== undefined);
+}
+
+export function normalizeAXTreeSnapshot(value: unknown): AXTreeSnapshot | undefined {
+  const source = Array.isArray(value) ? undefined : record(value);
+  const nodes = normalizeNodeList(source?.nodes);
+  if (!source || !nodes) return undefined;
+  return {
+    nodes,
+    visitedNodeCount: number(source.visitedNodeCount) ?? nodes.length,
+    wasTruncated: source.wasTruncated === true,
+  };
+}
+
+export function normalizeAXTreeDelta(value: unknown): AXTreeDelta | undefined {
+  const source = Array.isArray(value) ? undefined : record(value);
+  if (!source) return undefined;
+  const added = normalizeNodeList(source.added);
+  const removed = normalizeNodeList(source.removed);
+  const updated = normalizeNodeList(source.updated);
+  const moved = normalizeNodeList(source.moved);
+  if (!added || !removed || !updated || !moved) return undefined;
+  return { added, removed, updated, moved };
+}
+
+export function isAccessibilityMode(value: unknown): value is AccessibilityContext["mode"] {
+  return value === "fullTree" || value === "diffFromPrevious";
+}
+
+/**
+ * Accepts the collector wire form (`tree` / `delta`), the on-disk form (same), and the
+ * legacy text-only form. Structured payloads always win and their text is derived.
+ */
+export function normalizeAccessibilityContext(value: unknown): AccessibilityContext {
+  const source = Array.isArray(value) ? undefined : record(value);
+  const mode = source?.mode;
+  if (!source || !isAccessibilityMode(mode)) {
+    throw new Error("Invalid history accessibility context");
+  }
+  const tree = source.tree === undefined ? undefined : normalizeAXTreeSnapshot(source.tree);
+  const delta = source.delta === undefined ? undefined : normalizeAXTreeDelta(source.delta);
+  if ((source.tree !== undefined && !tree) || (source.delta !== undefined && !delta)) {
+    throw new Error("Invalid history accessibility context");
+  }
+  if (tree || delta) return renderedAccessibilityContext({ mode, tree, delta });
+  const text = string(source.text);
+  if (text === undefined) throw new Error("Invalid history accessibility context");
+  return { mode, text };
+}
+
+export function hasAccessibilityStructure(context: AccessibilityContext | undefined): boolean {
+  return Boolean(context && (context.tree || context.delta));
+}
+
+export function renderedAccessibilityContext(
+  context: { mode: AccessibilityContext["mode"]; tree?: AXTreeSnapshot; delta?: AXTreeDelta },
+  characterLimit = defaultAccessibilityTextLimit,
+): AccessibilityContext {
+  const result: AccessibilityContext = {
+    mode: context.mode,
+    text: renderAccessibilityText(context, characterLimit),
+  };
+  if (context.tree) result.tree = context.tree;
+  if (context.delta) result.delta = context.delta;
+  return result;
+}
+
+export function renderAccessibilityText(
+  context: { tree?: AXTreeSnapshot; delta?: AXTreeDelta },
+  characterLimit = defaultAccessibilityTextLimit,
+): string {
+  const parts: string[] = [];
+  if (context.tree) parts.push(renderAXTreeText(context.tree, characterLimit));
+  if (context.delta) parts.push(renderAXTreeDeltaText(context.delta, characterLimit));
+  return parts.join("\n").slice(0, characterLimit);
+}
+
+export function renderAXTreeText(
+  snapshot: AXTreeSnapshot,
+  characterLimit = defaultAccessibilityTextLimit,
+): string {
+  const header =
+    `AXTree v2 nodes=${snapshot.nodes.length} ` +
+    `visited=${snapshot.visitedNodeCount} ` +
+    `truncated=${snapshot.wasTruncated}`;
+  return boundedLines([header, ...snapshot.nodes.map(renderAXTreeNode)], characterLimit);
+}
+
+export function renderAXTreeDeltaText(
+  delta: AXTreeDelta,
+  characterLimit = defaultAccessibilityTextLimit,
+): string {
+  const lines = [
+    `AXTreeDiff v2 added=${delta.added.length} ` +
+      `removed=${delta.removed.length} ` +
+      `updated=${delta.updated.length} ` +
+      `moved=${delta.moved.length}`,
+    ...delta.removed.map((node) => `- ${node.id} ${node.role} parent=${node.parentID ?? "root"}`),
+    ...delta.added.map((node) => `+ ${renderAXTreeNode(node)}`),
+    ...delta.updated.map((node) => `~ ${renderAXTreeNode(node)}`),
+    ...delta.moved.map((node) => `> ${renderAXTreeNode(node)}`),
+  ];
+  return boundedLines(lines, characterLimit);
+}
+
+export function accessibilityContextForDisk(context: AccessibilityContext): UnknownRecord {
+  if (!hasAccessibilityStructure(context)) return { mode: context.mode, text: context.text };
+  const stored: UnknownRecord = { mode: context.mode };
+  if (context.tree) stored.tree = context.tree;
+  if (context.delta) stored.delta = context.delta;
+  return stored;
+}
+
+function renderAXTreeNode(node: AXTreeNode): string {
+  const indentation = "  ".repeat(Math.min(node.depth, 24));
+  const components = [`${node.id} ${node.role}`];
+  if (node.subrole !== undefined) components.push(`subrole=${quotedAXValue(node.subrole)}`);
+  if (node.identifier !== undefined) {
+    components.push(`identifier=${quotedAXValue(node.identifier)}`);
+  }
+  if (node.childCount > 0) components.push(`children=${node.childCount}`);
+  if (node.enabled === false) components.push("disabled");
+  if (node.focused === true) components.push("focused");
+  if (node.selected === true) components.push("selected");
+  if (node.expanded !== undefined) components.push(node.expanded ? "expanded" : "collapsed");
+  if (node.disclosureLevel !== undefined) components.push(`level=${node.disclosureLevel}`);
+  if (node.title !== undefined) components.push(`title=${quotedAXValue(node.title)}`);
+  if (node.description !== undefined) {
+    components.push(`description=${quotedAXValue(node.description)}`);
+  }
+  if (node.placeholder !== undefined) {
+    components.push(`placeholder=${quotedAXValue(node.placeholder)}`);
+  }
+  if (node.help !== undefined) components.push(`help=${quotedAXValue(node.help)}`);
+  if (node.value !== undefined) components.push(`value=${quotedAXValue(node.value)}`);
+  if (node.parentID !== undefined) components.push(`parent=${node.parentID}`);
+  return indentation + components.join(" ");
+}
+
+function quotedAXValue(value: string): string {
+  const escaped = value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r");
+  return `"${escaped}"`;
+}
+
+function boundedLines(lines: string[], characterLimit: number): string {
+  if (characterLimit <= 0) return "";
+  let result = "";
+  let omitted = 0;
+  for (const [index, line] of lines.entries()) {
+    const candidate = result.length === 0 ? line : `\n${line}`;
+    if (result.length + candidate.length > characterLimit) {
+      omitted = lines.length - index;
+      break;
+    }
+    result += candidate;
+  }
+  if (omitted === 0) return result;
+  const marker = `\n… truncated ${omitted} AX tree lines`;
+  if (result.length + marker.length <= characterLimit) result += marker;
+  return result;
+}
+
+function stringList(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").slice(0, limit)
+    : [];
+}
+
+/** Lenient: a frame that fails validation is dropped, never rejects the event. */
+export function normalizeSemanticFrame(value: unknown): SemanticFrame | undefined {
+  const source = Array.isArray(value) ? undefined : record(value);
+  const surface = source?.surface;
+  if (
+    !source ||
+    source.version !== 1 ||
+    typeof surface !== "string" ||
+    !semanticSurfaceKinds.includes(surface as SemanticSurfaceKind)
+  ) {
+    return undefined;
+  }
+  const identity = record(source.identity) ?? {};
+  const focus = record(source.focus);
+  const regions = record(source.regions) ?? {};
+  const outline = Array.isArray(source.outline)
+    ? source.outline
+        .map((entry) => {
+          const item = record(entry);
+          const text = string(item?.text);
+          return text === undefined ? undefined : { level: number(item?.level) ?? 1, text };
+        })
+        .filter((entry): entry is SemanticOutlineEntry => entry !== undefined)
+        .slice(0, 64)
+    : [];
+  const focusRole = string(focus?.role);
+  let focusFrame: SemanticFocus | undefined;
+  if (focus && focusRole) {
+    focusFrame = { role: focusRole, path: stringList(focus.path, 16) };
+    const focusText = string(focus.text);
+    if (focusText !== undefined) focusFrame.text = focusText;
+  }
+  return {
+    version: 1,
+    surface: surface as SemanticSurfaceKind,
+    identity: compact({
+      title: string(identity.title),
+      url: string(identity.url),
+      domain: string(identity.domain),
+      path: string(identity.path),
+    }) as SemanticFrame["identity"],
+    outline,
+    body: string(source.body) ?? "",
+    bodyTruncated: source.bodyTruncated === true,
+    focus: focusFrame,
+    recent: stringList(source.recent, 32),
+    regions: {
+      content: number(regions.content) ?? 0,
+      navigation: number(regions.navigation) ?? 0,
+      chrome: number(regions.chrome) ?? 0,
+    },
+  };
+}
+
 export function normalizeHistoryEvent(value: unknown): HistoryEvent {
   const source = record(value);
   const application = record(source?.application);
@@ -310,16 +691,6 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
   if (modifiers !== undefined && stringArray(modifiers) === undefined) {
     throw new Error("Invalid history event modifiers");
   }
-  if (
-    accessibility &&
-    !(
-      ["fullTree", "diffFromPrevious"].includes(string(accessibility.mode) ?? "") &&
-      string(accessibility.text) !== undefined
-    )
-  ) {
-    throw new Error("Invalid history accessibility context");
-  }
-
   return {
     id: id.toLowerCase(),
     timestamp,
@@ -359,12 +730,8 @@ export function normalizeHistoryEvent(value: unknown): HistoryEvent {
           mouseDestination: point(interaction.mouseDestination),
         }
       : undefined,
-    accessibility: accessibility
-      ? {
-          mode: accessibility.mode as "fullTree" | "diffFromPrevious",
-          text: accessibility.text as string,
-        }
-      : undefined,
+    accessibility: accessibility ? normalizeAccessibilityContext(accessibility) : undefined,
+    semantic: normalizeSemanticFrame(source?.semantic),
     evidence: normalizeEventEvidence(evidence),
   };
 }
@@ -565,7 +932,10 @@ export function eventForDisk(event: HistoryEvent): UnknownRecord {
           mouseDestination: event.interaction.mouseDestination,
         })
       : undefined,
-    accessibility: event.accessibility,
+    accessibility: event.accessibility
+      ? accessibilityContextForDisk(event.accessibility)
+      : undefined,
+    semantic: event.semantic,
     evidence: event.evidence,
   });
 }

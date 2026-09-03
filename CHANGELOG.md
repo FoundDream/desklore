@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Evidence
+
+- The collector now sends Accessibility context as structured node snapshots and deltas instead
+  of pre-rendered text. ServerCore renders the text, keeps the nodes in segment files, and gives
+  model-facing consumers text only. Text-only segments written by earlier builds still load.
+- Persisted events carry a `semantic` frame derived from the sanitized tree: surface kind,
+  identity, heading outline, a bounded content-region body, the focused element with its
+  path, recent lines, and per-region text volume. Delta-only events are framed by replaying
+  the delta on the window's last full snapshot.
+- Timeline Agent evidence tools are semantic-first: every event returns a frame summary,
+  `include_accessibility` adds the full content-region body instead of the rendered tree, and
+  the new optional `include_raw_accessibility` exposes the rendered tree on demand. Event search
+  matches semantic content rather than window chrome. Events without a frame keep the previous
+  text behaviour.
+- `pnpm eval:semantic` replays retained segments through the frame extractor and reports, without
+  source text, structured-node and frame coverage, frame-to-text volume, identity, content, focus,
+  and content-share rates per application, plus stored-frame agreement. `--baseline` compares with
+  an earlier report and flags per-application regressions.
+- The collector asks Chromium and Electron applications for their full Accessibility tree once
+  per process: Electron applications (those exposing `AXManualAccessibility`) and known Chromium
+  browsers whenever the captured window has no web content area, and any application whose tree
+  is a handful of empty groups. Chat, editor, and browser windows built on Chromium previously
+  yielded chrome only or no semantic evidence at all. Diagnostics show how many requests were made.
+- Semantic frames prefer the deepest focused element, so a focused scroll area no longer hides the
+  focused text area inside it.
+
+### Direction
+
+- Redefined DeskLore as open-source personal context infrastructure: a local, cited, deletable
+  memory of your work, used first by DeskLore and then by agents you trust. See
+  `docs/DIRECTION.md` for the layer model and the current phase, which is collecting
+  comprehensive context. README, website copy, and package metadata follow the new definition.
+
 ## 0.2.0 — 2026-08-26
 
 DeskLore's second early source release makes Timeline Agent work durable, adds user-controlled

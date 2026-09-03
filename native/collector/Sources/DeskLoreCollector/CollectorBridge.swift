@@ -42,6 +42,7 @@ private struct CollectorHealthDTO: Encodable {
     let selectionEventCount: Int
     let lastAXCaptureDurationMilliseconds: Double
     let axCaptureBacklog: Int
+    let enhancedAccessibilityRequestCount: Int
     let screenCaptureGranted: Bool
 }
 
@@ -309,6 +310,7 @@ final class CollectorBridge {
                 lastAXCaptureDurationMilliseconds:
                     engine.lastAXCaptureDurationMilliseconds,
                 axCaptureBacklog: engine.axCaptureBacklog,
+                enhancedAccessibilityRequestCount: engine.enhancedAccessibilityRequestCount,
                 screenCaptureGranted: visualCaptureProvider.isScreenCaptureGranted
             ),
             lastError: engine.lastError

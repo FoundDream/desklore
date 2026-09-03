@@ -1,8 +1,8 @@
 const translations = {
   en: {
-    "meta.title": "DeskLore - Computer history for your Mac",
+    "meta.title": "DeskLore - Your computer's memory",
     "meta.description":
-      "DeskLore is open-source computer history for macOS: semantic-first, local-first, and built without continuous screen recording.",
+      "DeskLore is open-source personal context infrastructure for macOS: a memory of your work that stays local, cites its evidence, and can be used by the agents you trust.",
     "language.label": "Language",
     "nav.home": "Back to the DeskLore home page",
     "nav.primary": "Primary navigation",
@@ -12,17 +12,17 @@ const translations = {
     "common.viewSource": "View source",
     "hero.imageAlt": "A translucent timeline ribbon floating in deep blue space",
     "hero.titleLine1": "Your Mac,",
-    "hero.titleLine2": "with a history you can revisit.",
+    "hero.titleLine2": "with a memory you own.",
     "hero.lead":
-      "Turn everyday activity into a readable timeline, without continuous screen recording or uploading raw history.",
+      "Turn everyday activity into a memory stored on your machine, with every claim traceable to evidence and no continuous screen recording.",
     "hero.howItWorks": "See how it works",
     "hero.privacyBoundary": "Explore the privacy boundary",
     "manifesto.iconAlt": "DeskLore app icon",
     "manifesto.title":
-      "Computer history should not be a pile of recordings. It should be readable, searchable, and yours to control.",
+      "Personal context should not be a pile of recordings. It should be readable, cited, and yours to control.",
     "manifesto.body":
-      "DeskLore focuses on apps, windows, web pages, and interaction semantics, turning scattered activity into a personal timeline.",
-    "history.label": "Readable computer history",
+      "DeskLore reads app, window, page, and interaction semantics, keeps them as evidence, and grows them into a memory you can inspect and delete.",
+    "history.label": "A readable evidence layer",
     "history.title": "What you did today should remain easy to revisit.",
     "history.body":
       "DeskLore groups continuous events into clear activity segments, preserving time, context, and sources so your day becomes traceable again.",
@@ -60,15 +60,15 @@ const translations = {
     "openSource.title": "Your history should stay under your control.",
     "openSource.body":
       "DeskLore runs locally and is open source under Apache-2.0. You can inspect how it captures, filters, stores, and deletes data.",
-    "footer.tagline": "Open-source computer history for macOS.",
+    "footer.tagline": "Open-source personal context infrastructure for macOS.",
     "footer.guide": "Guide",
     "footer.guideHref": "https://github.com/FoundDream/desklore/blob/main/README.md",
     "footer.privacy": "Privacy",
   },
   "zh-CN": {
-    "meta.title": "DeskLore - 你的 Mac 活动历史",
+    "meta.title": "DeskLore - 你的电脑记忆",
     "meta.description":
-      "DeskLore 是开源的 macOS Computer History。语义优先，本地运行，不持续录屏。",
+      "DeskLore 是开源的个人上下文基础设施：你的电脑记忆，归你所有，每句话都有证据，供你信任的 agent 使用。",
     "language.label": "语言",
     "nav.home": "返回 DeskLore 首页",
     "nav.primary": "主要导航",
@@ -78,15 +78,15 @@ const translations = {
     "common.viewSource": "查看源码",
     "hero.imageAlt": "一条半透明的时间线漂浮在深蓝色空间中",
     "hero.titleLine1": "你的 Mac，",
-    "hero.titleLine2": "也有可回看的历史。",
-    "hero.lead": "把每天的操作整理成可读时间线，不持续录屏，不上传原始历史。",
+    "hero.titleLine2": "也有归你所有的记忆。",
+    "hero.lead": "把每天的操作整理成存在本机的记忆，每一句话都能追溯到证据，不持续录屏。",
     "hero.howItWorks": "看看它如何工作",
     "hero.privacyBoundary": "了解隐私边界",
     "manifesto.iconAlt": "DeskLore 应用图标",
-    "manifesto.title": "电脑历史不该是一堆录像。它应该是一段能读懂、能搜索、能由你自己掌握的记录。",
+    "manifesto.title": "个人上下文不该是一堆录像。它应该能读懂、有证据、由你自己掌握。",
     "manifesto.body":
-      "DeskLore 关注应用、窗口、网页和交互语义，把分散在一天里的操作整理成个人时间线。",
-    "history.label": "可读的 Computer History",
+      "DeskLore 读取应用、窗口、网页和交互语义，把它们作为证据保留，再生长成一份你可以检查和删除的记忆。",
+    "history.label": "可读的证据层",
     "history.title": "今天做了什么，不该只靠回忆。",
     "history.body":
       "DeskLore 把连续事件收束成清楚的工作片段，保留时间、上下文和来源，让一天重新变得可追溯。",
@@ -118,7 +118,7 @@ const translations = {
     "openSource.title": "你的历史，应该由你掌握。",
     "openSource.body":
       "DeskLore 在本地运行，使用 Apache-2.0 许可证开源。你可以检查它如何采集、过滤、保存与删除。",
-    "footer.tagline": "开源的 macOS Computer History。",
+    "footer.tagline": "开源的 macOS 个人上下文基础设施。",
     "footer.guide": "使用说明",
     "footer.guideHref": "https://github.com/FoundDream/desklore/blob/main/README.zh-CN.md",
     "footer.privacy": "隐私",

@@ -53,11 +53,25 @@ entrypoints. Branding inputs are isolated under `resources`.
 
 ## Data ownership and flow
 
-The collector emits sanitized semantic events and usage-state transitions. ServerCore applies the
+The collector emits sanitized semantic events and usage-state transitions. Accessibility context
+travels as bounded, structured node lists (a full window snapshot or a delta against the previous
+snapshot in the same window stream); ServerCore renders the textual form, retains the nodes in
+segment files, and hands model- and renderer-facing consumers rendered text only. On the
+persistence path the `semantic` layer partitions each tree into content, navigation, and chrome,
+classifies the surface, and stores a bounded semantic frame on the event; delta-only events are
+framed against the window's last full snapshot. Frame extraction is a pure function over
+recorded snapshots so it can be replayed offline when the rules change. ServerCore applies the
 persisted observation policy again, coalesces events, and writes owner-only segment data. Closed
 segments receive an immediate deterministic timeline baseline. Optional Timeline Agent work can
 upgrade that same document after validating every claim citation against retained evidence. Six-hour
 and daily timeline rollups, plus usage summaries, are derived from these local records.
+
+Chromium and Electron applications build their Accessibility tree lazily. Once per process, the
+collector sets `AXManualAccessibility` (Electron) or `AXEnhancedUserInterface` (Chromium
+browsers) when the captured window has no web content area, and tries both when any application's
+tree is a handful of empty groups, so later captures see the real tree. Diagnostics count these
+requests. This widens what those applications expose to Accessibility clients but not what
+DeskLore retains: the same policy, sanitization, and retention apply.
 
 Visual fallback is disabled by default. Its coordinator separately owns AX sufficiency decisions,
 capture settling/coalescing, provider backoff, transient image understanding, and health metrics.

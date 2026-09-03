@@ -1,8 +1,8 @@
 <div align="center">
   <img src="resources/branding/icon.png" width="128" alt="DeskLore 应用图标">
   <h1>DeskLore</h1>
-  <p><strong>开源的 macOS Computer History。</strong></p>
-  <p>优先记录语义事件，不持续录屏，默认本地运行。</p>
+  <p><strong>你的电脑记忆，归你所有，供你信任的 agent 使用。</strong></p>
+  <p>开源的 macOS 个人上下文基础设施。本地、有证据、可删除、属于你。</p>
   <p><a href="README.md">English</a></p>
 </div>
 
@@ -11,18 +11,24 @@
 </p>
 <p align="center"><sub>真实 DeskLore 界面，时间线内容全部为合成数据。</sub></p>
 
-DeskLore 把日常 Mac 活动整理成可搜索、可切换粒度的时间线。它优先使用 macOS
-Accessibility 语义，而不是持续录制屏幕。项目提供可选视觉补充，但默认关闭。
+DeskLore 是个人上下文的开源基础设施。它通过 macOS Accessibility 语义而不是录屏，观察你在
+Mac 上做的事，把它们生长成一份存在你自己机器上的记忆，全部是普通文件。记忆里的每一句话都能
+追溯到证据，也能随证据一起删除。DeskLore 自己先用这份记忆，你信任的 agent 也可以在你授权的
+范围内使用它。
+
+目前发布的是证据层：可搜索、可切换粒度的时间线，以及经过引用校验的摘要。记忆层和它的出口，
+包括主动提醒和 agent 访问，是 [docs/DIRECTION.md](docs/DIRECTION.md) 描述的方向。
 
 > **当前状态：** [`0.2.0`](https://github.com/FoundDream/desklore/releases/tag/v0.2.0) 是面向
 > macOS 14+、Apple Silicon 的早期源码版本，暂不提供官方签名安装包。
 
 ## 为什么是 DeskLore
 
-- **History 是产品本身。** 目标是可阅读、可检索的个人计算机历史，不是原始录屏仓库或通用 Agent 平台。
-- **语义采集优先。** 应用、窗口、交互、URL 和 Accessibility 上下文会被规范化为带证据的事件。
+- **记忆是产品，历史是它的证据。** 十分钟、六小时和当天三种粒度的时间线文档是被保留的证据，之后的每一条结论都必须引用它们。
+- **语义采集优先。** 应用、窗口、交互、URL 和 Accessibility 上下文会被规范化为带证据的事件。截图只是回退，默认关闭。
 - **默认本地。** 原始事件、Markdown 时间线、聚合总结和设置都保存在本机。
-- **先同意，再记录。** 用户未确认首次记录边界前，原生 Collector 不会启动。
+- **每道边界单独同意。** 用户未确认首次记录边界前，原生 Collector 不会启动；每一项会把数据发出本机的能力都是单独的决定。
+- **按基础设施来建。** 证据生产者、记忆层和消费者是分开的层，格式稳定且带版本号，新的采集器和 agent 可以接入而不必重写内核。
 - **中英文界面。** 默认使用英文，可在首次引导或设置中切换为简体中文。
 - **结果可检查。** 时间线明细和聚合总结使用 Markdown，包含来源 ID，并提供确定性规则回退。
 

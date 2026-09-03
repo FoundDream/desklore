@@ -88,6 +88,10 @@ export function DiagnosticsView({
             <strong>{health?.axCaptureBacklog ?? 0}</strong>
           </div>
           <div>
+            <span>{t("health.enhancedAccessibility")}</span>
+            <strong>{health?.enhancedAccessibilityRequestCount ?? 0}</strong>
+          </div>
+          <div>
             <span>{t("health.rawEvents")}</span>
             <strong>{health?.capturedEventCount ?? 0}</strong>
           </div>
