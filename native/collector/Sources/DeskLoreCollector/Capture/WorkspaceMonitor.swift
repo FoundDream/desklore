@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import DeskLoreNativeCore
 import Foundation
 
@@ -7,14 +8,8 @@ final class WorkspaceMonitor: NSObject {
     var onApplicationActivated: ((NSRunningApplication) -> Void)?
     var onAvailabilityChanged: ((Bool, UsageStateEvent.Reason) -> Void)?
 
-    private enum AvailabilityBlocker: Hashable {
-        case screenSleep
-        case systemSleep
-        case sessionInactive
-        case screenSaver
-    }
-
-    private var blockers: Set<AvailabilityBlocker> = []
+    private var availability = UsageAvailabilityGate()
+    private var displayStateTimer: Timer?
 
     func start() {
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -55,6 +50,15 @@ final class WorkspaceMonitor: NSObject {
             object: nil
         )
 
+        pollDisplayState()
+        displayStateTimer = Timer.scheduledTimer(
+            timeInterval: 2,
+            target: self,
+            selector: #selector(pollDisplayState),
+            userInfo: nil,
+            repeats: true
+        )
+
         if let application = NSWorkspace.shared.frontmostApplication {
             onApplicationActivated?(application)
         }
@@ -63,7 +67,9 @@ final class WorkspaceMonitor: NSObject {
     func stop() {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
-        blockers.removeAll()
+        displayStateTimer?.invalidate()
+        displayStateTimer = nil
+        availability = UsageAvailabilityGate()
     }
 
     @objc
@@ -72,50 +78,77 @@ final class WorkspaceMonitor: NSObject {
                 as? NSRunningApplication else {
             return
         }
+        updateAvailability(.applicationActivated, reason: .applicationActivation)
         onApplicationActivated?(application)
     }
 
-    private func block(_ blocker: AvailabilityBlocker, reason: UsageStateEvent.Reason) {
-        let wasAvailable = blockers.isEmpty
-        blockers.insert(blocker)
-        if wasAvailable { onAvailabilityChanged?(false, reason) }
-    }
-
-    private func unblock(_ blocker: AvailabilityBlocker, reason: UsageStateEvent.Reason) {
-        let wasAvailable = blockers.isEmpty
-        blockers.remove(blocker)
-        if !wasAvailable, blockers.isEmpty { onAvailabilityChanged?(true, reason) }
+    private func updateAvailability(
+        _ signal: UsageAvailabilityGate.Signal,
+        reason: UsageStateEvent.Reason
+    ) {
+        if let available = availability.handle(signal) {
+            onAvailabilityChanged?(available, reason)
+        }
     }
 
     @objc private func screensDidSleep() {
-        block(.screenSleep, reason: .screenSleep)
+        updateAvailability(.screenSleep, reason: .screenSleep)
     }
 
     @objc private func screensDidWake() {
-        unblock(.screenSleep, reason: .screenWake)
+        updateAvailability(.screenWake, reason: .screenWake)
+    }
+
+    @objc private func pollDisplayState() {
+        guard let displaysAsleep = Self.areAllOnlineDisplaysAsleep() else { return }
+        if displaysAsleep {
+            updateAvailability(.screenSleep, reason: .screenSleep)
+        } else {
+            updateAvailability(.screenWake, reason: .screenWake)
+        }
     }
 
     @objc private func systemWillSleep() {
-        block(.systemSleep, reason: .systemSleep)
+        updateAvailability(.systemSleep, reason: .systemSleep)
     }
 
     @objc private func systemDidWake() {
-        unblock(.systemSleep, reason: .systemWake)
+        updateAvailability(.systemWake, reason: .systemWake)
     }
 
     @objc private func sessionDidResignActive() {
-        block(.sessionInactive, reason: .sessionInactive)
+        updateAvailability(.sessionInactive, reason: .sessionInactive)
     }
 
     @objc private func sessionDidBecomeActive() {
-        unblock(.sessionInactive, reason: .sessionActive)
+        updateAvailability(.sessionActive, reason: .sessionActive)
     }
 
     @objc private func screenSaverDidStart() {
-        block(.screenSaver, reason: .screenSaverStarted)
+        updateAvailability(.screenSaverStarted, reason: .screenSaverStarted)
     }
 
     @objc private func screenSaverDidStop() {
-        unblock(.screenSaver, reason: .screenSaverStopped)
+        updateAvailability(.screenSaverStopped, reason: .screenSaverStopped)
+    }
+
+    private static func areAllOnlineDisplaysAsleep() -> Bool? {
+        var displayCount: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &displayCount) == .success,
+              displayCount > 0 else {
+            return nil
+        }
+
+        var displays = [CGDirectDisplayID](
+            repeating: kCGNullDirectDisplay,
+            count: Int(displayCount)
+        )
+        guard CGGetOnlineDisplayList(displayCount, &displays, &displayCount) == .success else {
+            return nil
+        }
+
+        return displays.prefix(Int(displayCount)).allSatisfy {
+            CGDisplayIsAsleep($0) != 0
+        }
     }
 }
