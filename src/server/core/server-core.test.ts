@@ -35,6 +35,7 @@ function captureHealth(): CaptureHealth {
     burstCoalescedEventCount: 0,
     lastAXCaptureDurationMilliseconds: 0,
     axCaptureBacklog: 0,
+    enhancedAccessibilityRequestCount: 0,
     screenCaptureGranted: false,
   };
 }

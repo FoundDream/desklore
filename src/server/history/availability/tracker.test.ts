@@ -36,6 +36,7 @@ function health(overrides: Partial<CaptureHealth> = {}): CaptureHealth {
     burstCoalescedEventCount: 0,
     lastAXCaptureDurationMilliseconds: 0,
     axCaptureBacklog: 0,
+    enhancedAccessibilityRequestCount: 0,
     screenCaptureGranted: false,
     ...overrides,
   };

@@ -25,6 +25,7 @@ final class HistoryEngine: NSObject, ObservableObject {
     @Published private(set) var axValueNotificationTargets = 0
     @Published private(set) var axSelectionNotificationTargets = 0
     @Published private(set) var lastAXCaptureDurationMilliseconds = 0.0
+    @Published private(set) var enhancedAccessibilityRequestCount = 0
     @Published private(set) var axCaptureBacklog = 0
     @Published private(set) var activeApplication: HistoryEvent.Application?
     @Published private(set) var activeDomain: String?
@@ -379,6 +380,7 @@ final class HistoryEngine: NSObject, ObservableObject {
 
     private func processCapturedEvent(_ result: AXCaptureResult) {
         lastAXCaptureDurationMilliseconds = result.durationMilliseconds
+        if result.enhancedAccessibilityRequested { enhancedAccessibilityRequestCount += 1 }
         activeDomain = result.event.window?.url.flatMap(Self.domain(from:))
         recordSemanticCaptureHealth(result.event)
         refreshSemanticListenerHealth()

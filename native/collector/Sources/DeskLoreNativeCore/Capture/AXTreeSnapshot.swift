@@ -105,6 +105,12 @@ public struct AXTreeSnapshot: Codable, Equatable, Sendable {
     /// Chromium and Electron applications expose a handful of empty groups until an
     /// assistive client asks for the full tree. A tiny tree with at most one text-bearing
     /// node outside the window is the signal that such a request is worth making.
+    /// Chromium browsers expose their native toolbar and tab strip immediately but only build
+    /// the web content tree (`AXWebArea`) once an assistive client asks for it.
+    public var containsWebArea: Bool {
+        nodes.contains { $0.role == "AXWebArea" }
+    }
+
     public var isDegenerate: Bool {
         guard nodes.count <= 16 else { return false }
         let textBearing = nodes.filter { node in

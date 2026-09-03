@@ -66,11 +66,12 @@ segments receive an immediate deterministic timeline baseline. Optional Timeline
 upgrade that same document after validating every claim citation against retained evidence. Six-hour
 and daily timeline rollups, plus usage summaries, are derived from these local records.
 
-Chromium and Electron applications build their Accessibility tree lazily. When a captured window
-tree is degenerate (a few empty groups, no text), the collector sets `AXManualAccessibility` or
-`AXEnhancedUserInterface` on that application once per process so later captures see the real
-tree. This widens what those applications expose to Accessibility clients but not what DeskLore
-retains: the same policy, sanitization, and retention apply.
+Chromium and Electron applications build their Accessibility tree lazily. Once per process, the
+collector sets `AXManualAccessibility` (Electron) or `AXEnhancedUserInterface` (Chromium
+browsers) when the captured window has no web content area, and tries both when any application's
+tree is a handful of empty groups, so later captures see the real tree. Diagnostics count these
+requests. This widens what those applications expose to Accessibility clients but not what
+DeskLore retains: the same policy, sanitization, and retention apply.
 
 Visual fallback is disabled by default. Its coordinator separately owns AX sufficiency decisions,
 capture settling/coalescing, provider backoff, transient image understanding, and health metrics.

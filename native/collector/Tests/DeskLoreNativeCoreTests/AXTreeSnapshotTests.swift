@@ -126,6 +126,20 @@ final class AXTreeSnapshotTests: XCTestCase {
         })
 
         XCTAssertTrue(electron.isDegenerate)
+        XCTAssertFalse(electron.containsWebArea)
+        let browserChrome = AXTreeSnapshot(nodes: [
+            node(id: "1", depth: 0, role: "AXWindow", title: "Chrome", childCount: 1),
+            node(id: "2", parentID: "1", depth: 1, role: "AXToolbar", childCount: 2),
+            node(id: "3", parentID: "2", depth: 2, role: "AXButton", title: "Back"),
+            node(id: "4", parentID: "2", depth: 2, role: "AXButton", title: "Forward"),
+        ])
+        XCTAssertFalse(browserChrome.isDegenerate)
+        XCTAssertFalse(browserChrome.containsWebArea)
+        let page = AXTreeSnapshot(nodes: [
+            node(id: "1", depth: 0, role: "AXWindow", childCount: 1),
+            node(id: "2", parentID: "1", depth: 1, role: "AXWebArea", title: "Page"),
+        ])
+        XCTAssertTrue(page.containsWebArea)
         XCTAssertFalse(terminal.isDegenerate)
         XCTAssertFalse(large.isDegenerate)
     }

@@ -66,6 +66,8 @@ struct RunningApplicationContext: Sendable {
 struct AXCaptureResult: Sendable {
     let event: HistoryEvent
     let durationMilliseconds: Double
+    /// True when this capture asked the application to expose its full Accessibility tree.
+    let enhancedAccessibilityRequested: Bool
 }
 
 enum AXCaptureOutcome: Sendable {
@@ -202,12 +204,14 @@ final class AXContextReader {
                 timestamp: timestamp
             )
         } : nil
-        if let snapshot = accessibilityCapture?.snapshot, snapshot.isDegenerate {
+        let enhancedAccessibilityRequested = accessibilityCapture.map { capture in
             requestEnhancedAccessibilityIfNeeded(
                 for: appElement,
-                processIdentifier: application.processIdentifier
+                processIdentifier: application.processIdentifier,
+                bundleIdentifier: application.bundleIdentifier,
+                snapshot: capture.snapshot
             )
-        }
+        } ?? false
 
         let event = HistoryEvent(
             timestamp: timestamp,
@@ -232,7 +236,8 @@ final class AXContextReader {
                 event: event,
                 durationMilliseconds: (
                     ProcessInfo.processInfo.systemUptime - captureStartedAt
-                ) * 1_000
+                ) * 1_000,
+                enhancedAccessibilityRequested: enhancedAccessibilityRequested
             )
         )
     }
@@ -856,32 +861,59 @@ final class AXContextReader {
         ].contains(role)
     }
 
-    /// Chromium builds its Accessibility tree lazily. Electron applications honor the
-    /// `AXManualAccessibility` attribute and Chrome honors `AXEnhancedUserInterface`; setting
-    /// either on the application element asks the process to expose the full tree from the
-    /// next capture on. Attempted once per process, and only when the observed tree is degenerate,
-    /// because the enhanced mode can slow window animations in some applications.
+    private static let chromiumBrowserBundleIdentifiers: Set<String> = [
+        "com.google.Chrome",
+        "com.google.Chrome.canary",
+        "com.microsoft.edgemac",
+        "com.brave.Browser",
+        "com.vivaldi.Vivaldi",
+        "company.thebrowser.Browser",
+        "com.operasoftware.Opera",
+        "org.chromium.Chromium",
+    ]
+
+    /// Chromium builds its Accessibility tree lazily. Electron applications expose a settable
+    /// `AXManualAccessibility` attribute and honor it as the request to build the tree; Chromium
+    /// browsers honor `AXEnhancedUserInterface` for the web content area. Each process is asked
+    /// at most once, and only when the observed tree shows the request is needed, because the
+    /// enhanced mode can slow window animations in some applications.
+    ///
+    /// Returns true when a request was made during this capture.
     private func requestEnhancedAccessibilityIfNeeded(
         for application: AXUIElement,
-        processIdentifier: pid_t
-    ) {
-        guard enhancedAccessibilityRequestedProcesses.insert(processIdentifier).inserted else {
-            return
+        processIdentifier: pid_t,
+        bundleIdentifier: String,
+        snapshot: AXTreeSnapshot
+    ) -> Bool {
+        guard !enhancedAccessibilityRequestedProcesses.contains(processIdentifier) else {
+            return false
         }
-        for attribute in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
-            var settable = DarwinBoolean(false)
-            guard AXUIElementIsAttributeSettable(
-                application,
-                attribute as CFString,
-                &settable
-            ) == .success, settable.boolValue else { continue }
-            let result = AXUIElementSetAttributeValue(
+        let isElectron = isAttributeSettable("AXManualAccessibility", on: application)
+        let isChromiumBrowser = Self.chromiumBrowserBundleIdentifiers.contains(bundleIdentifier)
+        let needsRequest = snapshot.isDegenerate
+            || (isElectron && !snapshot.containsWebArea)
+            || (isChromiumBrowser && !snapshot.containsWebArea)
+        guard needsRequest else { return false }
+        enhancedAccessibilityRequestedProcesses.insert(processIdentifier)
+        let attributes = isElectron
+            ? ["AXManualAccessibility", "AXEnhancedUserInterface"]
+            : ["AXEnhancedUserInterface"]
+        for attribute in attributes where isAttributeSettable(attribute, on: application) {
+            if AXUIElementSetAttributeValue(
                 application,
                 attribute as CFString,
                 kCFBooleanTrue
-            )
-            if result == .success { return }
+            ) == .success {
+                return true
+            }
         }
+        return false
+    }
+
+    private func isAttributeSettable(_ attribute: String, on element: AXUIElement) -> Bool {
+        var settable = DarwinBoolean(false)
+        return AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success
+            && settable.boolValue
     }
 
     private func isPrivateBrowsing(

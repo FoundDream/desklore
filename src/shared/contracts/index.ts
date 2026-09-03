@@ -93,6 +93,7 @@ export interface CaptureHealth {
   burstCoalescedEventCount: number;
   lastAXCaptureDurationMilliseconds: number;
   axCaptureBacklog: number;
+  enhancedAccessibilityRequestCount: number;
   screenCaptureGranted: boolean;
 }
 
