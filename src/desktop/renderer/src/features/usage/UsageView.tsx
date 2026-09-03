@@ -22,8 +22,15 @@ function usageDurationLabel(
 
 export function UsageView({ usage }: { usage?: ApplicationUsageSummary }) {
   const { locale, t } = useI18n();
-  const [range, setRange] = useState<"today" | "week">("today");
-  const selectedDays = range === "today" ? (usage ? [usage.today] : []) : (usage?.last7Days ?? []);
+  const [selection, setSelection] = useState("today");
+  const selectedDay =
+    selection === "week"
+      ? undefined
+      : selection === "today"
+        ? usage?.today
+        : (usage?.last7Days.find((day) => day.date === selection) ?? usage?.today);
+  const selectedDays =
+    selection === "week" ? (usage?.last7Days ?? []) : selectedDay ? [selectedDay] : [];
   const applications = useMemo(() => {
     const totals = new Map<
       string,
@@ -51,19 +58,36 @@ export function UsageView({ usage }: { usage?: ApplicationUsageSummary }) {
     ...(usage?.last7Days.map((day) => day.totalDurationMilliseconds) ?? []),
   );
   const dateLabel = (date: string): string =>
-    new Intl.DateTimeFormat(locale, { weekday: "short" }).format(new Date(`${date}T12:00:00`));
+    new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" }).format(
+      new Date(`${date}T12:00:00`),
+    );
+  const selectedLabel =
+    selection === "week"
+      ? t("usage.weekTotal")
+      : selectedDay?.date === usage?.today.date
+        ? t("usage.todayTotal")
+        : selectedDay
+          ? dateLabel(selectedDay.date)
+          : t("usage.todayTotal");
 
   return (
     <>
       <PageHeader
-        eyebrow={t("usage.eyebrow")}
         title={t("usage.title")}
         action={
           <div className="usage-range" aria-label={t("usage.range")}>
-            <button className={range === "today" ? "active" : ""} onClick={() => setRange("today")}>
+            <button
+              className={
+                selection !== "week" && selectedDay?.date === usage?.today.date ? "active" : ""
+              }
+              onClick={() => setSelection("today")}
+            >
               {t("usage.today")}
             </button>
-            <button className={range === "week" ? "active" : ""} onClick={() => setRange("week")}>
+            <button
+              className={selection === "week" ? "active" : ""}
+              onClick={() => setSelection("week")}
+            >
               {t("usage.last7Days")}
             </button>
           </div>
@@ -71,13 +95,19 @@ export function UsageView({ usage }: { usage?: ApplicationUsageSummary }) {
       />
       <section className="usage-overview">
         <div className="usage-total">
-          <span>{range === "today" ? t("usage.todayTotal") : t("usage.weekTotal")}</span>
+          <span>{selectedLabel}</span>
           <strong>{usageDurationLabel(total, locale)}</strong>
-          <small>{t("usage.definition")}</small>
         </div>
         <div className="usage-week" aria-label={t("usage.last7Days")}>
           {(usage?.last7Days ?? []).map((day) => (
-            <div key={day.date} title={usageDurationLabel(day.totalDurationMilliseconds, locale)}>
+            <button
+              aria-label={`${dateLabel(day.date)} · ${usageDurationLabel(day.totalDurationMilliseconds, locale)}`}
+              aria-pressed={selection !== "week" && selectedDay?.date === day.date}
+              className={selection !== "week" && selectedDay?.date === day.date ? "active" : ""}
+              key={day.date}
+              onClick={() => setSelection(day.date)}
+              title={`${dateLabel(day.date)} · ${usageDurationLabel(day.totalDurationMilliseconds, locale)}`}
+            >
               <span>
                 <i
                   style={{
@@ -89,7 +119,7 @@ export function UsageView({ usage }: { usage?: ApplicationUsageSummary }) {
                 />
               </span>
               <small>{dateLabel(day.date)}</small>
-            </div>
+            </button>
           ))}
         </div>
       </section>

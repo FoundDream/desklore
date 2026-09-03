@@ -196,45 +196,6 @@
   line-height: 1.55;
 }
 
-.rollup-source {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 20px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-.rollup-source-meta {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-}
-
-.rollup-source-meta span {
-  color: var(--muted-soft);
-  font-size: 10px;
-}
-
-.rollup-source button {
-  flex: none;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 5px;
-  color: #52525b;
-  background: transparent;
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.rollup-source button:hover {
-  color: var(--foreground);
-  background: var(--accent);
-}
-
 .rollup-periods {
   display: grid;
   gap: 12px;
@@ -266,6 +227,12 @@
 }
 
 .rollup-period {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  min-height: 76px;
+  padding: 15px 18px;
   overflow: hidden;
   background: var(--surface);
 }
@@ -274,45 +241,21 @@
   border-top: 1px solid var(--border-soft);
 }
 
-.rollup-period summary {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) 36px;
-  align-items: start;
-  gap: 16px;
-  min-height: 76px;
-  padding: 15px 18px;
-  cursor: pointer;
-  list-style: none;
-}
-
-.rollup-period summary::-webkit-details-marker {
-  display: none;
-}
-
-.rollup-period summary:hover {
-  background: #f9f9fa;
-}
-
-.rollup-period summary:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-
-.rollup-period summary time {
+.rollup-period > time {
   padding-top: 2px;
   color: var(--muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.rollup-period summary h3 {
+.rollup-period h3 {
   margin: 0;
   font-size: 13px;
   font-weight: 630;
   line-height: 1.4;
 }
 
-.rollup-period summary p {
+.rollup-period p {
   display: -webkit-box;
   overflow: hidden;
   margin: 5px 0 0;
@@ -321,26 +264,6 @@
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.rollup-period summary > span {
-  justify-self: end;
-  padding-top: 2px;
-  color: var(--muted-soft);
-  font-size: 10px;
-}
-
-.rollup-period[open] summary {
-  border-bottom: 1px solid var(--border);
-}
-
-.rollup-period-details {
-  padding: 16px 18px 16px 110px;
-  background: #fafafa;
-}
-
-.rollup-period-details .rollup-source {
-  margin-top: 16px;
 }
 
 .archive {

@@ -191,6 +191,10 @@ nav button > i.warn {
   padding: 44px 22px 20px;
 }
 
+.content-header.single-line {
+  align-items: center;
+}
+
 .section-kicker {
   display: block;
   margin-bottom: 7px;

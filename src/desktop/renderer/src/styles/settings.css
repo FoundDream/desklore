@@ -1,4 +1,14 @@
 .settings-shell {
+  --surface: #ffffff;
+  --sidebar: #f7f7f8;
+  --foreground: #202124;
+  --muted: #6f7074;
+  --muted-soft: #96979b;
+  --border: #e3e3e5;
+  --border-soft: #ededee;
+  --accent: #f3f3f4;
+  --accent-strong: #e9e9eb;
+  --ring: rgba(59, 130, 246, 0.22);
   display: grid;
   grid-template-columns: 252px minmax(0, 1fr);
   height: 100vh;
@@ -127,9 +137,9 @@
   padding: 0 9px;
   border: 0;
   border-radius: 8px;
-  color: #52525b;
+  color: #55565a;
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 520;
   text-align: left;
 }
@@ -175,7 +185,7 @@
 }
 
 .settings-content-inner {
-  width: min(860px, calc(100% - 80px));
+  width: min(900px, calc(100% - 80px));
   margin: 0 auto;
   padding: 44px 0 80px;
 }
@@ -186,7 +196,7 @@
 
 .settings-page-header h1 {
   margin: 0;
-  font-size: 25px;
+  font-size: 26px;
   font-weight: 660;
   line-height: 1.2;
   letter-spacing: -0.03em;
@@ -204,7 +214,7 @@
 .setting-group > h2 {
   margin: 0 0 12px;
   color: var(--foreground);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 640;
 }
 
@@ -212,7 +222,7 @@
   display: grid;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 15px;
   background: var(--surface);
 }
 
@@ -220,9 +230,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 28px;
-  min-height: 72px;
-  padding: 14px 18px;
+  gap: 24px;
+  min-height: 68px;
+  padding: 14px 16px;
 }
 
 .setting-row + .setting-row {
@@ -236,16 +246,17 @@
 }
 
 .setting-row-copy strong {
-  font-size: 12px;
-  font-weight: 610;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 590;
   line-height: 1.35;
 }
 
 .setting-row-copy span {
   overflow-wrap: anywhere;
   color: var(--muted);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .setting-row-control {
@@ -257,25 +268,26 @@
 
 .setting-row-control > button,
 .settings-recovery > button {
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #f7f7f8;
-  font-size: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: #f3f3f4;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
 
 .setting-row-control > button:hover,
 .settings-recovery > button:hover {
-  background: var(--accent-strong);
+  background: #e9e9eb;
 }
 
 .settings-empty-state {
   padding: 18px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11.5px;
 }
 
 .settings-application-picker {
@@ -290,7 +302,7 @@
   justify-content: space-between;
   min-height: 28px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .settings-application-toolbar button {
@@ -300,7 +312,7 @@
   border-radius: 6px;
   color: var(--foreground);
   background: var(--surface);
-  font-size: 9px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -319,8 +331,8 @@
 }
 
 .settings-application-search > span {
-  color: #3f3f46;
-  font-size: 10px;
+  color: #4b4c50;
+  font-size: 11px;
   font-weight: 560;
 }
 
@@ -333,7 +345,7 @@
   outline: none;
   color: var(--foreground);
   background: var(--surface);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .settings-application-search input:focus-visible {
@@ -411,14 +423,14 @@
 }
 
 .settings-application-copy strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 610;
 }
 
 .settings-application-copy small {
   color: var(--muted);
   font-family: "SF Mono", "Roboto Mono", monospace;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .settings-application-row input {
@@ -434,12 +446,12 @@
   padding: 20px;
   place-items: center;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .settings-application-error {
   color: var(--warning);
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
@@ -470,8 +482,8 @@
 }
 
 .settings-rule-form label > span {
-  color: #3f3f46;
-  font-size: 10px;
+  color: #4b4c50;
+  font-size: 11px;
   font-weight: 560;
 }
 
@@ -485,7 +497,7 @@
   color: var(--foreground);
   background: var(--surface);
   font-family: "SF Mono", "Roboto Mono", monospace;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .settings-rule-form input:focus-visible {
@@ -508,11 +520,11 @@
   height: 34px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   outline: none;
   color: var(--foreground);
   background: var(--surface);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .setting-select:focus-visible,
@@ -532,7 +544,7 @@
   border-radius: 999px;
   color: #52525b;
   background: var(--accent);
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 580;
   white-space: nowrap;
 }
@@ -556,12 +568,6 @@
   border-top: 1px solid var(--border-soft);
 }
 
-.settings-form-status {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 18px;
-}
-
 .settings-form-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
@@ -579,15 +585,15 @@
 }
 
 .settings-form-grid label > span {
-  color: #3f3f46;
-  font-size: 10px;
+  color: #4b4c50;
+  font-size: 11px;
   font-weight: 560;
 }
 
 .settings-form-grid label b {
   margin-left: 7px;
   color: var(--success);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 560;
 }
 
@@ -616,7 +622,7 @@
 .settings-save-state {
   flex: 1;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .settings-form-actions button:disabled,
@@ -632,8 +638,26 @@
   opacity: 0.5;
 }
 
+.settings-shell .switch {
+  width: 38px;
+  height: 22px;
+}
+
+.settings-shell .switch span {
+  background: #d7d7da;
+}
+
+.settings-shell .switch span::after {
+  width: 18px;
+  height: 18px;
+}
+
 .settings-shell .switch input:checked + span {
   background: #3b82f6;
+}
+
+.settings-shell .switch input:checked + span::after {
+  transform: translateX(16px);
 }
 
 .visual-settings-form {
@@ -650,8 +674,8 @@
   align-items: center;
   min-height: 40px;
   outline: none;
-  color: #52525b;
-  font-size: 10px;
+  color: #55565a;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   list-style: none;
@@ -680,8 +704,8 @@
 }
 
 .settings-advanced label > span {
-  color: #3f3f46;
-  font-size: 10px;
+  color: #4b4c50;
+  font-size: 11px;
   font-weight: 560;
 }
 
@@ -702,7 +726,7 @@
 }
 
 .settings-inline-warning strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 620;
 }
 
@@ -744,7 +768,7 @@
   min-height: 22px;
   padding-top: 9px;
   color: var(--success);
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .setting-group-danger {

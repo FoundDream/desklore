@@ -160,12 +160,6 @@ export function TimelineView({ history, run }: { history?: HistorySnapshot; run:
     setReferencedDocumentIDs([]);
   };
 
-  const openRollupDocuments = (rollup: TimelineRollup): void => {
-    setSelectedDate(dateKey(rollup.startedAt));
-    setReferencedDocumentIDs(rollup.sourceDocumentIDs);
-    setResolution("10min");
-  };
-
   const openSearchMatch = (match: HistorySearchMatch): void => {
     setSelectedDate(dateKey(match.startedAt));
     setResolution(match.kind);
@@ -189,7 +183,6 @@ export function TimelineView({ history, run }: { history?: HistorySnapshot; run:
   return (
     <>
       <PageHeader
-        eyebrow={t("timeline.eyebrow")}
         title={t("timeline.title")}
         action={
           <div className="header-actions">
@@ -296,7 +289,6 @@ export function TimelineView({ history, run }: { history?: HistorySnapshot; run:
         <TimelineRollupView
           kind={resolution === "6h" ? "6h" : "day"}
           rollups={resolution === "6h" ? selectedDay.sixHourRollups : selectedDay.dailyRollups}
-          onOpenDocuments={openRollupDocuments}
         />
       ) : null}
     </>

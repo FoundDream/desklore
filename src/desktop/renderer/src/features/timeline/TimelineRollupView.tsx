@@ -1,9 +1,5 @@
 import type { TimelineRollup } from "../../../../../shared/contracts/index.js";
-import {
-  ApplicationList,
-  ContinuationHint,
-  timeLabel,
-} from "../../components/HistoryComponents.js";
+import { ContinuationHint, timeLabel } from "../../components/HistoryComponents.js";
 import { useI18n } from "../../app/i18n.js";
 
 function rollupRangeLabel(rollup: TimelineRollup, locale: "en" | "zh-CN"): string {
@@ -19,36 +15,12 @@ function RollupStatus({ status }: { status: TimelineRollup["status"] }) {
   );
 }
 
-function RollupSourceFooter({
-  rollup,
-  onOpenDocuments,
-}: {
-  rollup: TimelineRollup;
-  onOpenDocuments: (rollup: TimelineRollup) => void;
-}) {
-  const { t } = useI18n();
-  if (rollup.sourceDocumentIDs.length === 0 && rollup.applications.length === 0) return null;
-  return (
-    <footer className="rollup-source">
-      <ApplicationList applications={rollup.applications} />
-      {rollup.sourceDocumentIDs.length > 0 && (
-        <div className="rollup-source-meta">
-          <span>{t("timeline.basedOnActivities", { count: rollup.sourceDocumentIDs.length })}</span>
-          <button onClick={() => onOpenDocuments(rollup)}>{t("timeline.viewDetails")}</button>
-        </div>
-      )}
-    </footer>
-  );
-}
-
 export function TimelineRollupView({
   kind,
   rollups,
-  onOpenDocuments,
 }: {
   kind: "6h" | "day";
   rollups: TimelineRollup[];
-  onOpenDocuments: (rollup: TimelineRollup) => void;
 }) {
   const { locale, t } = useI18n();
 
@@ -75,7 +47,6 @@ export function TimelineRollupView({
           <h2>{daily.title}</h2>
           <p>{daily.description}</p>
           <ContinuationHint item={daily.continuationHint} />
-          <RollupSourceFooter rollup={daily} onOpenDocuments={onOpenDocuments} />
         </article>
       </section>
     );
@@ -93,23 +64,16 @@ export function TimelineRollupView({
         </header>
         <div>
           {rollups.map((rollup) => (
-            <details className="rollup-period" key={rollup.id}>
-              <summary>
-                <time>{rollupRangeLabel(rollup, locale)}</time>
-                <div>
-                  <div className="rollup-title-row">
-                    <h3>{rollup.title}</h3>
-                    <RollupStatus status={rollup.status} />
-                  </div>
-                  <p>{rollup.description}</p>
+            <article className="rollup-period" key={rollup.id}>
+              <time>{rollupRangeLabel(rollup, locale)}</time>
+              <div>
+                <div className="rollup-title-row">
+                  <h3>{rollup.title}</h3>
+                  <RollupStatus status={rollup.status} />
                 </div>
-                <span>{t("common.details")}</span>
-              </summary>
-              <div className="rollup-period-details">
-                <ContinuationHint item={rollup.continuationHint} />
-                <RollupSourceFooter rollup={rollup} onOpenDocuments={onOpenDocuments} />
+                <p>{rollup.description}</p>
               </div>
-            </details>
+            </article>
           ))}
         </div>
       </section>

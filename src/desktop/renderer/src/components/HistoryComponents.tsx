@@ -111,14 +111,14 @@ export function PageHeader({
   title,
   action,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   action?: ReactNode;
 }) {
   return (
-    <header className="content-header">
+    <header className={`content-header ${eyebrow ? "" : "single-line"}`}>
       <div>
-        <span className="section-kicker">{eyebrow}</span>
+        {eyebrow && <span className="section-kicker">{eyebrow}</span>}
         <h1>{title}</h1>
       </div>
       {action}

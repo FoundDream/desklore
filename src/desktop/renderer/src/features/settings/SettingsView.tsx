@@ -417,7 +417,10 @@ export function SettingsView({
           {tab === "general" && (
             <>
               <SettingsSection title={t("settings.interface")}>
-                <SettingRow title={t("settings.language")}>
+                <SettingRow
+                  title={t("settings.language")}
+                  description={t("settings.languageDescription")}
+                >
                   <select
                     className="setting-select"
                     aria-label={t("settings.language")}
@@ -436,7 +439,10 @@ export function SettingsView({
               </SettingsSection>
 
               <SettingsSection title={t("settings.capture")}>
-                <SettingRow title={t("settings.recording")}>
+                <SettingRow
+                  title={t("settings.recording")}
+                  description={t("settings.recordingDescription")}
+                >
                   <StatusPill tone={recording ? "success" : "neutral"}>
                     {recording ? t("sidebar.recording") : t("sidebar.paused")}
                   </StatusPill>
@@ -451,7 +457,10 @@ export function SettingsView({
                     {recording ? t("settings.pauseRecording") : t("settings.resumeRecording")}
                   </button>
                 </SettingRow>
-                <SettingRow title={t("settings.captureStatus")}>
+                <SettingRow
+                  title={t("settings.captureStatus")}
+                  description={t("settings.captureStatusDescription")}
+                >
                   <StatusPill
                     tone={
                       captureStatus === "ready"
@@ -497,13 +506,6 @@ export function SettingsView({
             <>
               <SettingsSection title={t("settings.modelConnection")}>
                 <div className="settings-form-block">
-                  <div className="settings-form-status">
-                    <StatusPill tone={history?.llm.apiKeyConfigured ? "success" : "neutral"}>
-                      {history?.llm.apiKeyConfigured
-                        ? t("settings.configured")
-                        : t("settings.notConfigured")}
-                    </StatusPill>
-                  </div>
                   <div className="settings-form-grid">
                     <label className="wide">
                       <span>
@@ -566,6 +568,11 @@ export function SettingsView({
                     </label>
                   </details>
                   <footer className="settings-form-actions">
+                    <StatusPill tone={history?.llm.apiKeyConfigured ? "success" : "neutral"}>
+                      {history?.llm.apiKeyConfigured
+                        ? t("common.ready")
+                        : t("settings.notConfigured")}
+                    </StatusPill>
                     <div className="settings-save-state" role="status">
                       {feedback ?? (modelDirty ? t("settings.unsavedChanges") : "")}
                     </div>
@@ -595,7 +602,10 @@ export function SettingsView({
                     <strong>{t("settings.keyRequired")}</strong>
                   </div>
                 )}
-                <SettingRow title={t("settings.semanticSummaries")}>
+                <SettingRow
+                  title={t("settings.semanticSummaries")}
+                  description={t("settings.semanticSummariesDescription")}
+                >
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -611,7 +621,10 @@ export function SettingsView({
                     <span />
                   </label>
                 </SettingRow>
-                <SettingRow title={t("settings.rollupSynthesis")}>
+                <SettingRow
+                  title={t("settings.rollupSynthesis")}
+                  description={t("settings.rollupSynthesisDescription")}
+                >
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -638,7 +651,10 @@ export function SettingsView({
           {tab === "visual" && (
             <>
               <SettingsSection title={t("settings.visualFallback")}>
-                <SettingRow title={t("settings.visualFallback")}>
+                <SettingRow
+                  title={t("settings.visualFallback")}
+                  description={t("settings.visualFallbackDescription")}
+                >
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -690,7 +706,10 @@ export function SettingsView({
               </SettingsSection>
 
               <SettingsSection title={t("settings.screenRecording")}>
-                <SettingRow title={t("settings.screenRecording")}>
+                <SettingRow
+                  title={t("settings.screenRecording")}
+                  description={t("settings.screenRecordingDescription")}
+                >
                   <StatusPill
                     tone={
                       providerStatus === "ready" ? "success" : visualEnabled ? "warning" : "neutral"
@@ -1079,7 +1098,10 @@ export function SettingsView({
               {feedback && <div className="settings-inline-feedback">{feedback}</div>}
 
               <SettingsSection title={t("settings.dangerZone")} tone="danger">
-                <SettingRow title={t("settings.deleteHistory")}>
+                <SettingRow
+                  title={t("settings.deleteHistory")}
+                  description={t("settings.deleteHistoryDescription")}
+                >
                   <button
                     className="text-danger"
                     disabled={busy || !history}
