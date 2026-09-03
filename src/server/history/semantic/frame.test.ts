@@ -294,6 +294,27 @@ describe("semantic frame extraction", () => {
     expect(terminal.recent).toEqual(["line 38", "line 39", "line 40"]);
   });
 
+  it("prefers the deepest focused element over its focused containers", () => {
+    const terminal = extractSemanticFrame({
+      bundleIdentifier: "com.apple.Terminal",
+      windowTitle: "zsh",
+      snapshot: snapshot([
+        node({ id: "w", role: "AXWindow", depth: 0, childCount: 1, title: "zsh" }),
+        node({ id: "scroll", parentID: "w", role: "AXScrollArea", depth: 1, focused: true }),
+        node({
+          id: "text",
+          parentID: "scroll",
+          role: "AXTextArea",
+          depth: 2,
+          value: "$ pnpm test",
+          focused: true,
+        }),
+      ]),
+    });
+
+    expect(terminal.focus).toEqual({ role: "AXTextArea", text: "$ pnpm test", path: ["zsh"] });
+  });
+
   it("resolves a file URL into a path", () => {
     const local = extractSemanticFrame({
       bundleIdentifier: "com.apple.TextEdit",

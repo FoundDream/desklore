@@ -20,6 +20,12 @@
   source text, structured-node and frame coverage, frame-to-text volume, identity, content, focus,
   and content-share rates per application, plus stored-frame agreement. `--baseline` compares with
   an earlier report and flags per-application regressions.
+- The collector asks Chromium and Electron applications for their full Accessibility tree
+  (`AXManualAccessibility`, then `AXEnhancedUserInterface`) once per process when the observed
+  tree is degenerate: a handful of empty groups and no text. Chat, editor, and browser windows
+  built on Chromium previously yielded no semantic evidence at all.
+- Semantic frames prefer the deepest focused element, so a focused scroll area no longer hides the
+  focused text area inside it.
 
 ### Direction
 

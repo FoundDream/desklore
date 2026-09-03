@@ -102,6 +102,19 @@ public struct AXTreeSnapshot: Codable, Equatable, Sendable {
     public let visitedNodeCount: Int
     public let wasTruncated: Bool
 
+    /// Chromium and Electron applications expose a handful of empty groups until an
+    /// assistive client asks for the full tree. A tiny tree with at most one text-bearing
+    /// node outside the window is the signal that such a request is worth making.
+    public var isDegenerate: Bool {
+        guard nodes.count <= 16 else { return false }
+        let textBearing = nodes.filter { node in
+            node.role != "AXWindow"
+                && [node.value, node.title, node.description]
+                    .contains { !($0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
+        }
+        return textBearing.count <= 1
+    }
+
     public init(
         nodes: [AXTreeNode],
         visitedNodeCount: Int? = nil,

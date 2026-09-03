@@ -109,6 +109,27 @@ final class AXTreeSnapshotTests: XCTestCase {
         XCTAssertEqual((encodedDelta["moved"] as? [[String: Any]])?.count, 0)
     }
 
+    func testDegenerateDetectionFlagsEmptyChromiumTreesOnly() {
+        let electron = AXTreeSnapshot(nodes: [
+            node(id: "1", depth: 0, role: "AXWindow", title: "Claude", childCount: 1),
+            node(id: "2", parentID: "1", depth: 1, role: "AXGroup", childCount: 2),
+            node(id: "3", parentID: "2", depth: 2, role: "AXGroup"),
+            node(id: "4", parentID: "2", depth: 2, role: "AXGroup"),
+        ])
+        let terminal = AXTreeSnapshot(nodes: [
+            node(id: "1", depth: 0, role: "AXWindow", title: "zsh", childCount: 1),
+            node(id: "2", parentID: "1", depth: 1, role: "AXTextArea", value: "$ ls"),
+            node(id: "3", parentID: "1", depth: 1, role: "AXStaticText", value: "zsh"),
+        ])
+        let large = AXTreeSnapshot(nodes: (0..<40).map {
+            node(id: "\($0)", depth: 1, role: "AXGroup")
+        })
+
+        XCTAssertTrue(electron.isDegenerate)
+        XCTAssertFalse(terminal.isDegenerate)
+        XCTAssertFalse(large.isDegenerate)
+    }
+
     private func node(
         id: String,
         parentID: String? = nil,

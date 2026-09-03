@@ -131,6 +131,7 @@ final class AXContextReader {
     }
 
     private var previousAXSnapshotByStream: [String: AXSnapshotState] = [:]
+    private var enhancedAccessibilityRequestedProcesses: Set<pid_t> = []
 
     func event(
         for application: RunningApplicationContext,
@@ -201,6 +202,12 @@ final class AXContextReader {
                 timestamp: timestamp
             )
         } : nil
+        if let snapshot = accessibilityCapture?.snapshot, snapshot.isDegenerate {
+            requestEnhancedAccessibilityIfNeeded(
+                for: appElement,
+                processIdentifier: application.processIdentifier
+            )
+        }
 
         let event = HistoryEvent(
             timestamp: timestamp,
@@ -847,6 +854,34 @@ final class AXContextReader {
             kAXComboBoxRole as String,
             "AXSearchField",
         ].contains(role)
+    }
+
+    /// Chromium builds its Accessibility tree lazily. Electron applications honor the
+    /// `AXManualAccessibility` attribute and Chrome honors `AXEnhancedUserInterface`; setting
+    /// either on the application element asks the process to expose the full tree from the
+    /// next capture on. Attempted once per process, and only when the observed tree is degenerate,
+    /// because the enhanced mode can slow window animations in some applications.
+    private func requestEnhancedAccessibilityIfNeeded(
+        for application: AXUIElement,
+        processIdentifier: pid_t
+    ) {
+        guard enhancedAccessibilityRequestedProcesses.insert(processIdentifier).inserted else {
+            return
+        }
+        for attribute in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+            var settable = DarwinBoolean(false)
+            guard AXUIElementIsAttributeSettable(
+                application,
+                attribute as CFString,
+                &settable
+            ) == .success, settable.boolValue else { continue }
+            let result = AXUIElementSetAttributeValue(
+                application,
+                attribute as CFString,
+                kCFBooleanTrue
+            )
+            if result == .success { return }
+        }
     }
 
     private func isPrivateBrowsing(

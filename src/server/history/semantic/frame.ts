@@ -182,9 +182,19 @@ function focusOf(
   partition: AXRegionPartition,
   limits: FrameLimits,
 ): SemanticFocus | undefined {
-  const focused =
-    ordered.find((node) => node.focused === true && partition.kinds.get(node.id) === "content") ??
-    ordered.find((node) => node.focused === true);
+  // Focus flags appear on containers as well as on the element itself (a focused scroll
+  // area around a focused text area), so prefer the deepest focused node, then text.
+  const focusedNodes = ordered.filter((node) => node.focused === true);
+  const inContent = focusedNodes.filter((node) => partition.kinds.get(node.id) === "content");
+  const focused = (inContent.length ? inContent : focusedNodes).reduce<AXTreeNode | undefined>(
+    (best, node) =>
+      !best ||
+      node.depth > best.depth ||
+      (node.depth === best.depth && !nodeText(best) && nodeText(node) !== undefined)
+        ? node
+        : best,
+    undefined,
+  );
   if (!focused) return undefined;
   const byID = new Map(snapshot.nodes.map((node) => [node.id, node]));
   const path: string[] = [];
