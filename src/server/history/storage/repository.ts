@@ -338,15 +338,31 @@ export type SegmentMetric = "captured" | "policyBlocked" | "deduplicated" | "bur
 
 export class SegmentStore {
   private current?: SegmentMetadata;
+  private storageReady?: Promise<void>;
+  private pendingMetadata?: SegmentMetadata;
 
   constructor(readonly layout: StorageLayout) {}
 
   reset(): void {
     this.current = undefined;
+    this.pendingMetadata = undefined;
+    this.storageReady = undefined;
+  }
+
+  private prepareStorage(): Promise<void> {
+    this.storageReady ??= ensureStorage(this.layout).catch((error) => {
+      this.storageReady = undefined;
+      throw error;
+    });
+    return this.storageReady;
+  }
+
+  async flushMetadata(): Promise<void> {
+    if (this.pendingMetadata) await this.writeMetadata(this.pendingMetadata);
   }
 
   async append(event: HistoryEvent): Promise<ClosedSegment | undefined> {
-    await ensureStorage(this.layout);
+    await this.prepareStorage();
     const id = segmentIdentifier(new Date(event.timestamp));
     let closed: ClosedSegment | undefined;
     if (this.current && this.current.id !== id) {
@@ -369,7 +385,7 @@ export class SegmentStore {
   }
 
   async appendEvidence(enrichment: EventEvidenceEnrichment): Promise<void> {
-    await ensureStorage(this.layout);
+    await this.prepareStorage();
     const id = segmentIdentifier(new Date(enrichment.eventTimestamp));
     const directoryPath = path.join(this.layout.segments, id);
     await mkdir(directoryPath, { recursive: true, mode: 0o700 });
@@ -389,8 +405,10 @@ export class SegmentStore {
     timestamp: string,
     metric: SegmentMetric,
     count = 1,
+    deferWrite = false,
   ): Promise<ClosedSegment | undefined> {
-    await ensureStorage(this.layout);
+    // The capture pipeline may merge this write with append(), but must flush in its finally block.
+    await this.prepareStorage();
     const id = segmentIdentifier(new Date(timestamp));
     let closed: ClosedSegment | undefined;
     if (this.current && this.current.id !== id) {
@@ -406,7 +424,8 @@ export class SegmentStore {
       metadata.policyBlockedEventCount +
       metadata.deduplicatedEventCount +
       metadata.burstCoalescedEventCount;
-    await this.writeMetadata(metadata);
+    if (deferWrite) this.pendingMetadata = metadata;
+    else await this.writeMetadata(metadata);
     this.current = metadata;
     return closed;
   }
@@ -422,7 +441,7 @@ export class SegmentStore {
   }
 
   async pendingClosedSegments(): Promise<ClosedSegment[]> {
-    await ensureStorage(this.layout);
+    await this.prepareStorage();
     const entries = await readdir(this.layout.segments, { withFileTypes: true });
     const segments: ClosedSegment[] = [];
     for (const entry of entries) {
@@ -437,7 +456,7 @@ export class SegmentStore {
   }
 
   async recoverExpiredSegments(date = new Date()): Promise<ClosedSegment[]> {
-    await ensureStorage(this.layout);
+    await this.prepareStorage();
     const entries = await readdir(this.layout.segments, { withFileTypes: true });
     const recovered: ClosedSegment[] = [];
     for (const entry of entries) {
@@ -461,7 +480,7 @@ export class SegmentStore {
   }
 
   async pruneSegments(cutoff: Date): Promise<number> {
-    await ensureStorage(this.layout);
+    await this.prepareStorage();
     const entries = await readdir(this.layout.segments, { withFileTypes: true });
     let removed = 0;
     for (const entry of entries) {
@@ -504,7 +523,7 @@ export class SegmentStore {
   }
 
   async pruneVisualEvidence(cutoff: Date): Promise<number> {
-    await ensureStorage(this.layout);
+    await this.prepareStorage();
     const entries = await readdir(this.layout.segments, { withFileTypes: true });
     let removed = 0;
     for (const entry of entries) {
@@ -594,7 +613,8 @@ export class SegmentStore {
   private async loadOrCreateMetadata(id: string, timestamp: string): Promise<SegmentMetadata> {
     if (this.current?.id === id) return this.current;
     const directoryPath = path.join(this.layout.segments, id);
-    await mkdir(directoryPath, { recursive: true });
+    await mkdir(directoryPath, { recursive: true, mode: 0o700 });
+    await chmod(directoryPath, 0o700);
     const existing = await this.readMetadata(directoryPath).catch(() => undefined);
     return (
       existing ?? {
@@ -620,11 +640,11 @@ export class SegmentStore {
 
   private async writeMetadata(metadata: SegmentMetadata): Promise<void> {
     const directoryPath = path.join(this.layout.segments, metadata.id);
-    await mkdir(directoryPath, { recursive: true });
     await atomicWriteOwnedFile(
       path.join(directoryPath, "metadata.json"),
       `${JSON.stringify(metadataForDisk(metadata), null, 2)}\n`,
     );
+    if (this.pendingMetadata?.id === metadata.id) this.pendingMetadata = undefined;
   }
 
   private async finalize(metadata: SegmentMetadata): Promise<ClosedSegment> {

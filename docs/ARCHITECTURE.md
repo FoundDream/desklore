@@ -79,6 +79,10 @@ Pixels are processed transiently and discarded; persisted visual evidence contai
 metadata only. Its capture limits trade screenshot volume against how quickly a changed window is
 observed again, so changing them needs a replay over recorded captures, not a unit test alone.
 
+History search runs locally over timeline titles, descriptions, retained bodies, cited claims, and
+rollups. Today/yesterday terms filter by the local calendar date; other terms must still match
+content. Results with overlapping source documents are deduplicated across timeline resolutions.
+
 The Electron main process is the only layer that uses `safeStorage`. It loads the credential before
 starting ServerCore and passes it through the process initialization message. ServerCore keeps it in
 private process state and never includes it in snapshots. Renderer snapshots contain sanitized DTOs only.
@@ -104,6 +108,11 @@ Raw segments are the evidence source; timeline documents and rollups are derived
 state or Markdown use atomic owner-only files. Deleting a timeline document cascades to its source
 segment and visual evidence, then regenerates affected rollups. Clear/restore archives history as one
 unit and coordinates collector pause, outstanding visual work, and agent jobs before mutation.
+The collector must confirm it has paused before clear/restore begins. Late capture events are ignored
+until recording is explicitly restarted, and recording cannot resume during the archive operation.
+Capture counters and event metadata are committed together where possible, with pending counters
+flushed before the capture operation returns. Batch timeline checks share one document scan while
+subsequent batches still observe external edits to the Markdown archive.
 
 ## Testing strategy
 

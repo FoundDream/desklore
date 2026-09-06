@@ -13,6 +13,7 @@ import type { TimelineDocumentRecord } from "../contracts.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
@@ -50,7 +51,7 @@ describe("Timeline rollups", () => {
     expect(records.map((record) => record.kind).sort()).toEqual(["6h", "day"]);
     expect(records.every((record) => record.status === "final")).toBe(true);
     expect(records.every((record) => record.sourceDocumentIDs.includes("document-1"))).toBe(true);
-    await expect(repository.load()).resolves.toHaveLength(2);
+    await expect(repository.load()).resolves.toEqual(records);
 
     await expect(repository.refresh([])).resolves.toEqual([]);
     await expect(repository.load()).resolves.toEqual([]);
@@ -95,9 +96,67 @@ describe("Timeline rollups", () => {
 
     const result = repository.search("分层时间线 可检索", documents, rollups);
 
-    expect(result.matches.some((match) => match.kind === "10min")).toBe(true);
-    expect(result.matches.some((match) => match.kind === "6h")).toBe(true);
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0]?.kind).toBe("10min");
     expect(result.answer).toMatch(/\[(?:10min|6h|day):/);
+  });
+
+  it("searches retained body text and cited claims", () => {
+    const repository = new TimelineRollupRepository(makeStorageLayout("/unused"));
+    const source = document({
+      body: "正文唯一关键词",
+      claims: [{ text: "断言唯一关键词", evidenceEventIDs: ["event-1"] }],
+    });
+    expect(repository.search("正文唯一关键词", [source], []).matches).toHaveLength(1);
+    expect(repository.search("断言唯一关键词", [source], []).matches).toHaveLength(1);
+    expect(repository.search("completelyabsentneedle", [source], []).matches).toHaveLength(0);
+  });
+
+  it("filters today and yesterday independently of content relevance", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 6, 12));
+    const repository = new TimelineRollupRepository(makeStorageLayout("/unused"));
+    const today = document({
+      id: "today",
+      startedAt: new Date(2026, 8, 6, 0, 1).toISOString(),
+      body: "retrievalneedle",
+    });
+    const yesterday = document({
+      id: "yesterday",
+      startedAt: new Date(2026, 8, 5, 23, 59).toISOString(),
+      body: "retrievalneedle",
+    });
+    expect(
+      repository
+        .search("今天 retrievalneedle", [today, yesterday], [])
+        .matches.map((match) => match.id),
+    ).toEqual(["today"]);
+    expect(
+      repository
+        .search("yesterday retrievalneedle", [today, yesterday], [])
+        .matches.map((match) => match.id),
+    ).toEqual(["yesterday"]);
+    expect(
+      repository.search("今天 completelyabsentneedle", [today, yesterday], []).matches,
+    ).toEqual([]);
+    expect(
+      repository.search("昨天", [today, yesterday], []).matches.map((match) => match.id),
+    ).toEqual(["yesterday"]);
+    expect(repository.search(" ", [today, yesterday], []).matches).toEqual([]);
+  });
+
+  it("keeps independent matches while removing overlapping rollup sources", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "desklore-search-dedupe-"));
+    temporaryDirectories.push(root);
+    const repository = new TimelineRollupRepository(makeStorageLayout(root));
+    const sources = [
+      document(),
+      document({ id: "document-2", sourceSegmentID: "2026-08-20T06-20-00Z" }),
+    ];
+    const rollups = await repository.refresh(sources);
+    const result = repository.search("分层时间线 可检索", sources, rollups);
+    expect(result.matches.map((match) => match.id).sort()).toEqual(["document-1", "document-2"]);
+    expect(repository.search("分层时间线", sources, [], 1).matches).toHaveLength(1);
   });
 
   it("uses model-backed synthesis once per source digest and keeps deterministic citations", async () => {

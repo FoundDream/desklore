@@ -406,12 +406,18 @@ export class TimelineRepository {
     this.jobs = new TimelineAgentJobRepository(layout);
   }
 
-  async generateIfNeeded(segment: ClosedSegment): Promise<TimelineDocumentRecord | undefined> {
+  async generateIfNeeded(
+    segment: ClosedSegment,
+    documentsBySegment?: Map<string, TimelineDocumentRecord>,
+  ): Promise<TimelineDocumentRecord | undefined> {
     if (this.generationInFlight.has(segment.metadata.id)) return undefined;
     this.generationInFlight.add(segment.metadata.id);
     try {
-      const existing = await this.loadDocuments();
-      const current = existing.find((document) => document.sourceSegmentID === segment.metadata.id);
+      const current = documentsBySegment
+        ? documentsBySegment.get(segment.metadata.id)
+        : (await this.loadDocuments()).find(
+            (document) => document.sourceSegmentID === segment.metadata.id,
+          );
       if (current) {
         if (this.isRawDocument(current)) await this.ensureJob(segment, current);
         return undefined;
@@ -437,6 +443,7 @@ export class TimelineRepository {
       const destination = path.join(this.layout.timeline, this.filename(document));
       await atomicWriteOwnedFile(destination, encodeTimelineMarkdown(document));
       const saved = { ...document, filePath: destination };
+      documentsBySegment?.set(segment.metadata.id, saved);
       await this.ensureJob(segment, saved, runtime);
       return saved;
     } finally {
@@ -445,9 +452,13 @@ export class TimelineRepository {
   }
 
   async generatePending(segments: ClosedSegment[]): Promise<TimelineDocumentRecord[]> {
+    if (!segments.length) return [];
+    const documentsBySegment = new Map(
+      (await this.loadDocuments()).map((document) => [document.sourceSegmentID, document]),
+    );
     const generated: TimelineDocumentRecord[] = [];
     for (const segment of segments) {
-      const document = await this.generateIfNeeded(segment);
+      const document = await this.generateIfNeeded(segment, documentsBySegment);
       if (document) generated.push(document);
     }
     return generated;

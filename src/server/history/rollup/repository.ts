@@ -431,23 +431,9 @@ function searchTokens(query: string): string[] {
   return unique([...words, ...cjk], 32);
 }
 
-function textScore(query: string, haystack: string, startedAt: string): number {
+function textScore(tokens: string[], haystack: string): number {
   const lowered = haystack.toLocaleLowerCase();
-  const tokens = searchTokens(query);
-  let score = tokens.reduce(
-    (total, token) => total + (lowered.includes(token) ? token.length : 0),
-    0,
-  );
-  const date = new Date(startedAt);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (/\b(today)\b/i.test(query) && date.toDateString() === today.toDateString()) score += 8;
-  if (/\b(yesterday)\b/i.test(query) && date.toDateString() === yesterday.toDateString())
-    score += 8;
-  if (query.includes("今天") && date.toDateString() === today.toDateString()) score += 8;
-  if (query.includes("昨天") && date.toDateString() === yesterday.toDateString()) score += 8;
-  return score;
+  return tokens.reduce((total, token) => total + (lowered.includes(token) ? token.length : 0), 0);
 }
 
 export class TimelineRollupRepository {
@@ -494,7 +480,8 @@ export class TimelineRollupRepository {
     now = new Date(),
   ): Promise<TimelineRollupRecord[]> {
     await ensureStorage(this.layout);
-    const existing = await this.load();
+    const storedContents = new Map<string, string>();
+    const existing = await this.load(storedContents);
     const existingByID = new Map(existing.map((record) => [record.id, record]));
     const sixHourGroups = new Map<string, TimelineDocumentRecord[]>();
     for (const document of documents) {
@@ -550,17 +537,17 @@ export class TimelineRollupRepository {
       );
       const next = { ...record, filePath };
       const contents = encode(next);
-      const previous = await readFile(filePath, "utf8").catch(() => undefined);
-      if (previous !== contents) await atomicWriteOwnedFile(filePath, contents);
+      if (storedContents.get(filePath) !== contents) await atomicWriteOwnedFile(filePath, contents);
+      record.filePath = filePath;
     }
     const currentIDs = new Set(records.map((record) => record.id));
     for (const record of existing) {
       if (!currentIDs.has(record.id) && record.filePath) await rm(record.filePath);
     }
-    return this.load();
+    return records.sort((lhs, rhs) => Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt));
   }
 
-  async load(): Promise<TimelineRollupRecord[]> {
+  async load(storedContents?: Map<string, string>): Promise<TimelineRollupRecord[]> {
     await ensureStorage(this.layout);
     const records: TimelineRollupRecord[] = [];
     for (const directory of [this.layout.rollupSixHour, this.layout.rollupDay]) {
@@ -569,7 +556,9 @@ export class TimelineRollupRepository {
         if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".md") continue;
         const filePath = path.join(directory, entry.name);
         try {
-          records.push(decode(await readFile(filePath, "utf8"), filePath));
+          const contents = await readFile(filePath, "utf8");
+          records.push(decode(contents, filePath));
+          storedContents?.set(filePath, contents);
         } catch {
           // Keep malformed rollups on disk for manual recovery.
         }
@@ -584,6 +573,18 @@ export class TimelineRollupRepository {
     rollups: TimelineRollupRecord[],
     limit = 8,
   ): HistorySearchResponse {
+    const dates = new Set<string>();
+    const terms = query.replace(/\b(today|yesterday)\b|今天|昨天/gi, (term) => {
+      const date = new Date();
+      if (/yesterday|昨天/i.test(term)) date.setDate(date.getDate() - 1);
+      dates.add(date.toDateString());
+      return " ";
+    });
+    const tokens = searchTokens(terms);
+    const scoreMatch = (haystack: string, startedAt: string): number => {
+      if (dates.size && !dates.has(new Date(startedAt).toDateString())) return 0;
+      return tokens.length ? textScore(tokens, haystack) : dates.size ? 1 : 0;
+    };
     const matches: HistorySearchMatch[] = [];
     for (const rollup of rollups) {
       const haystack = [
@@ -593,7 +594,7 @@ export class TimelineRollupRepository {
         ...rollup.applications.map((application) => application.name),
         rollup.body,
       ].join("\n");
-      const score = textScore(query, haystack, rollup.startedAt);
+      const score = scoreMatch(haystack, rollup.startedAt);
       if (score > 0) {
         matches.push({
           id: rollup.id,
@@ -602,7 +603,7 @@ export class TimelineRollupRepository {
           endedAt: rollup.endedAt,
           title: rollup.title,
           description: rollup.description,
-          score: score + (rollup.kind === "day" ? 0.2 : 0.1),
+          score,
           sourceDocumentIDs: rollup.sourceDocumentIDs,
           sourceSegmentIDs: rollup.sourceSegmentIDs,
         });
@@ -613,9 +614,11 @@ export class TimelineRollupRepository {
         document.title,
         document.description,
         document.continuationHint,
+        document.body,
+        ...document.claims.map((claim) => claim.text),
         ...document.applications.map((application) => application.name),
       ].join("\n");
-      const score = textScore(query, haystack, document.startedAt);
+      const score = scoreMatch(haystack, document.startedAt);
       if (score > 0) {
         matches.push({
           id: document.id,
@@ -630,12 +633,21 @@ export class TimelineRollupRepository {
         });
       }
     }
-    const selected = matches
-      .sort(
-        (lhs, rhs) =>
-          rhs.score - lhs.score || Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt),
-      )
-      .slice(0, limit);
+    matches.sort(
+      (lhs, rhs) =>
+        rhs.score - lhs.score ||
+        lhs.sourceDocumentIDs.length - rhs.sourceDocumentIDs.length ||
+        { "10min": 0, "6h": 1, day: 2 }[lhs.kind] - { "10min": 0, "6h": 1, day: 2 }[rhs.kind] ||
+        Date.parse(rhs.startedAt) - Date.parse(lhs.startedAt),
+    );
+    const selected: HistorySearchMatch[] = [];
+    const coveredDocuments = new Set<string>();
+    for (const match of matches) {
+      if (selected.length >= limit) break;
+      if (match.sourceDocumentIDs.some((id) => coveredDocuments.has(id))) continue;
+      selected.push(match);
+      for (const id of match.sourceDocumentIDs) coveredDocuments.add(id);
+    }
     const answer = selected.length
       ? selected
           .slice(0, 3)

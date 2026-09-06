@@ -1,7 +1,8 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as ownedFiles from "../../../platform/node/atomic-owned-file.js";
 import {
   clearHistoryData,
   ensureStorage,
@@ -17,6 +18,7 @@ import type { EventEvidenceEnrichment, HistoryEvent } from "../contracts.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
   }
@@ -42,6 +44,58 @@ async function fixture(): Promise<{
 }
 
 describe("history storage deletion and retention", () => {
+  it("commits captured and persisted counts together without an extra metadata write", async () => {
+    const { root, store, event } = await fixture();
+    const writes = vi.spyOn(ownedFiles, "atomicWriteOwnedFile");
+    await store.recordMetric(event.timestamp, "captured", 1, true);
+    await store.append(event);
+    await store.flushMetadata();
+    expect(writes).toHaveBeenCalledTimes(1);
+    const id = segmentIdentifier(new Date(event.timestamp));
+    const metadataPath = path.join(root, "segments", id, "metadata.json");
+    expect(JSON.parse(await readFile(metadataPath, "utf8"))).toMatchObject({
+      capturedEventCount: 1,
+      eventCount: 1,
+      suppressedEventCount: 0,
+    });
+    await store.recordMetric(event.timestamp, "captured", 1, true);
+    await store.recordMetric(event.timestamp, "deduplicated");
+    await store.flushMetadata();
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(await readFile(metadataPath, "utf8"))).toMatchObject({
+      capturedEventCount: 2,
+      eventCount: 1,
+      deduplicatedEventCount: 1,
+      suppressedEventCount: 1,
+    });
+  });
+
+  it("preserves buffered-only metrics across bucket rotation and reload", async () => {
+    const { root, store, event } = await fixture();
+    await store.recordMetric(event.timestamp, "captured", 1, true);
+    await store.flushMetadata();
+    await store.recordMetric(event.timestamp, "captured", 1, true);
+    const closed = await store.append({ ...event, timestamp: "2026-08-20T00:11:00.000Z" });
+    expect(closed?.metadata).toMatchObject({ capturedEventCount: 2, eventCount: 0 });
+    const restored = new SegmentStore(makeStorageLayout(root));
+    expect((await restored.pendingClosedSegments())[0]?.metadata).toMatchObject({
+      capturedEventCount: 2,
+      eventCount: 0,
+    });
+  });
+
+  it("prepares private directories again after clearing and resetting storage", async () => {
+    const { root, store, event } = await fixture();
+    await store.append(event);
+    await clearHistoryData(store.layout);
+    store.reset();
+    await store.append(event);
+    const directory = path.join(root, "segments", segmentIdentifier(new Date(event.timestamp)));
+    expect((await stat(directory)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(directory, "events.jsonl"))).mode & 0o777).toBe(0o600);
+    expect((await stat(path.join(directory, "metadata.json"))).mode & 0o777).toBe(0o600);
+  });
+
   it("deletes an application-owned source segment", async () => {
     const { root, store, event } = await fixture();
     await store.append(event);

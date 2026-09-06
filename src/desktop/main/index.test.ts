@@ -21,6 +21,7 @@ const runtime = vi.hoisted(() => {
     connection,
     resolveConnection: () => resolveConnection?.(),
     handlers,
+    historyHandlers: new Map<string, (...args: unknown[]) => void>(),
     snapshot,
     windows: [] as Array<{
       webContents: {
@@ -39,6 +40,7 @@ const runtime = vi.hoisted(() => {
       hide: ReturnType<typeof vi.fn>;
     }>,
     registerHistoryIPC: vi.fn(),
+    buildMenu: vi.fn(() => ({})),
   };
 });
 
@@ -87,7 +89,7 @@ vi.mock("electron", () => {
       exit: vi.fn(),
     },
     BrowserWindow,
-    Menu: { buildFromTemplate: vi.fn(() => ({})) },
+    Menu: { buildFromTemplate: runtime.buildMenu },
     nativeImage: {
       createFromBuffer: vi.fn(() => ({ setTemplateImage: vi.fn() })),
       createFromPath: vi.fn(() => ({ isEmpty: vi.fn(() => true) })),
@@ -120,7 +122,9 @@ vi.mock("./server/server-core-client.js", () => ({
     grantRecordingConsent = vi.fn(async () => runtime.snapshot);
     pause = vi.fn(async () => runtime.snapshot);
     resume = vi.fn(async () => runtime.snapshot);
-    on = vi.fn();
+    on = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      runtime.historyHandlers.set(event, handler);
+    });
     shutdown = vi.fn(async () => undefined);
     terminate = vi.fn();
   },
@@ -146,5 +150,30 @@ describe("desktop startup", () => {
     expect(runtime.registerHistoryIPC.mock.invocationCallOrder[0]).toBeLessThan(
       runtime.windows[0]!.loadFile.mock.invocationCallOrder[0]!,
     );
+    await vi.waitFor(() => expect(runtime.historyHandlers.has("snapshot")).toBe(true));
+    const builds = runtime.buildMenu;
+    const before = builds.mock.calls.length;
+    const update = runtime.historyHandlers.get("snapshot")!;
+    update({ ...runtime.snapshot, history: { recorderState: "paused", documents: [] } });
+    expect(builds).toHaveBeenCalledTimes(before);
+    update({
+      ...runtime.snapshot,
+      connectionState: "connected",
+      history: { recorderState: "running" },
+    });
+    expect(builds).toHaveBeenCalledTimes(before + 1);
+    update({
+      ...runtime.snapshot,
+      connectionState: "connected",
+      history: { recorderState: "running", health: { capturedEventCount: 5 } },
+    });
+    expect(builds).toHaveBeenCalledTimes(before + 1);
+    update({
+      ...runtime.snapshot,
+      locale: "zh-CN",
+      connectionState: "connected",
+      history: { recorderState: "running" },
+    });
+    expect(builds).toHaveBeenCalledTimes(before + 2);
   });
 });

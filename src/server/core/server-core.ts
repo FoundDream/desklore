@@ -124,6 +124,9 @@ export class ServerCore extends EventEmitter {
   private flushTimer?: NodeJS.Timeout;
   private maintenanceTimer?: NodeJS.Timeout;
   private receivedNativeEvent = false;
+  private captureBlockedForHistoryMutation = false;
+  private historyMutationInProgress = false;
+  private recordingTransitionInProgress = false;
   private currentCaptureSegmentID?: string;
   private readonly semanticHealth = {
     keyboardSubmitCount: 0,
@@ -179,10 +182,12 @@ export class ServerCore extends EventEmitter {
           }
           this.emitSnapshot();
         }).catch((error) => this.captureError(error));
+      } else {
+        this.emitSnapshot();
       }
-      this.emitSnapshot();
     });
     this.collector.on("event", (event: HistoryEvent) => {
+      if (this.captureBlockedForHistoryMutation) return;
       if (!this.receivedNativeEvent) {
         this.receivedNativeEvent = true;
         console.info("[desklore] Native event stream connected.");
@@ -192,6 +197,7 @@ export class ServerCore extends EventEmitter {
       );
     });
     this.collector.on("usage-state", (event: UsageStateEvent) => {
+      if (this.captureBlockedForHistoryMutation) return;
       void this.enqueueCapture(async () => {
         await this.recorderAvailability.recordUsageState(this.collector.current(), event);
         await this.usage.transition(event);
@@ -246,33 +252,35 @@ export class ServerCore extends EventEmitter {
   }
 
   async start(): Promise<DesktopSnapshot> {
-    await this.initialize();
-    if (!this.recordingConsentGranted) {
-      return this.current();
-    }
-    const recovered = await this.segments.recoverExpiredSegments();
-    const completed = await this.segments.pendingClosedSegments();
-    await this.collector.start();
-    await this.syncObservationPolicyToCollector();
-    await this.collector.request("start");
-    await this.captureWork;
-    await this.recorderAvailability.record(this.collector.current(), "recorder_started");
-    this.timelineAgentEnabled = true;
-    this.startTimers();
-    await this.refreshDocuments();
-    void this.enqueueTimeline(async () => {
-      const byID = new Map(
-        [...recovered, ...completed].map((segment) => [segment.metadata.id, segment]),
-      );
-      await this.timeline.generatePending(
-        [...byID.values()].sort(
-          (lhs, rhs) => Date.parse(lhs.metadata.startedAt) - Date.parse(rhs.metadata.startedAt),
-        ),
-      );
+    return this.withRecordingTransition(async () => {
+      await this.initialize();
+      if (!this.recordingConsentGranted) {
+        return this.current();
+      }
+      const recovered = await this.segments.recoverExpiredSegments();
+      const completed = await this.segments.pendingClosedSegments();
+      await this.collector.start();
+      await this.syncObservationPolicyToCollector();
+      await this.requestRecording("start");
+      await this.captureWork;
+      await this.recorderAvailability.record(this.collector.current(), "recorder_started");
+      this.timelineAgentEnabled = true;
+      this.startTimers();
       await this.refreshDocuments();
-      this.kickTimelineAgent();
-    }).catch((error) => this.captureError(error));
-    return this.current();
+      void this.enqueueTimeline(async () => {
+        const byID = new Map(
+          [...recovered, ...completed].map((segment) => [segment.metadata.id, segment]),
+        );
+        await this.timeline.generatePending(
+          [...byID.values()].sort(
+            (lhs, rhs) => Date.parse(lhs.metadata.startedAt) - Date.parse(rhs.metadata.startedAt),
+          ),
+        );
+        await this.refreshDocuments();
+        this.kickTimelineAgent();
+      }).catch((error) => this.captureError(error));
+      return this.current();
+    });
   }
 
   async grantRecordingConsent(): Promise<DesktopSnapshot> {
@@ -340,9 +348,34 @@ export class ServerCore extends EventEmitter {
   }
 
   async resume(): Promise<DesktopSnapshot> {
-    await this.collector.request("resume");
-    await this.captureWork;
-    return this.current();
+    return this.withRecordingTransition(async () => {
+      await this.requestRecording("resume");
+      await this.captureWork;
+      return this.current();
+    });
+  }
+
+  private async withRecordingTransition(
+    operation: () => Promise<DesktopSnapshot>,
+  ): Promise<DesktopSnapshot> {
+    this.assertRecordingAndHistoryIdle();
+    this.recordingTransitionInProgress = true;
+    try {
+      return await operation();
+    } finally {
+      this.recordingTransitionInProgress = false;
+    }
+  }
+
+  private async requestRecording(command: "start" | "resume"): Promise<void> {
+    const wasBlocked = this.captureBlockedForHistoryMutation;
+    this.captureBlockedForHistoryMutation = false;
+    try {
+      await this.collector.request(command);
+    } catch (error) {
+      this.captureBlockedForHistoryMutation = wasBlocked;
+      throw error;
+    }
   }
 
   async requestNative(command: NativePermissionCommand): Promise<DesktopSnapshot> {
@@ -516,59 +549,56 @@ export class ServerCore extends EventEmitter {
 
   async clearHistory(): Promise<DesktopSnapshot> {
     await this.initialize();
+    await this.pauseForHistoryMutation();
     this.stopTimers();
     this.timelineAgentEnabled = false;
     this.clearTimelineAgentTimer();
     this.timeline.abortAgentJobs();
-    if (
-      this.collector.current().connectionState === "connected" &&
-      this.collector.current().snapshot?.recorderState === "running"
-    ) {
-      await this.collector.request("pause").catch(() => undefined);
+    try {
+      await this.enqueueCapture(async () => {
+        for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
+      });
+      await this.captureWork;
+      this.visual.cancelPending();
+      await this.visual.drain();
+      await this.timelineAgentWork;
+      await this.timelineWork;
+      this.historyRecovery = await clearHistoryData(this.layout, {
+        documentCount: this.documents.length,
+        rollupCount: this.rollups.length,
+      });
+      await this.usage.reload();
+      await this.recorderAvailability.reset(this.collector.current(), "history_cleared");
+      this.segments.reset();
+      this.coalescer.reset();
+      this.burstCoalescer.reset();
+      this.semanticFrames.reset();
+      this.documents = [];
+      this.rollups = [];
+      this.applicationIconPaths.clear();
+      this.visual.clearCache();
+      this.currentCaptureSegmentID = undefined;
+      this.lastError = undefined;
+      this.emitSnapshot();
+      return this.current();
+    } finally {
+      this.historyMutationInProgress = false;
+      if (this.collector.current().connectionState === "connected") {
+        this.startTimers();
+        this.timelineAgentEnabled = true;
+        this.kickTimelineAgent();
+      }
     }
-    await this.enqueueCapture(async () => {
-      for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
-    });
-    await this.captureWork;
-    this.visual.cancelPending();
-    await this.visual.drain();
-    await this.timelineAgentWork;
-    await this.timelineWork;
-    this.historyRecovery = await clearHistoryData(this.layout, {
-      documentCount: this.documents.length,
-      rollupCount: this.rollups.length,
-    });
-    await this.usage.reload();
-    await this.recorderAvailability.reset(this.collector.current(), "history_cleared");
-    this.segments.reset();
-    this.coalescer.reset();
-    this.burstCoalescer.reset();
-    this.semanticFrames.reset();
-    this.documents = [];
-    this.rollups = [];
-    this.applicationIconPaths.clear();
-    this.visual.clearCache();
-    this.currentCaptureSegmentID = undefined;
-    this.lastError = undefined;
-    if (this.collector.current().connectionState === "connected") this.startTimers();
-    if (this.collector.current().connectionState === "connected") {
-      this.timelineAgentEnabled = true;
-      this.kickTimelineAgent();
-    }
-    this.emitSnapshot();
-    return this.current();
   }
 
   async restoreHistory(id: string): Promise<DesktopSnapshot> {
     await this.initialize();
+    const wasRunning = this.collector.current().snapshot?.recorderState === "running";
+    await this.pauseForHistoryMutation();
     this.stopTimers();
     this.timelineAgentEnabled = false;
     this.clearTimelineAgentTimer();
     this.timeline.abortAgentJobs();
-    const wasRunning =
-      this.collector.current().connectionState === "connected" &&
-      this.collector.current().snapshot?.recorderState === "running";
-    if (wasRunning) await this.collector.request("pause").catch(() => undefined);
     try {
       await this.enqueueCapture(async () => {
         for (const event of this.burstCoalescer.flushAll()) await this.persist(event);
@@ -592,21 +622,45 @@ export class ServerCore extends EventEmitter {
       this.lastError = undefined;
       await this.refreshDocuments();
     } catch (error) {
-      if (wasRunning) await this.collector.request("resume").catch(() => undefined);
+      if (wasRunning) await this.requestRecording("resume").catch(() => undefined);
+      throw error;
+    } finally {
+      this.historyMutationInProgress = false;
       if (this.collector.current().connectionState === "connected") {
         this.startTimers();
         this.timelineAgentEnabled = true;
         this.kickTimelineAgent();
       }
-      throw error;
-    }
-    if (this.collector.current().connectionState === "connected") {
-      this.startTimers();
-      this.timelineAgentEnabled = true;
-      this.kickTimelineAgent();
     }
     this.emitSnapshot();
     return this.current();
+  }
+
+  private async pauseForHistoryMutation(): Promise<void> {
+    this.assertRecordingAndHistoryIdle();
+    this.historyMutationInProgress = true;
+    try {
+      const connection = this.collector.current();
+      if (connection.connectionState === "connected") {
+        if (connection.snapshot?.recorderState === "running") await this.collector.request("pause");
+        const state = this.collector.current().snapshot?.recorderState;
+        if (state !== "paused" && state !== "stopped") {
+          throw new Error("Recording must be paused before changing history");
+        }
+      } else if (connection.connectionState === "starting") {
+        throw new Error("Wait for the collector to finish starting before changing history");
+      }
+      // Ignore late native events until the user explicitly starts or resumes recording.
+      this.captureBlockedForHistoryMutation = true;
+    } catch (error) {
+      this.historyMutationInProgress = false;
+      throw error;
+    }
+  }
+
+  private assertRecordingAndHistoryIdle(): void {
+    if (this.historyMutationInProgress) throw new Error("History is being cleared or restored");
+    if (this.recordingTransitionInProgress) throw new Error("Recording state is being changed");
   }
 
   storagePath(): string {
@@ -645,45 +699,49 @@ export class ServerCore extends EventEmitter {
   }
 
   private async processEvent(event: HistoryEvent): Promise<void> {
-    const eventSegmentID = segmentIdentifier(new Date(event.timestamp));
-    if (this.currentCaptureSegmentID && this.currentCaptureSegmentID !== eventSegmentID) {
-      for (const pending of this.burstCoalescer.flushAll()) await this.persist(pending);
-    }
-    this.currentCaptureSegmentID = eventSegmentID;
-    this.semanticHealth.capturedEventCount += 1;
-    const sanitized = applyObservationPolicy(this.policy, event);
-    const capturedClosed = await this.segments.recordMetric(event.timestamp, "captured");
-    if (capturedClosed) this.scheduleTimeline(capturedClosed);
-    if (!sanitized) {
-      this.semanticHealth.policyBlockedEventCount += 1;
-      const closed = await this.segments.recordSuppressed(event.timestamp);
-      if (closed) this.scheduleTimeline(closed);
-      return;
-    }
-    const normalized = this.coalescer.process(
-      classifyKeyboardEvent(withSanitizedAccessibilityTree(sanitized, event)),
-    );
-    if (!normalized) {
-      this.semanticHealth.deduplicatedEventCount += 1;
-      const closed = await this.segments.recordMetric(event.timestamp, "deduplicated");
-      if (closed) this.scheduleTimeline(closed);
-      return;
-    }
-    if (normalized.kind === "keyboard.submit") this.semanticHealth.keyboardSubmitCount += 1;
-    if (normalized.kind === "keyboard.shortcut") this.semanticHealth.keyboardShortcutCount += 1;
-    if (normalized.kind === "keyboard.text_input") this.semanticHealth.textInputEventCount += 1;
-    if (normalized.kind === "selection.changed") this.semanticHealth.selectionEventCount += 1;
-    const burst = this.burstCoalescer.ingest(normalized);
-    if (burst.coalescedCount > 0) {
-      this.semanticHealth.burstCoalescedEventCount += burst.coalescedCount;
-      const closed = await this.segments.recordMetric(
-        event.timestamp,
-        "burstCoalesced",
-        burst.coalescedCount,
+    try {
+      const eventSegmentID = segmentIdentifier(new Date(event.timestamp));
+      if (this.currentCaptureSegmentID && this.currentCaptureSegmentID !== eventSegmentID) {
+        for (const pending of this.burstCoalescer.flushAll()) await this.persist(pending);
+      }
+      this.currentCaptureSegmentID = eventSegmentID;
+      this.semanticHealth.capturedEventCount += 1;
+      const sanitized = applyObservationPolicy(this.policy, event);
+      const capturedClosed = await this.segments.recordMetric(event.timestamp, "captured", 1, true);
+      if (capturedClosed) this.scheduleTimeline(capturedClosed);
+      if (!sanitized) {
+        this.semanticHealth.policyBlockedEventCount += 1;
+        const closed = await this.segments.recordSuppressed(event.timestamp);
+        if (closed) this.scheduleTimeline(closed);
+        return;
+      }
+      const normalized = this.coalescer.process(
+        classifyKeyboardEvent(withSanitizedAccessibilityTree(sanitized, event)),
       );
-      if (closed) this.scheduleTimeline(closed);
+      if (!normalized) {
+        this.semanticHealth.deduplicatedEventCount += 1;
+        const closed = await this.segments.recordMetric(event.timestamp, "deduplicated");
+        if (closed) this.scheduleTimeline(closed);
+        return;
+      }
+      if (normalized.kind === "keyboard.submit") this.semanticHealth.keyboardSubmitCount += 1;
+      if (normalized.kind === "keyboard.shortcut") this.semanticHealth.keyboardShortcutCount += 1;
+      if (normalized.kind === "keyboard.text_input") this.semanticHealth.textInputEventCount += 1;
+      if (normalized.kind === "selection.changed") this.semanticHealth.selectionEventCount += 1;
+      const burst = this.burstCoalescer.ingest(normalized);
+      if (burst.coalescedCount > 0) {
+        this.semanticHealth.burstCoalescedEventCount += burst.coalescedCount;
+        const closed = await this.segments.recordMetric(
+          event.timestamp,
+          "burstCoalesced",
+          burst.coalescedCount,
+        );
+        if (closed) this.scheduleTimeline(closed);
+      }
+      for (const ready of burst.ready) await this.persist(ready);
+    } finally {
+      await this.segments.flushMetadata();
     }
-    for (const ready of burst.ready) await this.persist(ready);
   }
 
   private async persist(event: HistoryEvent): Promise<void> {
@@ -734,7 +792,7 @@ export class ServerCore extends EventEmitter {
     this.historyRecovery = await latestHistoryArchive(this.layout);
     this.emitSnapshot();
     void this.enqueueTimeline(async () => {
-      for (const segment of completed) await this.timeline.generateIfNeeded(segment);
+      await this.timeline.generatePending(completed);
       await this.refreshDocuments();
       this.kickTimelineAgent();
     }).catch((error) => this.captureError(error));

@@ -57,9 +57,18 @@ function setDevelopmentDockIcon(): void {
   if (!icon.isEmpty()) dock.setIcon(icon);
 }
 
+let trayStateKey: string | undefined;
+
 function rebuildTray(snapshot: DesktopSnapshot): void {
   if (!tray) return;
   const running = snapshot.history?.recorderState === "running";
+  const stateKey = JSON.stringify([
+    snapshot.locale,
+    snapshot.recordingConsentGranted,
+    snapshot.connectionState === "connected",
+    running,
+  ]);
+  if (stateKey === trayStateKey) return;
   const t = (key: Parameters<typeof translate>[1]): string => translate(snapshot.locale, key);
   tray.setToolTip(running ? t("tray.recording") : "DeskLore");
   tray.setContextMenu(
@@ -80,6 +89,7 @@ function rebuildTray(snapshot: DesktopSnapshot): void {
       },
     ]),
   );
+  trayStateKey = stateKey;
 }
 
 async function createWindow(): Promise<void> {

@@ -228,7 +228,7 @@ describe("History settings", () => {
 
     await internals.processEvent(input);
 
-    expect(recordMetric).toHaveBeenCalledWith(input.timestamp, "captured");
+    expect(recordMetric).toHaveBeenCalledWith(input.timestamp, "captured", 1, true);
     expect(recordSuppressed).toHaveBeenCalledWith(input.timestamp);
     expect(append).not.toHaveBeenCalled();
   });
