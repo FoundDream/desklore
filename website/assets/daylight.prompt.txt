@@ -1,0 +1,6 @@
+Asset: daylight.webp
+Generated with the built-in image_gen tool on 2026-09-08.
+The original raster was encoded as WebP (quality 82) without altering the artwork.
+
+Prompt:
+Use case: stylized-concept. Asset type: wide atmospheric background for the DeskLore macOS personal memory website, used behind real product screenshots and live HTML text. Create a 1920x1080 landscape image: an almost-white frosted glass surface in a quiet bright room, diffuse early morning daylight passing through sheer curtains from the upper right, extremely subtle broad diagonal window shadows and fine translucent folded glass at the extreme right edge. The center and upper left must remain largely empty pale silver-white for dark headline legibility. Palette: off-white, soft cool silver gray, a whisper of powder blue at the upper right and faint warm peach reflected light low on the right. Photographic light and material realism, restrained premium consumer technology editorial art direction, soft high-key exposure with delicate detail. No text, no lettering, no logo, no UI, no computer, no devices, no people, no plants, no gradient blobs, no neon, no sharp high-contrast shadows. This is a subtle surface and daylight photograph, not a busy abstract illustration.
